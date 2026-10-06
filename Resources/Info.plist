@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>OpenQuota</string>
+	<key>CFBundleIdentifier</key>
+	<string>no.ogard.openquota</string>
+	<key>CFBundleName</key>
+	<string>OpenQuota</string>
+	<key>CFBundleDisplayName</key>
+	<string>OpenQuota</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Henrik Øgård</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/henrikogaard/openquota/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>/JihAKfA6s9thdEHAoB0Tx4PECwBuVgomah2NLVsZGI=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+</dict>
+</plist>

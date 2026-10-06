@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+      APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require signing credentials
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "${DEVELOPER_ID_P12}" ]] || missing+=(DEVELOPER_ID_P12)
+          [[ -n "${DEVELOPER_ID_P12_PASSWORD}" ]] || missing+=(DEVELOPER_ID_P12_PASSWORD)
+          [[ -n "${APPSTORE_API_PRIVATE_KEY}" ]] || missing+=(APPSTORE_API_PRIVATE_KEY)
+          [[ -n "${APPLE_TEAM_ID}" ]] || missing+=(APPLE_TEAM_ID)
+          [[ -n "${APPSTORE_API_KEY_ID}" ]] || missing+=(APPSTORE_API_KEY_ID)
+          [[ -n "${APPSTORE_ISSUER_ID}" ]] || missing+=(APPSTORE_ISSUER_ID)
+          if (( ${#missing[@]} )); then
+            echo "Missing signing credentials: ${missing[*]}"
+            echo "Same secrets/vars as linkrouter; see README's release section."
+            exit 1
+          fi
+
+      - name: Set version
+        # Tag is 'v0.1.0' → VERSION '0.1.0' for CFBundleShortVersionString.
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.DEVELOPER_ID_P12 }}
+          p12-password: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+
+      - name: Test
+        run: swift test
+
+      - name: Bundle app
+        env:
+          CODESIGN_IDENTITY: "Developer ID Application"
+          MARKETING_VERSION: ${{ env.VERSION }}
+          CURRENT_PROJECT_VERSION: ${{ github.run_number }}
+        run: bash scripts/bundle.sh "${{ env.VERSION }}"
+
+      - name: Package, notarize and verify
+        env:
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: bash scripts/package-release.sh
+
+      - name: Generate Sparkle appcast
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SPARKLE_PRIVATE_ED_KEY}" ]]; then
+            echo "SPARKLE_PRIVATE_ED_KEY not set; skipping appcast generation (auto-updates will not be offered)."
+            exit 0
+          fi
+          mkdir -p /tmp/sparkle
+          curl -fsSL -o /tmp/sparkle/sparkle.tar.xz \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz
+          tar -xJf /tmp/sparkle/sparkle.tar.xz -C /tmp/sparkle
+          printf '%s' "${SPARKLE_PRIVATE_ED_KEY}" \
+            | /tmp/sparkle/bin/generate_appcast --ed-key-file - dist/
+          test -f dist/appcast.xml
+
+      # Stable-name copy gives users one always-working download link:
+      # releases/latest/download/OpenQuota.dmg.
+      - name: Add stable-name DMG
+        run: |
+          set -euo pipefail
+          cp "dist/OpenQuota-${VERSION}.dmg" dist/OpenQuota.dmg
+          (cd dist && shasum -a 256 OpenQuota.dmg >> SHA256SUMS)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenQuota-${{ env.VERSION }}
+          path: |
+            dist/OpenQuota-${{ env.VERSION }}.dmg
+            dist/SHA256SUMS
+            dist/appcast.xml
+          if-no-files-found: error
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

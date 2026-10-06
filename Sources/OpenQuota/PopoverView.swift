@@ -55,8 +55,18 @@ struct PopoverView: View {
             .help("Refresh now")
             if model.refreshing { ProgressView().scaleEffect(0.5).frame(width: 12, height: 12) }
             Spacer()
-            Button("Settings…") { openSettings() }
-            Button("Quit") { NSApp.terminate(nil) }
+            Menu {
+                Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
+                    .disabled(!UpdateController.shared.canCheckForUpdates)
+                Divider()
+                Button("Settings…") { openSettings() }
+                Divider()
+                Button("Quit") { NSApp.terminate(nil) }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
