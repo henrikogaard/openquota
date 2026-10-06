@@ -96,6 +96,12 @@ struct SettingsView: View {
         }
     }
 
+    /// ProviderError carries a userMessage; localizedDescription would show
+    /// "ProviderError error N." to the user.
+    private func message(_ error: Error) -> String {
+        (error as? ProviderError)?.userMessage ?? error.localizedDescription
+    }
+
     private func addKey() {
         guard let provider = selectedSpec else { return }
         do {
@@ -107,7 +113,7 @@ struct SettingsView: View {
             newLabel = ""
             errorText = nil
         } catch {
-            errorText = error.localizedDescription
+            errorText = message(error)
         }
     }
 
@@ -119,7 +125,7 @@ struct SettingsView: View {
             sessionToken = ""
             errorText = nil
         } catch {
-            errorText = error.localizedDescription
+            errorText = message(error)
         }
     }
 }

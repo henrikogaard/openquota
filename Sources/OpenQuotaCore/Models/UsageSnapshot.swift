@@ -25,7 +25,11 @@ public struct AccountIdentity: Codable, Equatable, Hashable, Sendable {
             hash ^= UInt64(byte)
             hash = hash &* 0x100000001b3
         }
-        return "\(providerID)@\(String(format: "%016x", hash).prefix(8))"
+        // %x on Darwin reads only the low 32 bits — produce the full 64-bit
+        // hex explicitly or every account id collides to provider@00000000.
+        let hex = String(hash, radix: 16)
+        let padded = String(repeating: "0", count: max(0, 16 - hex.count)) + hex
+        return "\(providerID)@\(padded.prefix(8))"
     }
 }
 

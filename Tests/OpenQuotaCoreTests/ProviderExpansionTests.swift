@@ -470,6 +470,31 @@ final class CLIProviderTests: XCTestCase {
     }
 }
 
+final class RegressionTests: XCTestCase {
+    /// Bug found by live testing: `%x` on UInt64 reads only the low 32 bits
+    /// on Darwin, so every account id was `provider@00000000` and a second
+    /// key silently overwrote the first in the manifest + keychain.
+    func test_makeID_differsAcrossKeys() {
+        let a = AccountIdentity.makeID(providerID: "deepseek", identityKey: "sk-one")
+        let b = AccountIdentity.makeID(providerID: "deepseek", identityKey: "sk-two")
+        XCTAssertNotEqual(a, b)
+        XCTAssertFalse(a.hasSuffix("@00000000"))
+        XCTAssertFalse(b.hasSuffix("@00000000"))
+    }
+
+    /// Bug found by live testing: a first-failure snapshot got providerID ""
+    /// so error cards rendered without a provider name.
+    func test_failureSnapshotKeepsProviderID() async {
+        let store = SnapshotStore()
+        await store.finishRefresh(
+            accountID: "deepseek@deadbeef",
+            result: .failure(.unauthorized))
+        let snapshot = await store.snapshot(for: "deepseek@deadbeef")
+        XCTAssertEqual(snapshot?.providerID, "deepseek")
+        XCTAssertEqual(snapshot?.account.providerID, "deepseek")
+    }
+}
+
 final class ProviderRegistryTests: XCTestCase {
     func test_registryContainsSpecsAdaptersAndCLIs() {
         let home = FileManager.default.temporaryDirectory

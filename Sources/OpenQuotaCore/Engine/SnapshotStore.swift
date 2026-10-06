@@ -25,9 +25,13 @@ public actor SnapshotStore {
                 existing.errorMessage = error.userMessage
                 snapshots[accountID] = existing
             } else {
+                // Account ids are minted as `provider@hash` — recover the
+                // provider name so a first-failure card is still identifiable.
+                let providerID = accountID.split(separator: "@").first
+                    .map(String.init) ?? accountID
                 snapshots[accountID] = UsageSnapshot(
-                    account: AccountIdentity(providerID: "", id: accountID),
-                    providerID: "",
+                    account: AccountIdentity(providerID: providerID, id: accountID),
+                    providerID: providerID,
                     isStale: true,
                     errorMessage: error.userMessage
                 )
