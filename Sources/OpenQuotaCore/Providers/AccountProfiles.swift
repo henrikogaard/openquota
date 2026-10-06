@@ -44,6 +44,8 @@ public struct LocalAccountProfileStore: Sendable {
     }
 
     public func profiles() throws -> [LocalAccountProfile] {
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size > 1_048_576 { throw LocalAccountProfileError.profileLimitReached }
         guard let data = try? Data(contentsOf: url) else { return [] }
         let profiles = try JSONDecoder.openQuota.decode([LocalAccountProfile].self, from: data)
         guard profiles.count <= Self.maxProfiles else {
@@ -67,6 +69,13 @@ public struct LocalAccountProfileStore: Sendable {
         }
         let path = try Self.validatedCredentialPath(credentialPath)
         var current = try profiles()
+        if let index = current.firstIndex(where: {
+            $0.providerID == providerID && $0.credentialPath == path
+        }) {
+            current[index].label = trimmedLabel
+            try save(current)
+            return current[index]
+        }
         guard current.count < Self.maxProfiles else {
             throw LocalAccountProfileError.profileLimitReached
         }
@@ -113,7 +122,7 @@ public struct LocalAccountProfileStore: Sendable {
               size.uint64Value <= maxCredentialFileBytes else {
             throw LocalAccountProfileError.credentialFileTooLarge
         }
-        return URL(fileURLWithPath: path).standardizedFileURL.path
+        return fileURL.path
     }
 }
 
@@ -132,6 +141,10 @@ public struct ProfiledProvider: UsageProvider {
 
     public func accounts() async throws -> [AccountDescriptor] {
         let underlying = try await base.accounts()
+        if underlying.isEmpty {
+            return [.init(account: .init(providerID: id, id: "\(id)@\(profile.id)", label: profile.label),
+                          source: .configFile)]
+        }
         return underlying.map { descriptor in
             wrap(descriptor, hasMultipleAccounts: underlying.count > 1)
         }

@@ -11,7 +11,7 @@ struct MenuBarLabel: View {
         HStack(spacing: 4) {
             Image(systemName: "gauge")
             if let lowest = model.snapshots.compactMap(\.lowestPercentRemaining).min() {
-                Text("\(Int(lowest))%")
+                Text("\(Int(lowest))%\(model.snapshots.contains(where: \.isStale) ? "!" : "")")
                     .monospacedDigit()
             } else {
                 Text("—")

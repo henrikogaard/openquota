@@ -23,7 +23,7 @@ public actor RefreshScheduler {
         var retryAfterUntil: Date?
     }
 
-    private let providers: [any UsageProvider]
+    private var providers: [any UsageProvider]
     private let store: SnapshotStore
     private let config: Config
     /// Consecutive-failure count per account id — drives exponential backoff.
@@ -55,6 +55,14 @@ public actor RefreshScheduler {
         task = nil
     }
 
+    public func setProviders(_ providers: [any UsageProvider]) async {
+        while isRefreshingAll {
+            do { try await Task.sleep(for: .milliseconds(50)) }
+            catch { return }
+        }
+        self.providers = providers
+    }
+
     /// One pass over every provider's accounts, with bounded concurrency.
     public func refreshAll(force: Bool = false) async {
         guard !isRefreshingAll else { return }
@@ -65,11 +73,12 @@ public actor RefreshScheduler {
         var seenAccountIDs: Set<String> = []
         var discoveredByProvider: [String: Set<String>] = [:]
         var failedProviderIDs: Set<String> = []
+        let cached = await store.snapshots
         for provider in providers {
             guard !Task.isCancelled else { return }
             do {
                 let found = try await provider.accounts()
-                discoveredByProvider[provider.id, default: []] = []
+                if discoveredByProvider[provider.id] == nil { discoveredByProvider[provider.id] = [] }
                 for account in found where seenAccountIDs.insert(account.account.id).inserted {
                     accounts.append((provider, account))
                     discoveredByProvider[provider.id, default: []].insert(account.account.id)
@@ -92,6 +101,7 @@ public actor RefreshScheduler {
         var retainedAccountIDs = seenAccountIDs
         for providerID in failedProviderIDs {
             retainedAccountIDs.formUnion(lastKnownAccountIDsByProvider[providerID, default: []])
+            retainedAccountIDs.formUnion(cached.values.filter { $0.providerID == providerID }.map(\.account.id))
         }
         failures = failures.filter { retainedAccountIDs.contains($0.key) }
         await store.retain(accountIDs: retainedAccountIDs)

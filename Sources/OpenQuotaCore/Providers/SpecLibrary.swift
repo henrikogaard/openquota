@@ -197,19 +197,23 @@ public enum SpecLibrary {
         ]
     )
 
-    /// Mistral (admin key) — org usage endpoint. Unverified.
+    /// Vibe Code activity. Mistral does not expose a personal remaining allowance here.
     public static let mistral = ProviderSpec(
         id: "mistral",
-        displayName: "Mistral",
-        url: "https://api.mistral.ai/v1/admin/usage",
-        auth: .apiKeyHeader,
+        displayName: "Mistral Vibe",
+        url: "https://api.mistral.ai/v1/admin/analytics/vibe/code/usage/by_workspace?start_time={d30}&end_time={now}",
+        auth: .bearer,
         dashboardURL: "https://admin.mistral.ai/plateforme/billing",
         unverified: true,
         windows: [
             .init(
-                label: "Month", kind: .consumption,
-                used: "$.data.usage", unit: "$"
-            )
+                label: "Sessions (30d)", kind: .requests,
+                used: "sum:$.sessions[*].nb_sessions", unit: "sessions"
+            ),
+            .init(label: "Input (30d)", kind: .requests,
+                  used: "sum:$.consumed_tokens[*].input_tokens", unit: "tokens"),
+            .init(label: "Output (30d)", kind: .requests,
+                  used: "sum:$.consumed_tokens[*].output_tokens", unit: "tokens")
         ]
     )
 

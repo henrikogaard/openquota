@@ -314,18 +314,19 @@ final class AdapterTests: XCTestCase {
     func test_grokMultiEntry() async throws {
         let home = tempHome()
         try write(home, ".grok/auth.json", """
-            {"work":{"accessToken":"a1","expiresAt":4102444800},
-             "play":{"accessToken":"a2","expiresAt":4102444800}}
+            {"work":{"key":"a1","expires_at":"2100-01-01T00:00:00Z"},
+             "play":{"key":"a2","expires_at":"2100-01-01T00:00:00Z"}}
             """)
         let http = RecordingHTTP()
-        http.defaultBody = #"{"weekly_used_percent":20,"remaining_balance":9}"#
+        http.defaultBody = #"{"config":{"creditUsagePercent":0.5,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2027-01-01T00:00:00Z"}}}"#
         let provider = GrokProvider(
             http: http, files: LocalCredentialFiles(home: home))
         let accounts = try await provider.accounts()
         XCTAssertEqual(accounts.count, 2)
         let snapshot = try await provider.refresh(account: accounts[0])
-        XCTAssertEqual(snapshot.windows[0].used, 20)
-        XCTAssertEqual(snapshot.creditsRemaining, 9)
+        XCTAssertEqual(snapshot.windows[0].used, 0.5)
+        XCTAssertNil(snapshot.creditsRemaining)
+        XCTAssertEqual(http.requests[0].headers["X-XAI-Token-Auth"], "xai-grok-cli")
     }
 
     func test_opencodeReadsApiKey() async throws {
@@ -335,14 +336,16 @@ final class AdapterTests: XCTestCase {
             """)
         let http = RecordingHTTP()
         http.defaultBody = """
-            {"session":{"used_percent":15},"weekly":{"used_percent":8},"balance":3.5}
+            {"usage":{"rolling":{"percent":0.5,"resetsAt":"2027-01-01T00:00:00Z"},
+              "weekly":{"percent":8,"resetsAt":"2027-01-08T00:00:00Z"}}}
             """
         let provider = OpenCodeProvider(
             http: http, files: LocalCredentialFiles(home: home))
         let snapshot = try await provider.refresh(
             account: try provider.accounts()[0])
         XCTAssertEqual(snapshot.windows.count, 2)
-        XCTAssertEqual(snapshot.creditsRemaining, 3.5)
+        XCTAssertEqual(snapshot.windows[0].used, 0.5)
+        XCTAssertNotNil(snapshot.windows[0].resetsAt)
         XCTAssertEqual(
             http.requests[0].headers["Authorization"], "Bearer zen-key-1")
     }
@@ -355,8 +358,9 @@ final class AdapterTests: XCTestCase {
             """)
         let http = RecordingHTTP()
         http.defaultBody = """
-            {"weeklyUsage":{"usedPercent":12,"resetTime":"2027-01-08T00:00:00Z"},
-             "extraUsageBalance":40}
+            {"userStatus":{"planStatus":{"weeklyQuotaRemainingPercent":88,
+              "weeklyQuotaResetAtUnix":"1800000000","overageBalanceMicros":"40000000",
+              "planInfo":{"planName":"pro"}}}}
             """
         let provider = DevinProvider(
             http: http, files: LocalCredentialFiles(home: home))
@@ -368,6 +372,8 @@ final class AdapterTests: XCTestCase {
         XCTAssertTrue(request.url.absoluteString.contains(
             "SeatManagementService/GetUserStatus"))
         XCTAssertEqual(request.method, "POST")
+        let payload = try JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any]
+        XCTAssertEqual((payload?["metadata"] as? [String: Any])?["apiKey"] as? String, "dv-key-42")
         XCTAssertEqual(
             request.headers["Connect-Protocol-Version"], "1")
     }
@@ -377,16 +383,17 @@ final class AdapterTests: XCTestCase {
         let creds = FileCredentialStore(
             directory: home.appendingPathComponent("creds"))
         let http = RecordingHTTP()
-        let provider = CursorProvider(http: http, credentials: creds)
+        let provider = CursorProvider(http: http, credentials: creds,
+                                      manifestURL: home.appendingPathComponent("cursor-keys.json"))
         _ = try provider.addSessionToken("user-123::jwt-abc")
         let accounts = try await provider.accounts()
         XCTAssertEqual(accounts.count, 1)
         http.stub("GetCurrentPeriodUsage", body: """
-            {"planUsage":{"used":120,"limit":500},
+            {"planUsage":{"totalSpend":12000,"limit":50000},
              "billingCycleEnd":"2027-02-01T00:00:00Z"}
             """)
         http.stub("GetPlanInfo", body: #"{"planName":"pro"}"#)
-        http.stub("GetCreditGrantsBalance", body: #"{"totalBalance":7.5}"#)
+        http.stub("GetCreditGrantsBalance", body: #"{"totalCents":1000,"usedCents":250}"#)
         let snapshot = try await provider.refresh(account: accounts[0])
         XCTAssertEqual(snapshot.account.plan, "pro")
         XCTAssertEqual(snapshot.windows[0].used, 120)
@@ -464,9 +471,94 @@ final class CLIProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.windows[0].percentRemaining, 70)
     }
 
+    func test_largeValidOutputIsDrainedPastPipeCapacity() async throws {
+        let filler = String(repeating: "x", count: 256)
+        let script = try makeScript("""
+            printf '{"used":30,"limit":100,"padding":"'
+            i=0
+            while [ "$i" -lt 400 ]; do
+              printf '\(filler)'
+              i=$((i + 1))
+            done
+            printf '"}\\n'
+            """)
+
+        let data = try await CLIProvider.run(binary: script, args: [])
+        XCTAssertGreaterThan(data.count, 64 * 1024)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual((json["used"] as? NSNumber)?.doubleValue, 30)
+    }
+
+    func test_outputOverOneMiBIsRejected() async throws {
+        let filler = String(repeating: "x", count: 256)
+        let script = try makeScript("""
+            printf '{"padding":"'
+            i=0
+            while [ "$i" -lt 5000 ]; do
+              printf '\(filler)'
+              i=$((i + 1))
+            done
+            printf '"}\\n'
+            """)
+
+        do {
+            _ = try await CLIProvider.run(binary: script, args: [])
+            XCTFail("CLI output above the cap must fail")
+        } catch let error as ProviderError {
+            XCTAssertEqual(error, .badResponse("CLI output too large"))
+        }
+    }
+
+    func test_cancellationStopsLongRunningCLI() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let marker = directory.appendingPathComponent("started")
+        let script = directory.appendingPathComponent("fakecli")
+        try Data("""
+            #!/bin/sh
+            printf started > "\(marker.path)"
+            while :; do sleep 1; done
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+        let task = Task {
+            try await CLIProvider.run(binary: script, args: [])
+        }
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: marker.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+
+        let start = Date()
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Cancelled CLI must not complete successfully")
+        } catch is CancellationError {
+            XCTAssertLessThan(Date().timeIntervalSince(start), 1)
+        }
+    }
+
     func test_cliRegistryFindsBundledSpecs() {
         let providers = CLIProviders.all(environment: ["PATH": "/usr/bin"])
         XCTAssertEqual(providers.map(\.id), ["amp", "kiro", "augment"])
+    }
+
+    private func makeScript(_ body: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let script = directory.appendingPathComponent("fakecli")
+        try Data("#!/bin/sh\n\(body)\n".utf8).write(to: script)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: script.path)
+        return script
     }
 }
 

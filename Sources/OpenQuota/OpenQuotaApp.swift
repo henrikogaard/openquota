@@ -9,7 +9,7 @@ struct OpenQuotaApp: App {
     var body: some Scene {
         MenuBarExtra {
             PopoverView(model: model)
-                .frame(width: 320)
+                .frame(width: 360)
         } label: {
             MenuBarLabel(model: model)
         }

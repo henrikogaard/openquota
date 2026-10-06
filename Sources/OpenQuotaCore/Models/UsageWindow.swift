@@ -53,10 +53,6 @@ public struct UsageWindow: Codable, Equatable, Sendable, Identifiable {
         if let used, let limit, limit > 0 {
             return min(max(used / limit, 0), 1)
         }
-        if let used, limit == nil, used <= 1.0 {
-            // Provider reports a 0-1 (or 0-100 %) fraction with no explicit limit.
-            return used <= 1.0 ? min(max(used, 0), 1) : min(max(used / 100, 0), 1)
-        }
         if let remaining, let limit, limit > 0 {
             return min(max(1 - remaining / limit, 0), 1)
         }

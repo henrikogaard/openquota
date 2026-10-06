@@ -6,11 +6,13 @@ import OpenQuotaCore
 /// Application Support — no UserDefaults dance, atomic writes, small file.
 struct AppSettings {
     /// Custom providers the user added via a spec file/paste.
-    func userSpecs() -> [ProviderSpec] {
+    func userSpecs() throws -> [ProviderSpec] {
         let url = Self.specsURL
-        guard let data = try? Data(contentsOf: url),
-              let specs = try? JSONDecoder().decode([ProviderSpec].self, from: data)
-        else { return [] }
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= 1_048_576 else { throw ProviderError.badResponse("provider specs exceed 1 MiB") }
+        let specs = try JSONDecoder().decode([ProviderSpec].self, from: Data(contentsOf: url))
+        guard specs.count <= 100 else { throw ProviderError.badResponse("maximum 100 custom providers") }
         return specs
     }
 

@@ -31,8 +31,13 @@ public struct HTTPResponse: Sendable {
     public var headers: [String: String]
     public var body: Data
     public var retryAfter: TimeInterval? {
-        headers.first(where: { $0.key.lowercased() == "retry-after" })
-            .flatMap { TimeInterval($0.value) }
+        guard let raw = headers.first(where: { $0.key.lowercased() == "retry-after" })?.value else { return nil }
+        if let seconds = TimeInterval(raw), seconds.isFinite { return max(0, seconds) }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss zzz"
+        return formatter.date(from: raw).map { max(0, $0.timeIntervalSinceNow) }
     }
 }
 
@@ -46,6 +51,7 @@ public protocol HTTPClient: Sendable {
 public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
     private let session: URLSession
     private let maxTimeout: TimeInterval
+    private let maxResponseBytes = 2 * 1024 * 1024
 
     public init(maxTimeout: TimeInterval = 60) {
         let config = URLSessionConfiguration.ephemeral
@@ -61,6 +67,8 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
         self.maxTimeout = maxTimeout
     }
 
+    deinit { session.invalidateAndCancel() }
+
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method
@@ -71,7 +79,26 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
         }
         let (data, response): (Data, URLResponse)
         do {
+            #if os(macOS)
+            let (bytes, streamedResponse) = try await session.bytes(for: urlRequest)
+            var buffer = Data()
+            for try await byte in bytes {
+                guard buffer.count < maxResponseBytes else {
+                    throw ProviderError.badResponse("response exceeds 2 MB")
+                }
+                buffer.append(byte)
+            }
+            (data, response) = (buffer, streamedResponse)
+            #else
             (data, response) = try await session.data(for: urlRequest)
+            guard data.count <= maxResponseBytes else {
+                throw ProviderError.badResponse("response exceeds 2 MB")
+            }
+            #endif
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as ProviderError {
+            throw error
         } catch let error as URLError where error.code == .timedOut {
             throw ProviderError.timedOut
         } catch {

@@ -31,9 +31,9 @@ final class UsageWindowTests: XCTestCase {
         XCTAssertEqual(w.percentRemaining, 0)
     }
 
-    func test_percentFractionWithoutLimit() {
+    func test_spendWithoutLimitDoesNotInventAQuota() {
         let w = UsageWindow(id: "a", label: "5h", used: 0.42)
-        XCTAssertEqual(w.fractionUsed, 0.42)
+        XCTAssertNil(w.fractionUsed)
     }
 }
 

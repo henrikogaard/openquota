@@ -59,7 +59,7 @@ public struct GenericProvider: UsageProvider {
 
         // Account label/plan come from the identity paths when configured.
         var identity = account.account
-        if let label = JSONPath.string(root, at: spec.identityLabel) { identity.label = label }
+        if identity.label == nil, let label = JSONPath.string(root, at: spec.identityLabel) { identity.label = label }
         if let plan = JSONPath.string(root, at: spec.map.plan) { identity.plan = plan }
 
         var windows: [UsageWindow] = []
@@ -81,7 +81,7 @@ public struct GenericProvider: UsageProvider {
                     label: windowSpec.label,
                     kind: windowSpec.kind ?? .consumption,
                     used: numeric(body, at: windowSpec.used),
-                    limit: numeric(body, at: windowSpec.limit),
+                    limit: numeric(body, at: windowSpec.limit) ?? (windowSpec.unit == "%" ? 100 : nil),
                     remaining: numeric(body, at: windowSpec.remaining),
                     unit: windowSpec.unit,
                     resetsAt: JSONPath.date(body, at: windowSpec.resetsAt,
@@ -100,12 +100,21 @@ public struct GenericProvider: UsageProvider {
             ))
         }
 
+        windows.removeAll { $0.used == nil && $0.remaining == nil }
+        var credits = numeric(root, at: spec.map.creditsRemaining)
+        if let path = spec.map.creditsUsed {
+            if let purchased = credits, let used = numeric(root, at: path) { credits = purchased - used }
+            else { credits = nil }
+        }
+        guard !windows.isEmpty || credits != nil else {
+            throw ProviderError.badResponse("no recognized usage fields")
+        }
         return UsageSnapshot(
             account: identity,
             providerID: spec.id,
             windows: windows,
-            creditsRemaining: numeric(root, at: spec.map.creditsRemaining),
-            creditsUnit: JSONPath.string(root, at: spec.map.creditsUnit)
+            creditsRemaining: credits,
+            creditsUnit: spec.map.creditsUnitLabel ?? JSONPath.string(root, at: spec.map.creditsUnit)
         )
     }
 
@@ -118,9 +127,16 @@ public struct GenericProvider: UsageProvider {
 
     /// Register a user-supplied key: stores secret + manifest entry.
     public func addKey(_ secret: String, label: String?) throws -> AccountIdentity {
-        let id = AccountIdentity.makeID(providerID: spec.id, identityKey: secret)
-        try credentials.setSecret(secret, for: credentialKey(id))
         var entries = try configuredKeys()
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ProviderError.badResponse("empty credential")
+        }
+        let existing = try entries.first { try credentials.secret(for: credentialKey($0.id)) == secret }
+        let id = existing?.id ?? "\(spec.id)@\(UUID().uuidString.lowercased())"
+        guard existing != nil || entries.count < 100 else {
+            throw ProviderError.badResponse("maximum 100 accounts per provider")
+        }
+        try credentials.setSecret(secret, for: credentialKey(id))
         entries.removeAll { $0.id == id }
         entries.append(KeyEntry(id: id, label: label))
         try saveConfiguredKeys(entries)
@@ -134,6 +150,13 @@ public struct GenericProvider: UsageProvider {
         try saveConfiguredKeys(entries)
     }
 
+    public func renameKey(accountID: String, label: String?) throws {
+        var entries = try configuredKeys()
+        guard let index = entries.firstIndex(where: { $0.id == accountID }) else { return }
+        entries[index].label = label
+        try saveConfiguredKeys(entries)
+    }
+
     struct KeyEntry: Codable, Equatable {
         var id: String
         var label: String?
@@ -142,8 +165,12 @@ public struct GenericProvider: UsageProvider {
     // Key manifest lives beside the secret store; on macOS this is
     // Application Support/openquota/<spec>-keys.json.
     func configuredKeys() throws -> [KeyEntry] {
-        guard let data = try? Data(contentsOf: manifestURL) else { return [] }
-        return (try? JSONDecoder.openQuota.decode([KeyEntry].self, from: data)) ?? []
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else { return [] }
+        let size = try manifestURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= 1_048_576 else { throw ProviderError.badResponse("key manifest too large") }
+        let entries = try JSONDecoder.openQuota.decode([KeyEntry].self, from: Data(contentsOf: manifestURL))
+        guard entries.count <= 100 else { throw ProviderError.badResponse("too many saved keys") }
+        return entries
     }
 
     private func saveConfiguredKeys(_ entries: [KeyEntry]) throws {

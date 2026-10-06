@@ -1,4 +1,9 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 /// Providers that already have their own CLI on the machine (Amp, Kiro,
 /// Augment). Running `binary usage --json` inherits the CLI's auth entirely —
@@ -94,50 +99,272 @@ public struct CLIProvider: UsageProvider {
 
     /// Runs the binary with a 10s watchdog; stdout must fit a JSON payload.
     static func run(binary: URL, args: [String]) async throws -> Data {
-        final class ResumeGuard: @unchecked Sendable {
-            private let lock = NSLock()
-            private var resumed = false
-            /// Returns true exactly once — the caller resumes the continuation.
-            func claim() -> Bool {
+        let cancellation = CLIRunCancellation()
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { continuation in
+                let run = CLIProcessRun(
+                    binary: binary,
+                    args: args,
+                    continuation: continuation)
+                cancellation.install(run)
+                run.start()
+            }
+        }, onCancel: {
+            cancellation.cancel()
+        })
+    }
+}
+
+private final class CLIRunCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var run: CLIProcessRun?
+    private var cancelled = false
+
+    func install(_ run: CLIProcessRun) {
+        lock.lock()
+        if cancelled {
+            lock.unlock()
+            run.cancel()
+            return
+        }
+        self.run = run
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let run = self.run
+        lock.unlock()
+        run?.cancel()
+    }
+}
+
+private final class CLIProcessRun: @unchecked Sendable {
+    private static let maxOutputBytes = 1_048_576
+    private static let readChunkBytes = 64 * 1024
+
+    private let lock = NSLock()
+    /// Serializes reads with pipe teardown; handlers can race termination.
+    private let readLock = NSLock()
+    private let binary: URL
+    private let args: [String]
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var process: Process?
+    private var stdout: Pipe?
+    private var readHandle: FileHandle?
+    private var readSource: DispatchSourceRead?
+    private var readFD: Int32 = -1
+    private var output = Data()
+    private var watchdog: DispatchSourceTimer?
+    private var finished = false
+
+    init(
+        binary: URL,
+        args: [String],
+        continuation: CheckedContinuation<Data, Error>
+    ) {
+        self.binary = binary
+        self.args = args
+        self.continuation = continuation
+    }
+
+    func start() {
+        let process = Process()
+        let stdout = Pipe()
+        let readHandle = stdout.fileHandleForReading
+        let fd = readHandle.fileDescriptor
+        let flags = fcntl(fd, F_GETFL)
+        if flags >= 0 {
+            _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        }
+        let readSource = DispatchSource.makeReadSource(
+            fileDescriptor: fd,
+            queue: .global(qos: .utility))
+        readSource.setEventHandler { [weak self] in
+            self?.readAvailable()
+        }
+
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            readSource.setEventHandler {}
+            readSource.resume()
+            readSource.cancel()
+            readHandle.closeFile()
+            stdout.fileHandleForWriting.closeFile()
+            return
+        }
+        self.process = process
+        self.stdout = stdout
+        self.readHandle = readHandle
+        self.readSource = readSource
+        self.readFD = fd
+        process.executableURL = binary
+        process.arguments = args
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] process in
+            self?.terminated(status: process.terminationStatus)
+        }
+
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + .seconds(10))
+        timer.setEventHandler { [weak self] in
+            self?.timedOut()
+        }
+        watchdog = timer
+        timer.resume()
+        readSource.resume()
+
+        do {
+            try process.run()
+        } catch {
+            stdout.fileHandleForWriting.closeFile()
+            lock.unlock()
+            finish(error: ProviderError.notLoggedIn)
+            return
+        }
+        // The child inherits its own stdout descriptor. Close the parent's
+        // writer so EOF is observable once the process (and descendants) exit.
+        stdout.fileHandleForWriting.closeFile()
+        lock.unlock()
+    }
+
+    func cancel() {
+        finish(error: CancellationError())
+    }
+
+    private func timedOut() {
+        finish(error: ProviderError.timedOut)
+    }
+
+    private func readAvailable() {
+        readLock.lock()
+
+        lock.lock()
+        guard !finished, readFD >= 0 else {
+            lock.unlock()
+            readLock.unlock()
+            return
+        }
+        let fd = readFD
+        lock.unlock()
+
+        var buffer = [UInt8](repeating: 0, count: Self.readChunkBytes)
+        var failure: Error?
+        var reachedEOF = false
+        while true {
+            let count = buffer.withUnsafeMutableBytes {
+                read(fd, $0.baseAddress, $0.count)
+            }
+            if count > 0 {
                 lock.lock()
-                defer { lock.unlock() }
-                if resumed { return false }
-                resumed = true
-                return true
+                if finished {
+                    lock.unlock()
+                    readLock.unlock()
+                    return
+                }
+                if output.count + count > Self.maxOutputBytes {
+                    failure = ProviderError.badResponse("CLI output too large")
+                    lock.unlock()
+                    break
+                }
+                output.append(contentsOf: buffer.prefix(count))
+                lock.unlock()
+            } else if count == 0 {
+                reachedEOF = true
+                break
+            } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                break
+            } else {
+                failure = ProviderError.badResponse("CLI output read failed")
+                break
             }
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let stdout = Pipe()
-            let guard_ = ResumeGuard()
-            process.executableURL = binary
-            process.arguments = args
-            process.standardOutput = stdout
-            process.standardError = FileHandle.nullDevice
-            process.terminationHandler = { proc in
-                guard guard_.claim() else { return }
-                let data = stdout.fileHandleForReading.readDataToEndOfFile()
-                if proc.terminationStatus == 0 {
-                    continuation.resume(returning: data)
-                } else {
-                    continuation.resume(throwing: ProviderError.serverError(
-                        Int(proc.terminationStatus)))
-                }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
-                if process.isRunning, guard_.claim() {
-                    process.terminate()
-                    continuation.resume(throwing: ProviderError.timedOut)
-                }
-            }
-            do {
-                try process.run()
-            } catch {
-                if guard_.claim() {
-                    continuation.resume(throwing: ProviderError.notLoggedIn)
-                }
-            }
+        readLock.unlock()
+        if let failure {
+            finish(error: failure)
         }
+        if reachedEOF {
+            closeReader()
+        }
+    }
+
+    private func terminated(status: Int32) {
+        // Drain bytes already in the non-blocking pipe, but never wait for
+        // EOF: a descendant may have inherited stdout from the CLI.
+        readAvailable()
+        lock.lock()
+        let alreadyFinished = finished
+        lock.unlock()
+        guard !alreadyFinished else { return }
+        if status == 0 {
+            finish()
+        } else {
+            finish(error: ProviderError.serverError(Int(status)))
+        }
+    }
+
+    private func finish(data: Data? = nil, error: Error? = nil) {
+        lock.lock()
+        guard !finished, let continuation else {
+            lock.unlock()
+            return
+        }
+        let resultData = data ?? output
+        finished = true
+        self.continuation = nil
+        let process = self.process
+        self.process = nil
+        self.stdout = nil
+        let readHandle = self.readHandle
+        self.readHandle = nil
+        let readSource = self.readSource
+        self.readSource = nil
+        self.readFD = -1
+        let watchdog = self.watchdog
+        self.watchdog = nil
+        lock.unlock()
+
+        watchdog?.setEventHandler {}
+        watchdog?.cancel()
+        readSource?.setEventHandler {}
+        readSource?.cancel()
+
+        // Wait for an in-flight reader before closing its descriptor.
+        readLock.lock()
+        readLock.unlock()
+        readHandle?.closeFile()
+        process?.terminationHandler = nil
+        if let process, process.isRunning {
+            process.terminate()
+            #if os(Linux) || canImport(Darwin)
+            _ = kill(process.processIdentifier, SIGKILL)
+            #endif
+        }
+
+        if let error {
+            continuation.resume(throwing: error)
+        } else {
+            continuation.resume(returning: resultData)
+        }
+    }
+
+    private func closeReader() {
+        lock.lock()
+        let readSource = self.readSource
+        self.readSource = nil
+        let readHandle = self.readHandle
+        self.readHandle = nil
+        self.readFD = -1
+        lock.unlock()
+
+        readSource?.setEventHandler {}
+        readSource?.cancel()
+        readLock.lock()
+        readLock.unlock()
+        readHandle?.closeFile()
     }
 }
 

@@ -4,7 +4,7 @@ import XCTest
 
 final class AccountProfilesTests: XCTestCase {
     func test_storePersistsProfileMetadataAndRemovesProfiles() throws {
-        let directory = temporaryDirectory()
+        let directory = try temporaryDirectory()
         let credentialFile = directory.appendingPathComponent("credentials.json")
         try Data("private-token-marker".utf8).write(to: credentialFile)
         let store = LocalAccountProfileStore(url: directory.appendingPathComponent("profiles.json"))
@@ -18,7 +18,9 @@ final class AccountProfilesTests: XCTestCase {
         XCTAssertEqual(try store.profiles(), [profile])
         let persisted = try String(contentsOf: directory.appendingPathComponent("profiles.json"),
                                    encoding: .utf8)
-        XCTAssertTrue(persisted.contains(credentialFile.path))
+        let persistedProfiles = try JSONDecoder().decode(
+            [LocalAccountProfile].self, from: Data(persisted.utf8))
+        XCTAssertEqual(persistedProfiles.first?.credentialPath, profile.credentialPath)
         XCTAssertTrue(persisted.contains("Work"))
         XCTAssertFalse(persisted.contains("private-token-marker"))
 
@@ -27,7 +29,7 @@ final class AccountProfilesTests: XCTestCase {
     }
 
     func test_storeValidatesProviderPathFileTypeAndSize() throws {
-        let directory = temporaryDirectory()
+        let directory = try temporaryDirectory()
         let credentialFile = directory.appendingPathComponent("credentials.json")
         try Data("{}".utf8).write(to: credentialFile)
         let store = LocalAccountProfileStore(url: directory.appendingPathComponent("profiles.json"))
@@ -55,19 +57,31 @@ final class AccountProfilesTests: XCTestCase {
     }
 
     func test_storeEnforcesProfileLimit() throws {
-        let directory = temporaryDirectory()
-        let credentialFile = directory.appendingPathComponent("credentials.json")
-        try Data("{}".utf8).write(to: credentialFile)
+        let directory = try temporaryDirectory()
         let store = LocalAccountProfileStore(url: directory.appendingPathComponent("profiles.json"))
 
         for index in 0..<LocalAccountProfileStore.maxProfiles {
+            let credentialFile = directory.appendingPathComponent("credentials-\(index).json")
+            try Data("{}".utf8).write(to: credentialFile)
             try store.add(
                 providerID: "claude",
                 label: "Profile \(index)",
                 credentialPath: credentialFile.path)
         }
+        let first = try XCTUnwrap(try store.profiles().first)
+        let duplicatePath = first.credentialPath
+        let duplicate = try store.add(
+            providerID: "claude",
+            label: "Renamed",
+            credentialPath: duplicatePath)
+        XCTAssertEqual(duplicate.id, first.id)
+        XCTAssertEqual(try store.profiles().first?.label, "Renamed")
+        XCTAssertEqual(try store.profiles().count, LocalAccountProfileStore.maxProfiles)
+
+        let overflowFile = directory.appendingPathComponent("overflow.json")
+        try Data("{}".utf8).write(to: overflowFile)
         XCTAssertThrowsError(try store.add(
-            providerID: "claude", label: "Overflow", credentialPath: credentialFile.path)) {
+            providerID: "claude", label: "Overflow", credentialPath: overflowFile.path)) {
             XCTAssertEqual($0 as? LocalAccountProfileError, .profileLimitReached)
         }
     }
@@ -117,8 +131,12 @@ final class AccountProfilesTests: XCTestCase {
         XCTAssertEqual(account.account.label, "Personal")
     }
 
-    private func temporaryDirectory() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    private func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        return directory
     }
 }
 

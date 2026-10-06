@@ -9,6 +9,7 @@ public actor SnapshotStore {
     public private(set) var refreshing: Set<String> = []
     private var registeredAccounts: [String: AccountIdentity] = [:]
     private var generations: [String: UInt64] = [:]
+    private var nextGeneration: UInt64 = 0
 
     public init() {}
 
@@ -41,7 +42,9 @@ public actor SnapshotStore {
     @discardableResult
     public func beginRefreshWithGeneration(accountID: String) -> UInt64 {
         refreshing.insert(accountID)
-        return generations[accountID, default: 0]
+        nextGeneration &+= 1
+        generations[accountID] = nextGeneration
+        return nextGeneration
     }
 
     public func finishRefresh(accountID: String, result: Result<UsageSnapshot, ProviderError>) {
@@ -54,10 +57,11 @@ public actor SnapshotStore {
         generation: UInt64?
     ) -> Bool {
         if let generation {
-            guard generations[accountID, default: 0] == generation,
+            guard generations[accountID] == generation,
                   refreshing.contains(accountID) else { return false }
         }
         refreshing.remove(accountID)
+        generations.removeValue(forKey: accountID)
         switch result {
         case .success(let snapshot):
             snapshots[accountID] = snapshot
@@ -91,12 +95,13 @@ public actor SnapshotStore {
     }
 
     public func cancelRefresh(accountID: String, generation: UInt64) {
-        guard generations[accountID, default: 0] == generation else { return }
+        guard generations[accountID] == generation else { return }
         refreshing.remove(accountID)
+        generations.removeValue(forKey: accountID)
     }
 
     public func remove(accountID: String) {
-        generations[accountID, default: 0] &+= 1
+        generations.removeValue(forKey: accountID)
         snapshots.removeValue(forKey: accountID)
         registeredAccounts.removeValue(forKey: accountID)
         refreshing.remove(accountID)

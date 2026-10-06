@@ -9,32 +9,44 @@ import FoundationNetworking
 /// files the user already produced by logging in with the provider's CLI.
 public struct LocalCredentialFiles: Sendable {
     public var home: URL
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+    public var overridePaths: [String: URL]
+    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                overridePaths: [String: URL] = [:]) {
         self.home = home
+        self.overridePaths = overridePaths
+    }
+
+    private func url(_ path: String) -> URL {
+        overridePaths[path] ?? home.appendingPathComponent(path)
     }
 
     public func fileExists(_ relativePath: String) -> Bool {
-        FileManager.default.fileExists(atPath: home.appendingPathComponent(relativePath).path)
+        FileManager.default.fileExists(atPath: url(relativePath).path)
     }
 
     public func readJSON(_ relativePath: String) -> [String: Any]? {
-        let url = home.appendingPathComponent(relativePath)
+        let url = url(relativePath)
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= 1_048_576 else { return nil }
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data),
               let dict = obj as? [String: Any] else { return nil }
         return dict
     }
 
-    public func writeJSON(_ relativePath: String, _ dict: [String: Any]) {
-        let url = home.appendingPathComponent(relativePath)
-        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
-        try? data.write(to: url, options: [.atomic])
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                               ofItemAtPath: url.path)
+    public func writeJSON(_ relativePath: String, _ dict: [String: Any]) throws {
+        let url = url(relativePath)
+        let data = try JSONSerialization.data(withJSONObject: dict)
+        try data.write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                              ofItemAtPath: url.path)
     }
 
     public func readText(_ relativePath: String) -> String? {
-        try? String(contentsOf: home.appendingPathComponent(relativePath), encoding: .utf8)
+        let url = url(relativePath)
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= 1_048_576 else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 }
 
@@ -47,8 +59,19 @@ public struct OAuthTokens: Sendable {
     public var expiresAt: TimeInterval?
 
     public var isExpired: Bool {
-        guard let expiresAt else { return false }
+        guard let expiresAt = expiresAt ?? Self.jwtExpiry(accessToken) else { return false }
         return Date().timeIntervalSince1970 >= expiresAt - 60
+    }
+
+    static func jwtExpiry(_ token: String) -> TimeInterval? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (json["exp"] as? NSNumber)?.doubleValue
     }
 }
 
@@ -81,10 +104,10 @@ enum OAuthRefresher {
             timeout: 15
         )
         let resp = try await http.send(req)
-        guard resp.status == 200,
-              let json = try? JSONSerialization.jsonObject(with: resp.body) as? [String: Any],
+        let responseBody = try requireOK(resp)
+        guard let json = try? JSONSerialization.jsonObject(with: responseBody) as? [String: Any],
               let access = json["access_token"] as? String else {
-            throw ProviderError.serverError(resp.status)
+            throw ProviderError.badResponse("token response")
         }
         return OAuthTokens(
             accessToken: access,
@@ -160,13 +183,14 @@ func percentWindow(_ id: String, _ label: String, used: Any?, resetsAt: Any?,
     if let n = used as? NSNumber { value = n.doubleValue }
     else if let s = used as? String { value = Double(s) }
     else { value = nil }
-    guard let usedValue = value else { return nil }
+    guard let usedValue = value, usedValue.isFinite else { return nil }
     var reset: Date?
     switch resetsAt {
     case let s as String:
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         reset = iso.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+            ?? Double(s).map { Date(timeIntervalSince1970: $0) }
     case let n as NSNumber:
         // Heuristic: > 1e12 is millis, else seconds.
         reset = Date(timeIntervalSince1970: n.doubleValue > 1e12 ? n.doubleValue / 1000 : n.doubleValue)

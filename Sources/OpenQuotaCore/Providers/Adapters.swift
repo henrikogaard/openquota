@@ -35,10 +35,10 @@ func adapterNum(_ dict: [String: Any]?, _ keys: [String]) -> Double? {
     return nil
 }
 
-/// Normalizes a provider's percent-used value: some report 0-1 fractions.
+/// Percent fields are already in 0...100; 0.5 means half a percent, not 50%.
 func normalizePercent(_ raw: Double?) -> Double? {
-    guard let raw else { return nil }
-    return raw >= 0 && raw <= 1 ? raw * 100 : raw
+    guard let raw, raw.isFinite else { return nil }
+    return raw
 }
 
 // MARK: - Claude (Claude Code OAuth)
@@ -55,27 +55,44 @@ public struct ClaudeProvider: UsageProvider {
 
     private let http: any HTTPClient
     private let files: LocalCredentialFiles
+    private let nativeCredentials: (any CredentialStore)?
 
-    public init(http: any HTTPClient, files: LocalCredentialFiles) {
+    public init(http: any HTTPClient, files: LocalCredentialFiles, nativeCredentials: (any CredentialStore)? = nil) {
         self.http = http
         self.files = files
+        #if os(macOS)
+        self.nativeCredentials = nativeCredentials ?? (
+            files.overridePaths[Self.credentialsPath] == nil
+                && files.home == FileManager.default.homeDirectoryForCurrentUser
+                ? KeychainCredentialStore(service: "Claude Code-credentials") : nil)
+        #else
+        self.nativeCredentials = nativeCredentials
+        #endif
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
-        guard oauthBlock() != nil else { return [] }
+        guard let (root, source) = try credentialRoot(),
+              root["claudeAiOauth"] is [String: Any] else { return [] }
         let identity = AccountIdentity(
             providerID: id,
             id: AccountIdentity.makeID(providerID: id, identityKey: "claude-cli"),
             label: "Claude Code")
-        return [AccountDescriptor(account: identity, source: .configFile, isDefaultHome: true)]
+        return [AccountDescriptor(account: identity, source: source, isDefaultHome: true)]
     }
 
-    private func oauthBlock() -> [String: Any]? {
-        files.readJSON(Self.credentialsPath)?["claudeAiOauth"] as? [String: Any]
+    private func credentialRoot() throws -> ([String: Any], CredentialSource)? {
+        if let raw = try nativeCredentials?.secret(for: NSUserName()),
+           let root = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+           root["claudeAiOauth"] is [String: Any] {
+            return (root, .keychainItem)
+        }
+        return files.readJSON(Self.credentialsPath).map { ($0, .configFile) }
     }
 
     private func tokens() throws -> OAuthTokens {
-        guard let oauth = oauthBlock(), let at = oauth["accessToken"] as? String else {
+        guard let (root, _) = try credentialRoot(),
+              let oauth = root["claudeAiOauth"] as? [String: Any],
+              let at = oauth["accessToken"] as? String else {
             throw ProviderError.notLoggedIn
         }
         return OAuthTokens(
@@ -85,14 +102,20 @@ public struct ClaudeProvider: UsageProvider {
             expiresAt: (oauth["expiresAt"] as? NSNumber).map { $0.doubleValue / 1000 })
     }
 
-    private func persist(tokens: OAuthTokens) {
-        guard var root = files.readJSON(Self.credentialsPath),
-              var oauth = root["claudeAiOauth"] as? [String: Any] else { return }
+    private func persist(tokens: OAuthTokens) throws {
+        guard let stored = try credentialRoot(),
+              var oauth = stored.0["claudeAiOauth"] as? [String: Any] else { throw ProviderError.notLoggedIn }
+        var root = stored.0
         oauth["accessToken"] = tokens.accessToken
         if let rt = tokens.refreshToken { oauth["refreshToken"] = rt }
         if let exp = tokens.expiresAt { oauth["expiresAt"] = Int(exp * 1000) }
         root["claudeAiOauth"] = oauth
-        files.writeJSON(Self.credentialsPath, root)
+        if stored.1 == .keychainItem {
+            let data = try JSONSerialization.data(withJSONObject: root)
+            try nativeCredentials?.setSecret(String(decoding: data, as: UTF8.self), for: NSUserName())
+        } else {
+            try files.writeJSON(Self.credentialsPath, root)
+        }
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
@@ -102,7 +125,7 @@ public struct ClaudeProvider: UsageProvider {
                 url: "https://platform.claude.com/v1/oauth/token",
                 clientID: Self.clientID, refreshToken: rt, http: http)
             t = refreshed
-            persist(tokens: refreshed)
+            try persist(tokens: refreshed)
         }
         let body = try await AdapterHTTP.getJSON(
             "https://api.anthropic.com/api/oauth/usage",
@@ -182,34 +205,40 @@ public struct CodexProvider: UsageProvider {
 
     private var accountID: String? { tokenBlock()?["account_id"] as? String }
 
-    private func persist(tokens: OAuthTokens) {
+    private func persist(tokens: OAuthTokens) throws {
         guard var root = files.readJSON(Self.authPath),
               var t = root["tokens"] as? [String: Any] else { return }
         t["access_token"] = tokens.accessToken
         if let rt = tokens.refreshToken { t["refresh_token"] = rt }
-        t["last_refresh"] = ISO8601DateFormatter().string(from: Date())
+        root["last_refresh"] = ISO8601DateFormatter().string(from: Date())
         root["tokens"] = t
-        files.writeJSON(Self.authPath, root)
+        try files.writeJSON(Self.authPath, root)
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
         var t = try tokens()
-        if let rt = t.refreshToken {
-            do {
-                let refreshed = try await OAuthRefresher.refresh(
-                    url: "https://auth.openai.com/oauth/token",
-                    clientID: Self.clientID, refreshToken: rt, http: http)
-                t = refreshed
-                persist(tokens: refreshed)
-            } catch {
-                // A failed refresh is non-fatal: the stored access token may
-                // still be valid (Codex rotates slowly).
-            }
+        if t.isExpired, let rt = t.refreshToken {
+            t = try await OAuthRefresher.refresh(
+                url: "https://auth.openai.com/oauth/token",
+                clientID: Self.clientID, refreshToken: rt, http: http)
+            try persist(tokens: t)
         }
         var headers = ["Authorization": "Bearer \(t.accessToken)"]
         if let acct = accountID { headers["ChatGPT-Account-Id"] = acct }
-        let body = try await AdapterHTTP.getJSON(
-            "https://chatgpt.com/backend-api/wham/usage", headers: headers, http: http)
+        let body: Any
+        do {
+            body = try await AdapterHTTP.getJSON(
+                "https://chatgpt.com/backend-api/wham/usage", headers: headers, http: http)
+        } catch ProviderError.unauthorized {
+            guard let rt = t.refreshToken else { throw ProviderError.unauthorized }
+            t = try await OAuthRefresher.refresh(
+                url: "https://auth.openai.com/oauth/token",
+                clientID: Self.clientID, refreshToken: rt, http: http)
+            try persist(tokens: t)
+            headers["Authorization"] = "Bearer \(t.accessToken)"
+            body = try await AdapterHTTP.getJSON(
+                "https://chatgpt.com/backend-api/wham/usage", headers: headers, http: http)
+        }
         guard let dict = body as? [String: Any],
               let rate = dict["rate_limit"] as? [String: Any] else {
             throw ProviderError.badResponse("usage payload")
@@ -299,7 +328,7 @@ public struct GeminiProvider: UsageProvider {
             newCreds["access_token"] = refreshed.accessToken
             if let rt = refreshed.refreshToken { newCreds["refresh_token"] = rt }
             if let exp = refreshed.expiresAt { newCreds["expiry_date"] = Int(exp * 1000) }
-            files.writeJSON(Self.credsPath, newCreds)
+            try files.writeJSON(Self.credsPath, newCreds)
         }
         let authHeaders = ["Authorization": "Bearer \(token)"]
 
@@ -359,17 +388,17 @@ public struct GrokProvider: UsageProvider {
     /// auth.json is either {accessToken...} or {<name>: {accessToken...}}.
     private func entries() -> [(String, [String: Any])] {
         guard let root = files.readJSON(Self.authPath) else { return [] }
-        if root["accessToken"] is String || root["access_token"] is String {
+        if root["accessToken"] is String || root["access_token"] is String || root["key"] is String {
             return [("default", root)]
         }
         var found: [(String, [String: Any])] = []
         for (key, value) in root {
             if let dict = value as? [String: Any],
-               dict["accessToken"] is String || dict["access_token"] is String {
+               dict["accessToken"] is String || dict["access_token"] is String || dict["key"] is String {
                 found.append((key, dict))
             }
         }
-        return found
+        return found.sorted { $0.0 < $1.0 }
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
@@ -388,46 +417,56 @@ public struct GrokProvider: UsageProvider {
             AccountIdentity.makeID(providerID: id, identityKey: $0.0) == account.account.id
         }
         guard let (name, entry) = match else { throw ProviderError.notLoggedIn }
-        var token = (entry["accessToken"] ?? entry["access_token"]) as? String ?? ""
-        if let exp = adapterNum(entry, ["expiresAt", "expires_at"]),
-           Date().timeIntervalSince1970 >= (exp > 1e12 ? exp / 1000 : exp) - 60,
-           let rt = (entry["refreshToken"] ?? entry["refresh_token"]) as? String {
+        var token = (entry["key"] ?? entry["accessToken"] ?? entry["access_token"]) as? String ?? ""
+        let rawExpiry = adapterNum(entry, ["expiresAt", "expires_at"])
+        let expiry = rawExpiry.map { $0 > 1e12 ? $0 / 1000 : $0 }
+            ?? JSONPath.date(entry, at: "$.expires_at", format: "iso8601")?.timeIntervalSince1970
+            ?? JSONPath.date(entry, at: "$.expires", format: "iso8601")?.timeIntervalSince1970
+        let bundle = OAuthTokens(accessToken: token, expiresAt: expiry)
+        if bundle.isExpired,
+           let rt = (entry["refresh_token"] ?? entry["refreshToken"] ?? entry["refresh"]) as? String {
+            let client = entry["oidc_client_id"] as? String
+                ?? (name.contains("::") ? name.components(separatedBy: "::").last : nil)
+                ?? "b1a00492-073a-47ea-816f-4c329264a828"
             let refreshed = try await OAuthRefresher.refresh(
                 url: "https://auth.x.ai/oauth2/token",
-                clientID: "grok-cli", refreshToken: rt, http: http)
+                clientID: client, refreshToken: rt, http: http)
             token = refreshed.accessToken
             var root = files.readJSON(Self.authPath) ?? [:]
             var mutableEntry = entry
-            mutableEntry["accessToken"] = refreshed.accessToken
-            if let rt = refreshed.refreshToken { mutableEntry["refreshToken"] = rt }
-            if name == "default", root["accessToken"] != nil { root = mutableEntry }
+            let tokenKey = entry["key"] != nil ? "key" : entry["access_token"] != nil ? "access_token" : "accessToken"
+            mutableEntry[tokenKey] = refreshed.accessToken
+            if let rt = refreshed.refreshToken {
+                mutableEntry[entry["refreshToken"] != nil ? "refreshToken" : "refresh_token"] = rt
+            }
+            if let exp = refreshed.expiresAt {
+                mutableEntry["expires_at"] = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: exp))
+                mutableEntry.removeValue(forKey: "expiresAt")
+                mutableEntry.removeValue(forKey: "expires")
+            }
+            if name == "default", root[tokenKey] != nil { root = mutableEntry }
             else { root[name] = mutableEntry }
-            files.writeJSON(Self.authPath, root)
+            try files.writeJSON(Self.authPath, root)
         }
         let body = try await AdapterHTTP.getJSON(
             "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-            headers: ["Authorization": "Bearer \(token)"], http: http)
-        guard let dict = body as? [String: Any] else {
+            headers: ["Authorization": "Bearer \(token)", "X-XAI-Token-Auth": "xai-grok-cli"],
+            http: http)
+        guard let dict = body as? [String: Any],
+              let config = dict["config"] as? [String: Any],
+              let period = config["currentPeriod"] as? [String: Any],
+              let end = period["end"] as? String else {
             throw ProviderError.badResponse("billing payload")
         }
-        var windows: [UsageWindow] = []
-        if let w = percentWindow(
+        guard let used = config["creditUsagePercent"] == nil ? 0 : adapterNum(config, ["creditUsagePercent"]),
+              let window = percentWindow(
             "grok.week", "Week",
-            used: normalizePercent(adapterNum(
-                dict, ["weekly_used_percent", "weeklyUsedPercent", "used_percent"])),
-            resetsAt: dict["weekly_reset_at"] ?? dict["weeklyResetAt"]) {
-            windows.append(w)
+            used: used, resetsAt: end), window.resetsAt != nil else {
+            throw ProviderError.badResponse("billing window")
         }
-        let snapshot = UsageSnapshot(
+        return UsageSnapshot(
             account: account.account, providerID: id,
-            windows: windows,
-            creditsRemaining: adapterNum(
-                dict, ["remaining_balance", "remainingBalance", "balance"]),
-            creditsUnit: "credits")
-        if windows.isEmpty && snapshot.creditsRemaining == nil {
-            throw ProviderError.badResponse("no usage fields")
-        }
-        return snapshot
+            windows: [window])
     }
 }
 
@@ -470,12 +509,13 @@ public struct OpenCodeProvider: UsageProvider {
         let body = try await AdapterHTTP.getJSON(
             "https://opencode.ai/zen/go/v1/usage",
             headers: ["Authorization": "Bearer \(key)"], http: http)
-        guard let dict = body as? [String: Any] else {
+        guard let root = body as? [String: Any],
+              let dict = root["usage"] as? [String: Any] else {
             throw ProviderError.badResponse("usage payload")
         }
         var windows: [UsageWindow] = []
         let specs: [(String, String)] = [
-            ("5h", "session"), ("Week", "weekly"), ("Month", "monthly"),
+            ("5h", "rolling"), ("Week", "weekly"), ("Month", "monthly"),
         ]
         for (label, key) in specs {
             let bucket = dict[key] as? [String: Any]
@@ -483,7 +523,7 @@ public struct OpenCodeProvider: UsageProvider {
                 "opencode.\(key)", label,
                 used: normalizePercent(adapterNum(
                     bucket, ["used_percent", "utilization", "percent"])),
-                resetsAt: bucket?["reset_at"] ?? bucket?["resets_at"]) {
+                resetsAt: bucket?["resetsAt"]) {
                 windows.append(w)
             }
         }
@@ -550,37 +590,40 @@ public struct DevinProvider: UsageProvider {
         let server = c.server.hasPrefix("http") ? c.server : "https://\(c.server)"
         let body = try await AdapterHTTP.postJSON(
             "\(server)/exa.seat_management_pb.SeatManagementService/GetUserStatus",
-            body: [:],
+            body: ["metadata": [
+                "apiKey": c.apiKey, "ideName": "devin", "ideVersion": "1.108.2",
+                "extensionName": "devin", "extensionVersion": "1.108.2", "locale": "en",
+            ]],
             headers: [
                 "Authorization": "Bearer \(c.apiKey)",
                 "Connect-Protocol-Version": "1",
             ],
             http: http)
-        guard let dict = body as? [String: Any] else {
+        guard let root = body as? [String: Any],
+              let status = root["userStatus"] as? [String: Any],
+              let dict = status["planStatus"] as? [String: Any] else {
             throw ProviderError.badResponse("status payload")
         }
         var windows: [UsageWindow] = []
-        let specs: [(String, String, String)] = [
-            ("dailyUsage", "devin.day", "Day"),
-            ("weeklyUsage", "devin.week", "Week"),
-            ("weekly_usage", "devin.week", "Week"),
-        ]
-        for (key, windowID, label) in specs {
-            guard let bucket = dict[key] as? [String: Any],
-                  windows.contains(where: { $0.id == windowID }) == false else { continue }
-            if let w = percentWindow(
-                windowID, label,
-                used: normalizePercent(adapterNum(
-                    bucket, ["usedPercent", "used_percent", "percent"])),
-                resetsAt: bucket["resetTime"] ?? bucket["reset_time"]) {
-                windows.append(w)
+        let plan = dict["planInfo"] as? [String: Any]
+        for (key, label) in [("daily", "Day"), ("weekly", "Week")] {
+            if key == "daily", plan?["hideDailyQuota"] as? Bool == true { continue }
+            let field = "\(key)QuotaRemainingPercent"
+            let reset = dict["\(key)QuotaResetAtUnix"]
+            let remaining = adapterNum(dict, [field])
+            if dict[field] != nil && remaining == nil { throw ProviderError.badResponse("quota percentage") }
+            // Proto3 omits numeric zero. Only infer exhaustion when a window exists.
+            if let remaining = remaining ?? (reset != nil ? 0 : nil),
+               let window = percentWindow("devin.\(key)", label, used: 100 - remaining, resetsAt: reset) {
+                windows.append(window)
             }
         }
+        var identity = account.account
+        identity.plan = plan?["planName"] as? String
         let snapshot = UsageSnapshot(
-            account: account.account, providerID: id, windows: windows,
-            creditsRemaining: adapterNum(
-                dict, ["extraUsageBalance", "extra_usage_balance", "balance"]),
-            creditsUnit: "ACUs")
+            account: identity, providerID: id, windows: windows,
+            creditsRemaining: adapterNum(dict, ["overageBalanceMicros"]).map { $0 / 1_000_000 },
+            creditsUnit: "USD")
         if windows.isEmpty && snapshot.creditsRemaining == nil {
             throw ProviderError.badResponse("no usage fields")
         }
@@ -600,10 +643,14 @@ public struct CursorProvider: UsageProvider {
 
     private let http: any HTTPClient
     private let credentials: any CredentialStore
+    private let storage: GenericProvider
 
-    public init(http: any HTTPClient, credentials: any CredentialStore) {
+    public init(http: any HTTPClient, credentials: any CredentialStore, manifestURL: URL? = nil) {
         self.http = http
         self.credentials = credentials
+        self.storage = GenericProvider(
+            spec: ProviderSpec(id: "cursor", displayName: "Cursor", url: "https://cursor.com"),
+            http: http, credentials: credentials, manifestURL: manifestURL)
     }
 
     /// The cookie value is `userID::jwt` (or %-encoded `userID%3A%3Ajwt`).
@@ -617,27 +664,43 @@ public struct CursorProvider: UsageProvider {
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
+        var accounts = try await storage.accounts()
         guard let raw = try credentials.secret(for: "cursor/session"),
-              let parsed = parseToken(raw) else { return [] }
+              let parsed = parseToken(raw) else { return accounts }
         let identity = AccountIdentity(
             providerID: id,
             id: AccountIdentity.makeID(providerID: id, identityKey: parsed.userID),
             label: parsed.userID)
-        return [AccountDescriptor(account: identity, source: .userSuppliedKey)]
+        if !accounts.contains(where: { $0.id == identity.id }) {
+            accounts.append(AccountDescriptor(account: identity, source: .userSuppliedKey))
+        }
+        return accounts
     }
 
     /// Register a pasted session token (Settings → Cursor → paste cookie value).
-    public func addSessionToken(_ raw: String) throws -> AccountIdentity {
+    public func addSessionToken(_ raw: String, label: String? = nil) throws -> AccountIdentity {
         guard let parsed = parseToken(raw) else {
             throw ProviderError.badResponse("expected userID::token format")
         }
-        let id = AccountIdentity.makeID(providerID: id, identityKey: parsed.userID)
-        try credentials.setSecret(raw, for: "cursor/session")
-        return AccountIdentity(providerID: self.id, id: id, label: parsed.userID)
+        return try storage.addKey(raw, label: label ?? parsed.userID)
+    }
+
+    public func removeSessionToken(accountID: String) throws {
+        if let raw = try credentials.secret(for: "cursor/session"),
+           let parsed = parseToken(raw),
+           accountID == AccountIdentity.makeID(providerID: id, identityKey: parsed.userID) {
+            try credentials.removeSecret(for: "cursor/session")
+        }
+        try storage.removeKey(accountID: accountID)
+    }
+
+    public func renameSessionToken(accountID: String, label: String?) throws {
+        try storage.renameKey(accountID: accountID, label: label)
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
-        guard let raw = try credentials.secret(for: "cursor/session"),
+        let stored = try credentials.secret(for: storage.credentialKey(account.id))
+        guard let raw = try stored ?? credentials.secret(for: "cursor/session"),
               let parsed = parseToken(raw) else { throw ProviderError.notLoggedIn }
         let headers = [
             "Authorization": "Bearer \(parsed.jwt)",
@@ -647,37 +710,58 @@ public struct CursorProvider: UsageProvider {
         var windows: [UsageWindow] = []
         var identity = account.account
         var credits: Double?
-        var fetchError: Error?
-
-        if let usage = try? await AdapterHTTP.postJSON(
+        guard let usage = try await AdapterHTTP.postJSON(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
-            body: [:], headers: headers, http: http) as? [String: Any],
-           let plan = usage["planUsage"] as? [String: Any] ?? usage["plan_usage"] as? [String: Any] {
-            let reset = ((usage["billingCycleEnd"] ?? usage["billing_cycle_end"]) as? String)
-                .flatMap { ISO8601DateFormatter().date(from: $0) }
-            let used = adapterNum(plan, ["used", "requestsUsed", "numRequests"])
-            let limit = adapterNum(plan, ["limit", "maxRequestUsage", "numRequestsTotal"])
-            if used != nil || limit != nil {
+            body: [:], headers: headers, http: http) as? [String: Any] else {
+            throw ProviderError.badResponse("Cursor usage")
+        }
+        let reset = usage["billingCycleEnd"]
+        if let plan = usage["planUsage"] as? [String: Any] {
+            if let percent = adapterNum(plan, ["totalPercentUsed"]),
+               let window = percentWindow("cursor.plan", "Plan", used: percent, resetsAt: reset) {
+                windows.append(window)
+            } else if let limit = adapterNum(plan, ["limit"]),
+                      let used = adapterNum(plan, ["totalSpend"])
+                        ?? adapterNum(plan, ["remaining"]).map({ limit - $0 }) {
                 windows.append(UsageWindow(
-                    id: "cursor.requests", label: "Requests", kind: .requests,
-                    used: used, limit: limit, resetsAt: reset))
+                    id: "cursor.plan", label: "Plan", kind: .credits,
+                    used: used / 100, limit: limit / 100, unit: "USD",
+                    resetsAt: percentWindow("date", "", used: 0, resetsAt: reset)?.resetsAt))
             }
-        } else {
-            fetchError = ProviderError.badResponse("GetCurrentPeriodUsage failed")
+            for (key, label) in [("autoPercentUsed", "Cursor Models"), ("apiPercentUsed", "Other Models")] {
+                if let window = percentWindow("cursor.\(key)", label, used: plan[key], resetsAt: reset) {
+                    windows.append(window)
+                }
+            }
         }
 
         if let plan = try? await AdapterHTTP.postJSON(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo",
             body: [:], headers: headers, http: http) as? [String: Any] {
-            identity.plan = (plan["planName"] ?? plan["plan_name"]) as? String
+            identity.plan = (plan["planInfo"] as? [String: Any])?["planName"] as? String
+                ?? plan["planName"] as? String
         }
         if let grants = try? await AdapterHTTP.postJSON(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCreditGrantsBalance",
             body: [:], headers: headers, http: http) as? [String: Any] {
-            credits = adapterNum(grants, ["totalBalance", "total_balance", "balance"])
+            if let total = adapterNum(grants, ["totalCents"]),
+               let used = adapterNum(grants, ["usedCents"]) {
+                credits = max(0, total - used) / 100
+            }
         }
 
-        if windows.isEmpty && credits == nil, let fetchError { throw fetchError }
+        if windows.isEmpty {
+            let summary = try await AdapterHTTP.getJSON("https://cursor.com/api/usage-summary",
+                headers: ["Cookie": "WorkosCursorSessionToken=\(parsed.userID)%3A%3A\(parsed.jwt)"], http: http)
+            if let summary = summary as? [String: Any],
+               let individual = summary["individualUsage"] as? [String: Any],
+               let plan = individual["plan"] as? [String: Any],
+               let window = percentWindow("cursor.plan", "Plan", used: plan["totalPercentUsed"],
+                                          resetsAt: summary["billingCycleEnd"]) {
+                windows.append(window)
+            }
+        }
+        if windows.isEmpty && credits == nil { throw ProviderError.badResponse("no Cursor quota fields") }
         return UsageSnapshot(
             account: identity, providerID: id, windows: windows,
             creditsRemaining: credits, creditsUnit: "$")

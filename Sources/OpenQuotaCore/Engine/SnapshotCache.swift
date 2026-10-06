@@ -25,6 +25,9 @@ public struct SnapshotCache: Sendable {
 
     public func save(_ snapshots: [String: UsageSnapshot]) throws {
         let data = try JSONEncoder.openQuota.encode(snapshots)
+        guard data.count <= Self.maxBytes else {
+            throw ProviderError.badResponse("snapshot cache exceeds 256 KB")
+        }
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)

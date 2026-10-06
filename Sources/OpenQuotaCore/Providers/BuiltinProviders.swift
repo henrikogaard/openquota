@@ -17,7 +17,8 @@ public enum BuiltinProviders {
         map: {
             var map = ProviderSpec.FieldMap()
             map.creditsRemaining = "$.data.total_credits"
-            map.creditsUnit = nil // credits unit is implied USD on OpenRouter
+            map.creditsUsed = "$.data.total_usage"
+            map.creditsUnitLabel = "USD"
             return map
         }(),
         windows: [
@@ -67,12 +68,14 @@ public struct ProviderRegistry: Sendable {
         adapters: [any UsageProvider]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
-        var list: [any UsageProvider] = (SpecLibrary.all + extraSpecs).map {
+        var seen = Set<String>()
+        let specs = (extraSpecs + SpecLibrary.all).filter { seen.insert($0.id).inserted }
+        var list: [any UsageProvider] = specs.map {
             GenericProvider(spec: $0, http: http, credentials: credentials)
         }
-        list.append(contentsOf: adapters
-            ?? Adapters.all(http: http, credentials: credentials))
-        list.append(contentsOf: CLIProviders.all(environment: environment))
+        list.append(contentsOf: (adapters
+            ?? Adapters.all(http: http, credentials: credentials)).filter { seen.insert($0.id).inserted })
+        list.append(contentsOf: CLIProviders.all(environment: environment).filter { seen.insert($0.id).inserted })
         self.providers = list
     }
 }

@@ -29,7 +29,10 @@ public struct ProviderSpec: Codable, Sendable {
         public var resetsAtFormat: String?
         /// Absolute remaining credit/currency amount and its unit.
         public var creditsRemaining: String?
+        /// Optional amount to subtract from creditsRemaining (purchased minus consumed).
+        public var creditsUsed: String?
         public var creditsUnit: String?
+        public var creditsUnitLabel: String?
 
         public init() {}
     }
@@ -95,7 +98,7 @@ public struct ProviderSpec: Codable, Sendable {
     public var identityKey: String?
     /// True when the endpoint/field mapping is from docs but not yet verified
     /// against a live account — surfaced as an "unverified" hint in Settings.
-    public var unverified: Bool = false
+    public var unverified: Bool = true
     public var map: FieldMap = FieldMap()
     public var windows: [WindowSpec] = []
 
@@ -104,7 +107,7 @@ public struct ProviderSpec: Codable, Sendable {
         method: String? = nil, body: String? = nil, headers: [String: String]? = nil,
         authHeader: String? = nil, authPrefix: String? = nil,
         dashboardURL: String? = nil, identityLabel: String? = nil, identityKey: String? = nil,
-        unverified: Bool = false,
+        unverified: Bool = true,
         map: FieldMap = FieldMap(), windows: [WindowSpec] = []
     ) {
         self.id = id
@@ -123,6 +126,35 @@ public struct ProviderSpec: Codable, Sendable {
         self.map = map
         self.windows = windows
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, displayName, url, method, body, headers, auth, authHeader, authPrefix
+        case dashboardURL, identityLabel, identityKey, unverified, map, windows
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try c.decode(String.self, forKey: .id)
+        guard !id.isEmpty, id.count <= 80,
+              id.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else {
+            throw DecodingError.dataCorruptedError(forKey: .id, in: c, debugDescription: "Invalid provider ID")
+        }
+        self.init(
+            id: id, displayName: try c.decode(String.self, forKey: .displayName),
+            url: try c.decode(String.self, forKey: .url),
+            auth: try c.decodeIfPresent(AuthType.self, forKey: .auth) ?? .bearer,
+            method: try c.decodeIfPresent(String.self, forKey: .method),
+            body: try c.decodeIfPresent(String.self, forKey: .body),
+            headers: try c.decodeIfPresent([String: String].self, forKey: .headers),
+            authHeader: try c.decodeIfPresent(String.self, forKey: .authHeader),
+            authPrefix: try c.decodeIfPresent(String.self, forKey: .authPrefix),
+            dashboardURL: try c.decodeIfPresent(String.self, forKey: .dashboardURL),
+            identityLabel: try c.decodeIfPresent(String.self, forKey: .identityLabel),
+            identityKey: try c.decodeIfPresent(String.self, forKey: .identityKey),
+            unverified: try c.decodeIfPresent(Bool.self, forKey: .unverified) ?? true,
+            map: try c.decodeIfPresent(FieldMap.self, forKey: .map) ?? FieldMap(),
+            windows: try c.decodeIfPresent([WindowSpec].self, forKey: .windows) ?? [])
+    }
 }
 
 /// Tiny JSON-pointer-lite reader: "$.a.b[0].c" against a JSONSerialization tree.
@@ -140,7 +172,7 @@ public enum JSONPath {
         var current = root
         var path = path
         if path.hasPrefix("$") { path = String(path.dropFirst()) }
-        var parts = path.split(separator: ".").map(String.init).filter { !$0.isEmpty }
+        let parts = path.split(separator: ".").map(String.init).filter { !$0.isEmpty }
         var i = 0
         while i < parts.count {
             var part = parts[i]
@@ -209,17 +241,17 @@ public enum JSONPath {
                 if let n = element as? NSNumber { total += n.doubleValue; found = true }
                 else if let s = element as? String, let d = Double(s) { total += d; found = true }
             }
-            return found ? total : nil
+            return found && total.isFinite ? total : nil
         }
-        if let n = raw as? NSNumber { return n.doubleValue }
-        if let s = raw as? String { return Double(s) }
+        if let n = raw as? NSNumber, n.doubleValue.isFinite { return n.doubleValue }
+        if let s = raw as? String, let n = Double(s), n.isFinite { return n }
         return nil
     }
 
     public static func double(_ root: Any?, at path: String?) -> Double? {
         guard let path, let raw = value(root, at: path) else { return nil }
-        if let n = raw as? NSNumber { return n.doubleValue }
-        if let s = raw as? String { return Double(s) }
+        if let n = raw as? NSNumber, n.doubleValue.isFinite { return n.doubleValue }
+        if let s = raw as? String, let n = Double(s), n.isFinite { return n }
         return nil
     }
 

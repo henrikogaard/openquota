@@ -11,13 +11,21 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text("OpenQuota").font(.headline)
+                Spacer()
+                if model.isDemo { Text("Demo data").font(.caption).foregroundStyle(.secondary) }
+                else { Text("\(model.snapshots.count) accounts").font(.caption).foregroundStyle(.secondary) }
+            }.padding(12)
+            Divider()
             if model.snapshots.isEmpty {
                 emptyState
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(model.snapshots, id: \.account.id) { snapshot in
-                            AccountCard(snapshot: snapshot)
+                            AccountCard(snapshot: snapshot, providerName: model.providerName(snapshot.providerID),
+                                        dashboardURL: model.dashboardURL(snapshot.providerID))
                         }
                     }
                     .padding(12)
@@ -26,6 +34,9 @@ struct PopoverView: View {
             }
 
             Divider()
+            if let status = model.statusMessage {
+                Text(status).font(.caption).foregroundStyle(.orange).padding(8)
+            }
             footer
         }
     }
@@ -53,6 +64,7 @@ struct PopoverView: View {
             }
             .keyboardShortcut("r")
             .help("Refresh now")
+            .disabled(model.refreshing || model.isDemo)
             if model.refreshing { ProgressView().scaleEffect(0.5).frame(width: 12, height: 12) }
             Spacer()
             Menu {
@@ -78,6 +90,8 @@ struct PopoverView: View {
 /// One provider-account card.
 struct AccountCard: View {
     var snapshot: UsageSnapshot
+    var providerName: String
+    var dashboardURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -99,6 +113,14 @@ struct AccountCard: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+            HStack {
+                Text("Updated \(snapshot.fetchedAt, style: .relative) ago")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                if let dashboardURL {
+                    Link("Usage page", destination: dashboardURL).font(.caption2)
+                }
+            }
         }
         .padding(10)
         .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
@@ -106,10 +128,11 @@ struct AccountCard: View {
 
     private var header: some View {
         HStack {
-            Text(snapshot.providerID.capitalized)
+            Text(providerName)
                 .font(.headline)
             if let label = snapshot.account.label {
                 Text(label).font(.subheadline).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
             }
             if snapshot.isStale {
                 Text("Outdated")
@@ -141,13 +164,16 @@ struct WindowRow: View {
                 Text(window.label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if let remaining = window.percentRemaining {
-                    Text("\(Int(remaining))% left")
+                    Text("\(remaining.formatted(.number.precision(.fractionLength(0...1))))% left")
                         .font(.caption)
                         .monospacedDigit()
                 } else if let remaining = window.remaining {
                     Text("\(format(remaining)) \(window.unit ?? "") left")
                         .font(.caption)
                         .monospacedDigit()
+                } else if let used = window.used {
+                    Text("\(format(used)) \(window.unit ?? "") used")
+                        .font(.caption).monospacedDigit()
                 }
             }
             if let fraction = window.fractionUsed {
@@ -156,9 +182,10 @@ struct WindowRow: View {
                     .scaleEffect(x: 1, y: 0.7, anchor: .center)
             }
             if let resetsAt = window.resetsAt {
-                Text("Resets \(resetsAt, style: .relative)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                Group {
+                    if resetsAt > Date() { Text("Resets in \(resetsAt, style: .relative)") }
+                    else { Text("Reset due · Refresh usage") }
+                }.font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
