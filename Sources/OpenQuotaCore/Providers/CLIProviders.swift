@@ -189,9 +189,11 @@ private final class CLIProcessRun: @unchecked Sendable {
         guard !finished else {
             lock.unlock()
             readSource.setEventHandler {}
+            readSource.setCancelHandler {
+                readHandle.closeFile()
+            }
             readSource.resume()
             readSource.cancel()
-            readHandle.closeFile()
             stdout.fileHandleForWriting.closeFile()
             return
         }
@@ -330,12 +332,18 @@ private final class CLIProcessRun: @unchecked Sendable {
         watchdog?.setEventHandler {}
         watchdog?.cancel()
         readSource?.setEventHandler {}
-        readSource?.cancel()
 
-        // Wait for an in-flight reader before closing its descriptor.
+        // Invalidate the descriptor before allowing the source to close it.
         readLock.lock()
         readLock.unlock()
-        readHandle?.closeFile()
+        if let readSource {
+            if let readHandle {
+                readSource.setCancelHandler {
+                    readHandle.closeFile()
+                }
+            }
+            readSource.cancel()
+        }
         process?.terminationHandler = nil
         if let process, process.isRunning {
             process.terminate()
@@ -361,10 +369,16 @@ private final class CLIProcessRun: @unchecked Sendable {
         lock.unlock()
 
         readSource?.setEventHandler {}
-        readSource?.cancel()
         readLock.lock()
         readLock.unlock()
-        readHandle?.closeFile()
+        if let readSource {
+            if let readHandle {
+                readSource.setCancelHandler {
+                    readHandle.closeFile()
+                }
+            }
+            readSource.cancel()
+        }
     }
 }
 

@@ -182,7 +182,7 @@ final class SpecLibraryTests: XCTestCase {
         XCTAssertTrue(GenericProvider(
             spec: SpecLibrary.zai, http: RecordingHTTP(),
             credentials: FileCredentialStore(directory: tempDir())).unverified)
-        XCTAssertFalse(GenericProvider(
+        XCTAssertTrue(GenericProvider(
             spec: BuiltinProviders.openRouter, http: RecordingHTTP(),
             credentials: FileCredentialStore(directory: tempDir())).unverified)
     }

@@ -273,7 +273,7 @@ public enum SpecLibrary {
         ]
     )
 
-    /// Full bundled library: the two verified specs + the doc-mapped tail.
+    /// Full bundled library: the two fixture-tested specs + the doc-mapped tail.
     public static let all: [ProviderSpec] = [
         BuiltinProviders.openRouter,
         BuiltinProviders.requesty,
