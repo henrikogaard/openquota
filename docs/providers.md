@@ -97,6 +97,9 @@ provides an organization balance. Neither is relabeled as a subscription quota.
 
 Any "credential + JSON endpoint" provider can be added without code:
 
+Save the array in `~/Library/Application Support/openquota/provider-specs.json`,
+then quit and relaunch OpenQuota. Editing the file does not hot-reload definitions.
+
 ```json
 [
   {

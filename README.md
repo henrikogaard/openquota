@@ -32,7 +32,7 @@ Each saved key/session has its own row. Local providers discover their default C
 
 These implementations are fixture-tested, **not a claim that every provider has been verified with a live paid account**. Private endpoints may change; errors retain the last good reading and mark it outdated. Additional generic integrations are labeled unverified. CLI integrations are experimental and depend on the installed CLI supporting the specified JSON command.
 
-Custom providers are added by dropping a `ProviderSpec` JSON into `~/Library/Application Support/openquota/provider-specs.json` — no code needed for any bearer-key + JSON-usage-endpoint service.
+Custom providers are added by dropping a `ProviderSpec` JSON array into `~/Library/Application Support/openquota/provider-specs.json` — no code needed for bearer-key + JSON-usage-endpoint services. Quit and relaunch OpenQuota after editing the file to load the new definitions.
 
 ## Build & run
 
@@ -65,7 +65,7 @@ Requests time out, HTTP response bodies are capped at 2 MiB on macOS, local cred
 
 Sparkle 2.x, same setup as linkrouter: the app checks `releases/latest/download/appcast.xml` (EdDSA-signed updates), and each `v*` tag runs `release.yml` — sign (Developer ID) → notarize → dmg → appcast → GitHub release.
 
-Release secrets/vars to configure on the repo (same values as linkrouter):
+Release secrets/vars to configure on the repo (Apple signing credentials may be shared with linkrouter; use OpenQuota's own Sparkle key):
 `DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`, `APPSTORE_API_PRIVATE_KEY` (secrets); `APPLE_TEAM_ID`, `APPSTORE_API_KEY_ID`, `APPSTORE_ISSUER_ID` (vars); `SPARKLE_PRIVATE_ED_KEY` (secret — EdDSA private key matching the public key in `Resources/Info.plist`).
 
 Only tag an approved release after configuring signing/notarization and update-signing credentials. A development ad-hoc bundle is not a signed, notarized distribution. A successful appcast request is not evidence of a successful update installation.
