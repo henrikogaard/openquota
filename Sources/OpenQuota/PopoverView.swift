@@ -15,7 +15,10 @@ struct PopoverView: View {
                 Text("OpenQuota").font(.headline)
                 Spacer()
                 if model.isDemo { Text("Demo data").font(.caption).foregroundStyle(.secondary) }
-                else { Text("\(model.snapshots.count) accounts").font(.caption).foregroundStyle(.secondary) }
+                else {
+                    Text(model.snapshots.count == 1 ? "1 account" : "\(model.snapshots.count) accounts")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(12)
             Divider()
             if model.snapshots.isEmpty {
@@ -30,7 +33,8 @@ struct PopoverView: View {
                     }
                     .padding(12)
                 }
-                .frame(maxHeight: 480)
+                // A window-style MenuBarExtra cannot infer a lazy scroll view's initial height.
+                .frame(height: 480)
             }
 
             Divider()
@@ -148,9 +152,7 @@ struct AccountCard: View {
     }
 
     private func formatAmount(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", value)
-            : String(format: "%.2f", value)
+        value.formatted(.number.precision(.fractionLength(0...2)))
     }
 }
 
@@ -197,9 +199,7 @@ struct WindowRow: View {
     }
 
     private func format(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", value)
-            : String(format: "%.1f", value)
+        value.formatted(.number.precision(.fractionLength(0...1)))
     }
 }
 #endif
