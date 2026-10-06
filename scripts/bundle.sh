@@ -56,10 +56,15 @@ fi
 # --- Sign ---
 # Sign the framework first (deep is safe now that XPC services are gone), then
 # the outer app WITHOUT --deep so the framework signature is preserved.
+# --options runtime requires a real identity: on an ad-hoc signature it turns
+# on library validation with no Team ID and dyld kills the app at launch.
+SIGN_OPTS=()
+[[ "$IDENTITY" != "-" ]] && SIGN_OPTS=(--options runtime --timestamp)
 if [[ -d "$FRAMEWORKS/Sparkle.framework" ]]; then
-    codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" \
+    # ${arr[@]+...} keeps empty-array expansion legal under bash 3.2 + set -u.
+    codesign --force --deep ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --sign "$IDENTITY" \
         "$FRAMEWORKS/Sparkle.framework"
 fi
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+codesign --force ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --sign "$IDENTITY" "$APP"
 
 echo "==> done: $APP"

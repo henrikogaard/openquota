@@ -4,6 +4,7 @@ import Sparkle
 
 /// Sparkle auto-updates — same setup as LinkRouter: appcast attached to each
 /// GitHub release, EdDSA-signed, background checks on.
+@MainActor
 final class UpdateController {
     static let shared = UpdateController()
 

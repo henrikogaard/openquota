@@ -25,7 +25,7 @@ final class AppModel {
         boot()
     }
 
-    static var appSupportDir: URL {
+    nonisolated static var appSupportDir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first!
             .appendingPathComponent("openquota", isDirectory: true)
@@ -42,7 +42,7 @@ final class AppModel {
         }
         rebuildProviders()
         scheduler = RefreshScheduler(providers: providers, store: store)
-        scheduler?.start()
+        Task { [scheduler] in await scheduler?.start() }
         observeTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pullFromStore()

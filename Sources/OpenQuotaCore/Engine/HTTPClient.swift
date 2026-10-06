@@ -54,7 +54,7 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
         #if os(macOS)
         config.waitsForConnectivity = false
         config.httpCookieStorage = nil
-        config.httpCredentialStorage = nil
+        config.urlCredentialStorage = nil
         #endif
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: config)
