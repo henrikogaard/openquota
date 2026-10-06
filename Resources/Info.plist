@@ -27,7 +27,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/henrikogaard/openquota/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>/JihAKfA6s9thdEHAoB0Tx4PECwBuVgomah2NLVsZGI=</string>
+	<string>w8+fbgfjP4TjfVrSoAhavFcBCLS35OFr2fKsMnodvG4=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 </dict>

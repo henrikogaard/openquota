@@ -42,7 +42,7 @@ For development: `swift run` shows the menu-bar item without an app bundle (icon
 Sparkle 2.x, same setup as linkrouter: the app checks `releases/latest/download/appcast.xml` (EdDSA-signed updates), and each `v*` tag runs `release.yml` — sign (Developer ID) → notarize → dmg → appcast → GitHub release.
 
 Release secrets/vars to configure on the repo (same values as linkrouter):
-`DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`, `APPSTORE_API_PRIVATE_KEY` (secrets); `APPLE_TEAM_ID`, `APPSTORE_API_KEY_ID`, `APPSTORE_ISSUER_ID` (vars); `SPARKLE_PRIVATE_ED_KEY` (secret — same EdDSA pair as LinkRouter; public key is already in `Resources/Info.plist`).
+`DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`, `APPSTORE_API_PRIVATE_KEY` (secrets); `APPLE_TEAM_ID`, `APPSTORE_API_KEY_ID`, `APPSTORE_ISSUER_ID` (vars); `SPARKLE_PRIVATE_ED_KEY` (secret — EdDSA private key matching the public key in `Resources/Info.plist`).
 
 Ship a release: `git tag v0.1.0 && git push origin v0.1.0`.
 
