@@ -7,6 +7,9 @@ public struct GenericProvider: UsageProvider {
     public var id: String { spec.id }
     public var displayName: String { spec.displayName }
     public var dashboardURL: URL? { spec.dashboardURL.flatMap(URL.init(string:)) }
+    /// True when the spec's endpoint/field mapping hasn't been verified
+    /// against a live account — Settings shows an "unverified" hint.
+    public var unverified: Bool { spec.unverified }
 
     private let http: any HTTPClient
     private let credentials: any CredentialStore
@@ -51,7 +54,8 @@ public struct GenericProvider: UsageProvider {
             throw ProviderError.unauthorized
         }
         let headers = authHeaders(key: key)
-        let root = try await fetchJSON(url: spec.url, headers: headers)
+        let root = try await fetchJSON(
+            url: spec.url, method: spec.method, body: spec.body, headers: headers)
 
         // Account label/plan come from the identity paths when configured.
         var identity = account.account
@@ -64,7 +68,11 @@ public struct GenericProvider: UsageProvider {
                 // A window may point at a separate endpoint; default = shared url.
                 let body: Any?
                 if let url = windowSpec.url {
-                    body = try await fetchJSON(url: url, headers: headers)
+                    var windowHeaders = headers
+                    windowSpec.headers?.forEach { windowHeaders[$0] = $1 }
+                    body = try await fetchJSON(
+                        url: url, method: windowSpec.method, body: windowSpec.body,
+                        headers: windowHeaders)
                 } else {
                     body = root
                 }
@@ -72,9 +80,9 @@ public struct GenericProvider: UsageProvider {
                     id: "\(spec.id).\(windowSpec.label.lowercased())",
                     label: windowSpec.label,
                     kind: windowSpec.kind ?? .consumption,
-                    used: JSONPath.double(body, at: windowSpec.used),
-                    limit: JSONPath.double(body, at: windowSpec.limit),
-                    remaining: JSONPath.double(body, at: windowSpec.remaining),
+                    used: numeric(body, at: windowSpec.used),
+                    limit: numeric(body, at: windowSpec.limit),
+                    remaining: numeric(body, at: windowSpec.remaining),
                     unit: windowSpec.unit,
                     resetsAt: JSONPath.date(body, at: windowSpec.resetsAt,
                                             format: windowSpec.resetsAtFormat)
@@ -84,9 +92,9 @@ public struct GenericProvider: UsageProvider {
             // Single-window shorthand via the top-level field map.
             windows.append(UsageWindow(
                 id: spec.id, label: spec.displayName,
-                used: JSONPath.double(root, at: spec.map.used),
-                limit: JSONPath.double(root, at: spec.map.limit),
-                remaining: JSONPath.double(root, at: spec.map.remaining),
+                used: numeric(root, at: spec.map.used),
+                limit: numeric(root, at: spec.map.limit),
+                remaining: numeric(root, at: spec.map.remaining),
                 resetsAt: JSONPath.date(root, at: spec.map.resetsAt,
                                         format: spec.map.resetsAtFormat)
             ))
@@ -96,7 +104,7 @@ public struct GenericProvider: UsageProvider {
             account: identity,
             providerID: spec.id,
             windows: windows,
-            creditsRemaining: JSONPath.double(root, at: spec.map.creditsRemaining),
+            creditsRemaining: numeric(root, at: spec.map.creditsRemaining),
             creditsUnit: JSONPath.string(root, at: spec.map.creditsUnit)
         )
     }
@@ -148,17 +156,65 @@ public struct GenericProvider: UsageProvider {
     // MARK: - HTTP
 
     private func authHeaders(key: String) -> [String: String] {
+        var headers: [String: String]
         switch spec.auth {
-        case .bearer: return ["Authorization": "Bearer \(key)"]
-        case .apiKeyHeader: return ["x-api-key": key]
+        case .bearer:
+            headers = ["Authorization": "Bearer \(key)"]
+        case .apiKeyHeader:
+            headers = ["x-api-key": key]
+        case .header:
+            let name = spec.authHeader ?? "Authorization"
+            headers = [name: "\(spec.authPrefix ?? "")\(key)"]
+        case .cookie:
+            headers = ["Cookie": key]
         }
+        spec.headers?.forEach { headers[$0] = $1 }
+        return headers
     }
 
-    private func fetchJSON(url: String, headers: [String: String]) async throws -> Any {
-        guard let url = URL(string: url) else { throw ProviderError.badResponse("bad URL \(url)") }
-        let response = try await http.send(HTTPRequest(url: url, headers: headers))
-        let body = try requireOK(response)
-        guard let json = try? JSONSerialization.jsonObject(with: body) else {
+    /// A numeric path may be prefixed "sum:" to total wildcard-flattened
+    /// leaves (e.g. "sum:$.data[*].results[*].amount.value").
+    private func numeric(_ root: Any?, at path: String?) -> Double? {
+        guard let path else { return nil }
+        if path.hasPrefix("sum:") {
+            return JSONPath.sum(root, at: String(path.dropFirst(4)))
+        }
+        return JSONPath.double(root, at: path)
+    }
+
+    /// Substitutes {now}, {today}, {d7}, {d30} epoch-seconds templates in URLs.
+    private func resolveURL(_ template: String) -> String {
+        let now = Date()
+        var url = template
+            .replacingOccurrences(of: "{now}", with: String(Int(now.timeIntervalSince1970)))
+            .replacingOccurrences(of: "{d7}", with: String(Int(now.timeIntervalSince1970) - 7 * 86400))
+            .replacingOccurrences(of: "{d30}", with: String(Int(now.timeIntervalSince1970) - 30 * 86400))
+        if url.contains("{today}") {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "UTC")!
+            let start = calendar.startOfDay(for: now)
+            url = url.replacingOccurrences(
+                of: "{today}", with: String(Int(start.timeIntervalSince1970)))
+        }
+        return url
+    }
+
+    private func fetchJSON(
+        url template: String, method: String? = nil, body: String? = nil,
+        headers: [String: String]
+    ) async throws -> Any {
+        guard let url = URL(string: resolveURL(template)) else {
+            throw ProviderError.badResponse("bad URL \(template)")
+        }
+        var request = HTTPRequest(url: url, headers: headers)
+        request.method = method ?? "GET"
+        if let body { request.body = Data(body.utf8) }
+        if request.method != "GET" && request.headers["Content-Type"] == nil {
+            request.headers["Content-Type"] = "application/json"
+        }
+        let response = try await http.send(request)
+        let data = try requireOK(response)
+        guard let json = try? JSONSerialization.jsonObject(with: data) else {
             throw ProviderError.badResponse("not JSON")
         }
         return json

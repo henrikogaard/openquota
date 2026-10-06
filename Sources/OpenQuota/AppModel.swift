@@ -105,5 +105,31 @@ final class AppModel {
     func specProviders() -> [GenericProvider] {
         providers.compactMap { $0 as? GenericProvider }
     }
+
+    /// Providers that read local credentials / CLIs instead of stored keys.
+    /// Returns (displayName, accountCount, dashboardURL) for the Settings
+    /// "detected" list — cheap local checks, no network.
+    func detectedLocalProviders() async -> [(id: String, name: String, accounts: Int)] {
+        var out: [(String, String, Int)] = []
+        for provider in providers where !(provider is GenericProvider) {
+            let count = (try? await provider.accounts())?.count ?? 0
+            out.append((provider.id, provider.displayName, count))
+        }
+        return out
+    }
+
+    /// Settings: register a pasted session token (Cursor's userID::jwt cookie).
+    func addSessionToken(_ raw: String, provider: any UsageProvider) throws {
+        guard let cursor = provider as? CursorProvider else {
+            throw ProviderError.badResponse("provider doesn't take session tokens")
+        }
+        _ = try cursor.addSessionToken(raw)
+        Task { await refreshNow() }
+    }
+
+    /// Non-spec providers the Settings UI can offer token entry for.
+    func tokenProviders() -> [any UsageProvider] {
+        providers.filter { $0 is CursorProvider }
+    }
 }
 #endif

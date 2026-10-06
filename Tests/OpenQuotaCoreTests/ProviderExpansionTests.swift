@@ -1,0 +1,496 @@
+import XCTest
+@testable import OpenQuotaCore
+
+/// Captures requests and returns canned responses keyed by URL substring.
+final class RecordingHTTP: HTTPClient, @unchecked Sendable {
+    var requests: [HTTPRequest] = []
+    var responses: [(match: String, response: HTTPResponse)] = []
+    var defaultBody = "{}"
+
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        requests.append(request)
+        for (match, response) in responses
+        where request.url.absoluteString.contains(match) {
+            return response
+        }
+        return HTTPResponse(status: 200, headers: [:], body: Data(defaultBody.utf8))
+    }
+
+    func stub(_ urlPart: String, status: Int = 200, body: String,
+              headers: [String: String] = [:]) {
+        responses.append((urlPart, HTTPResponse(
+            status: status, headers: headers, body: Data(body.utf8))))
+    }
+}
+
+final class JSONPathExtensionTests: XCTestCase {
+    func test_wildcardFlattenAndKeyAccess() {
+        let root: [String: Any] = [
+            "data": [
+                ["amount": ["value": 1.5]],
+                ["amount": ["value": 2.0]],
+            ]
+        ]
+        XCTAssertEqual(JSONPath.sum(root, at: "$.data[*].amount.value"), 3.5)
+    }
+
+    func test_keyValueFilter() {
+        let root: [String: Any] = [
+            "limits": [
+                ["type": "TIME_LIMIT", "percentage": 80],
+                ["type": "TOKENS_LIMIT", "percentage": 60],
+            ]
+        ]
+        XCTAssertEqual(
+            JSONPath.double(root, at: "$.limits[type=TOKENS_LIMIT].percentage"), 60)
+    }
+
+    func test_epochMillisDate() {
+        let root: [String: Any] = ["t": 1_800_000_000_000.0]
+        XCTAssertEqual(
+            JSONPath.date(root, at: "$.t", format: "epochMillis"),
+            Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    func test_sumOnScalarAndStrings() {
+        let root: [String: Any] = ["v": "2.5", "xs": [1, "2", 3.5]]
+        XCTAssertEqual(JSONPath.sum(root, at: "$.v"), 2.5)
+        XCTAssertEqual(JSONPath.sum(root, at: "$.xs"), 6.5)
+    }
+}
+
+final class SpecLibraryTests: XCTestCase {
+    private func makeProvider(
+        _ spec: ProviderSpec, dir: URL
+    ) throws -> (GenericProvider, RecordingHTTP) {
+        let http = RecordingHTTP()
+        let credentials = FileCredentialStore(directory: dir)
+        let provider = GenericProvider(
+            spec: spec, http: http, credentials: credentials,
+            manifestURL: dir.appendingPathComponent("\(spec.id)-keys.json"))
+        _ = try provider.addKey("sk-test", label: "test")
+        return (provider, http)
+    }
+
+    private func tempDir() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+    }
+
+    func test_everyLibrarySpecHasADisplayNameAndWindows() {
+        for spec in SpecLibrary.all {
+            XCTAssertFalse(spec.displayName.isEmpty, spec.id)
+            XCTAssertFalse(spec.url.isEmpty, spec.id)
+            XCTAssertFalse(spec.windows.isEmpty, "\(spec.id) has no windows")
+        }
+    }
+
+    func test_deepseekBalance() async throws {
+        let dir = tempDir()
+        let (provider, http) = try makeProvider(SpecLibrary.deepseek, dir: dir)
+        http.defaultBody = """
+            {"is_available":true,"balance_infos":[
+              {"currency":"USD","total_balance":"7.25","granted_balance":"0","topped_up_balance":"7.25"}]}
+            """
+        let accounts = try await provider.accounts()
+        let snapshot = try await provider.refresh(account: accounts[0])
+        XCTAssertEqual(snapshot.creditsRemaining, 7.25)
+        XCTAssertEqual(snapshot.windows[0].remaining, 7.25)
+        XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer sk-test")
+    }
+
+    func test_elevenLabsUsesCustomHeaderAndParsesQuota() async throws {
+        let dir = tempDir()
+        let (provider, http) = try makeProvider(SpecLibrary.elevenLabs, dir: dir)
+        http.defaultBody = """
+            {"tier":"free","character_count":2500,"character_limit":10000,
+             "next_character_count_reset_unix":1800000000}
+            """
+        let snapshot = try await provider.refresh(account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.account.plan, "free")
+        let window = snapshot.windows[0]
+        XCTAssertEqual(window.used, 2500)
+        XCTAssertEqual(window.limit, 10000)
+        XCTAssertEqual(window.percentRemaining, 75)
+        XCTAssertNotNil(window.resetsAt)
+        XCTAssertEqual(http.requests[0].headers["xi-api-key"], "sk-test")
+        XCTAssertNil(http.requests[0].headers["Authorization"])
+    }
+
+    func test_zaiFiltersLimitsByType() async throws {
+        let dir = tempDir()
+        let (provider, http) = try makeProvider(SpecLibrary.zai, dir: dir)
+        http.defaultBody = """
+            {"code":200,"data":{"limits":[
+              {"type":"TIME_LIMIT","percentage":82,"nextResetTime":1800000000000},
+              {"type":"TOKENS_LIMIT","percentage":45,"nextResetTime":1800000000000},
+              {"type":"WEB_SEARCH","percentage":90}]}}
+            """
+        let snapshot = try await provider.refresh(account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.windows.count, 3)
+        XCTAssertEqual(snapshot.windows[0].remaining, 82)
+        XCTAssertEqual(snapshot.windows[1].remaining, 45)
+        XCTAssertEqual(snapshot.windows[0].resetsAt,
+                       Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    func test_warpPostsGraphQLBody() async throws {
+        let dir = tempDir()
+        let (provider, http) = try makeProvider(SpecLibrary.warp, dir: dir)
+        http.defaultBody = """
+            {"data":{"requestLimitInfo":{"isUnlimited":false,"requestLimit":2500,
+              "requestsUsedSincePeriodStart":400,
+              "nextLimitResetTime":"2027-01-01T00:00:00Z"}}}
+            """
+        let snapshot = try await provider.refresh(account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.windows[0].used, 400)
+        XCTAssertEqual(snapshot.windows[0].limit, 2500)
+        let request = try XCTUnwrap(http.requests.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertNotNil(request.body)
+        XCTAssertEqual(request.headers["Content-Type"], "application/json")
+    }
+
+    func test_openAIAdminSumsBucketsAndSubstitutesURL() async throws {
+        let dir = tempDir()
+        let (provider, http) = try makeProvider(SpecLibrary.openAIAdmin, dir: dir)
+        http.defaultBody = """
+            {"object":"page","data":[
+              {"results":[{"amount":{"value":1.5,"currency":"usd"}},
+                          {"amount":{"value":0.5,"currency":"usd"}}]},
+              {"results":[{"amount":{"value":2.0,"currency":"usd"}}]}],
+             "has_more":false}
+            """
+        let snapshot = try await provider.refresh(account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.windows[0].used, 4.0)
+        // {d30} template substituted with epoch seconds.
+        let url = http.requests[0].url.absoluteString
+        XCTAssertTrue(url.contains("start_time="), url)
+        XCTAssertFalse(url.contains("{d30}"), url)
+    }
+
+    func test_perplexityCookieAuthHeader() async throws {
+        let dir = tempDir()
+        let (provider, http) = try makeProvider(SpecLibrary.perplexity, dir: dir)
+        http.defaultBody = #"{"data":{"credits":42}}"#
+        _ = try await provider.refresh(account: try provider.accounts()[0])
+        XCTAssertEqual(http.requests[0].headers["Cookie"], "sk-test")
+        XCTAssertNil(http.requests[0].headers["Authorization"])
+    }
+
+    func test_unverifiedFlagPropagates() {
+        XCTAssertTrue(GenericProvider(
+            spec: SpecLibrary.zai, http: RecordingHTTP(),
+            credentials: FileCredentialStore(directory: tempDir())).unverified)
+        XCTAssertFalse(GenericProvider(
+            spec: BuiltinProviders.openRouter, http: RecordingHTTP(),
+            credentials: FileCredentialStore(directory: tempDir())).unverified)
+    }
+}
+
+final class AdapterTests: XCTestCase {
+    private func tempHome() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".codex"), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".gemini"), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".grok"), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".local/share/opencode"),
+            withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".local/share/devin"),
+            withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".config/gh"), withIntermediateDirectories: true)
+        return url
+    }
+
+    private func write(_ home: URL, _ path: String, _ contents: String) throws {
+        try Data(contents.utf8).write(
+            to: home.appendingPathComponent(path))
+    }
+
+    func test_noFilesMeansNoAccounts() async throws {
+        let home = tempHome()
+        let files = LocalCredentialFiles(home: home)
+        let http = RecordingHTTP()
+        let creds = FileCredentialStore(
+            directory: home.appendingPathComponent("creds"))
+        for adapter in Adapters.all(http: http, credentials: creds, files: files) {
+            let found = try await adapter.accounts()
+            XCTAssertTrue(found.isEmpty, adapter.id)
+        }
+    }
+
+    func test_claudeReadsCredentialsAndMapsWindows() async throws {
+        let home = tempHome()
+        try write(home, ".claude/.credentials.json", """
+            {"claudeAiOauth":{"accessToken":"sk-ant-oat01-x",
+              "refreshToken":"rt","expiresAt":4102444800000}}
+            """)
+        let http = RecordingHTTP()
+        http.stub("api.anthropic.com", body: """
+            {"five_hour":{"utilization":25,"resets_at":"2027-01-01T00:00:00Z"},
+             "seven_day":{"utilization":10,"resets_at":"2027-01-08T00:00:00Z"},
+             "seven_day_sonnet":{"utilization":40}}
+            """)
+        let provider = ClaudeProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts[0].source, .configFile)
+        let snapshot = try await provider.refresh(account: accounts[0])
+        XCTAssertEqual(snapshot.windows.count, 3)
+        XCTAssertEqual(snapshot.windows[0].used, 25)
+        XCTAssertEqual(snapshot.windows[0].percentRemaining, 75)
+        let headers = http.requests[0].headers
+        XCTAssertEqual(headers["Authorization"], "Bearer sk-ant-oat01-x")
+        XCTAssertEqual(headers["anthropic-beta"], "oauth-2025-04-20")
+        // Token was fresh — no refresh call should have been issued.
+        XCTAssertEqual(http.requests.count, 1)
+    }
+
+    func test_claudeRefreshesExpiredToken() async throws {
+        let home = tempHome()
+        try write(home, ".claude/.credentials.json", """
+            {"claudeAiOauth":{"accessToken":"old",
+              "refreshToken":"rt","expiresAt":1000}}
+            """)
+        let http = RecordingHTTP()
+        http.stub("platform.claude.com", body: """
+            {"access_token":"new-token","refresh_token":"rt2","expires_in":3600}
+            """)
+        http.stub("api.anthropic.com", body: """
+            {"five_hour":{"utilization":5}}
+            """)
+        let provider = ClaudeProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        _ = try await provider.refresh(account: try provider.accounts()[0])
+        XCTAssertEqual(http.requests.count, 2)
+        XCTAssertTrue(http.requests[1].url.absoluteString.contains("anthropic"))
+        XCTAssertEqual(http.requests[1].headers["Authorization"], "Bearer new-token")
+        // The CLI's credential file was rewritten with the new token.
+        let rewritten = LocalCredentialFiles(home: home)
+            .readJSON(".claude/.credentials.json")?["claudeAiOauth"] as? [String: Any]
+        XCTAssertEqual(rewritten?["accessToken"] as? String, "new-token")
+    }
+
+    func test_codexMapsWindowsAndSendsAccountHeader() async throws {
+        let home = tempHome()
+        try write(home, ".codex/auth.json", """
+            {"tokens":{"access_token":"at","refresh_token":"rt","account_id":"acct-9"}}
+            """)
+        let http = RecordingHTTP()
+        http.stub("auth.openai.com", body: """
+            {"access_token":"at2","refresh_token":"rt2","expires_in":3600}
+            """)
+        http.stub("chatgpt.com", body: """
+            {"plan_type":"plus","rate_limit":{
+              "primary_window":{"used_percent":30,"reset_at":1800000000},
+              "secondary_window":{"used_percent":55,"reset_at":1800800000}},
+             "credits":{"balance":12.0}}
+            """)
+        let provider = CodexProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        let snapshot = try await provider.refresh(
+            account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.account.plan, "plus")
+        XCTAssertEqual(snapshot.windows.count, 2)
+        XCTAssertEqual(snapshot.windows[0].used, 30)
+        XCTAssertEqual(snapshot.windows[1].used, 55)
+        XCTAssertEqual(snapshot.creditsRemaining, 12)
+        let usage = http.requests.first {
+            $0.url.absoluteString.contains("wham")
+        }
+        XCTAssertEqual(usage?.headers["ChatGPT-Account-Id"], "acct-9")
+    }
+
+    func test_grokMultiEntry() async throws {
+        let home = tempHome()
+        try write(home, ".grok/auth.json", """
+            {"work":{"accessToken":"a1","expiresAt":4102444800},
+             "play":{"accessToken":"a2","expiresAt":4102444800}}
+            """)
+        let http = RecordingHTTP()
+        http.defaultBody = #"{"weekly_used_percent":20,"remaining_balance":9}"#
+        let provider = GrokProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.count, 2)
+        let snapshot = try await provider.refresh(account: accounts[0])
+        XCTAssertEqual(snapshot.windows[0].used, 20)
+        XCTAssertEqual(snapshot.creditsRemaining, 9)
+    }
+
+    func test_opencodeReadsApiKey() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/opencode/auth.json", """
+            {"opencode-go":{"type":"api","key":"zen-key-1"}}
+            """)
+        let http = RecordingHTTP()
+        http.defaultBody = """
+            {"session":{"used_percent":15},"weekly":{"used_percent":8},"balance":3.5}
+            """
+        let provider = OpenCodeProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        let snapshot = try await provider.refresh(
+            account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.windows.count, 2)
+        XCTAssertEqual(snapshot.creditsRemaining, 3.5)
+        XCTAssertEqual(
+            http.requests[0].headers["Authorization"], "Bearer zen-key-1")
+    }
+
+    func test_devinParsesTomlAndPostsConnect() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/devin/credentials.toml", """
+            api_key = "dv-key-42"
+            api_server_url = "https://server.codeium.com"
+            """)
+        let http = RecordingHTTP()
+        http.defaultBody = """
+            {"weeklyUsage":{"usedPercent":12,"resetTime":"2027-01-08T00:00:00Z"},
+             "extraUsageBalance":40}
+            """
+        let provider = DevinProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        let snapshot = try await provider.refresh(
+            account: try provider.accounts()[0])
+        XCTAssertEqual(snapshot.windows[0].used, 12)
+        XCTAssertEqual(snapshot.creditsRemaining, 40)
+        let request = http.requests[0]
+        XCTAssertTrue(request.url.absoluteString.contains(
+            "SeatManagementService/GetUserStatus"))
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(
+            request.headers["Connect-Protocol-Version"], "1")
+    }
+
+    func test_cursorParsesSessionCookie() async throws {
+        let home = tempHome()
+        let creds = FileCredentialStore(
+            directory: home.appendingPathComponent("creds"))
+        let http = RecordingHTTP()
+        let provider = CursorProvider(http: http, credentials: creds)
+        _ = try provider.addSessionToken("user-123::jwt-abc")
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.count, 1)
+        http.stub("GetCurrentPeriodUsage", body: """
+            {"planUsage":{"used":120,"limit":500},
+             "billingCycleEnd":"2027-02-01T00:00:00Z"}
+            """)
+        http.stub("GetPlanInfo", body: #"{"planName":"pro"}"#)
+        http.stub("GetCreditGrantsBalance", body: #"{"totalBalance":7.5}"#)
+        let snapshot = try await provider.refresh(account: accounts[0])
+        XCTAssertEqual(snapshot.account.plan, "pro")
+        XCTAssertEqual(snapshot.windows[0].used, 120)
+        XCTAssertEqual(snapshot.windows[0].limit, 500)
+        XCTAssertEqual(snapshot.creditsRemaining, 7.5)
+        let usageReq = http.requests.first {
+            $0.url.absoluteString.contains("GetCurrentPeriodUsage")
+        }
+        XCTAssertEqual(usageReq?.headers["Authorization"], "Bearer jwt-abc")
+    }
+
+    func test_copilotExchangesGhTokenThenReadsQuotas() async throws {
+        let home = tempHome()
+        try write(home, ".config/gh/hosts.yml", """
+            github.com:
+                oauth_token: gho_test123
+                user: henrik
+            """)
+        let http = RecordingHTTP()
+        http.stub("v2/token", body: #"{"token":"cop-tok","expires_at":1800000000}"#)
+        http.stub("copilot_internal/user", body: """
+            {"quota_snapshots":{
+              "premium_interactions":{"percent_remaining":62,"entitlement":300},
+              "chat":{"percent_remaining":95,"entitlement":1000}},
+             "quota_reset_date":"2027-02-01"}
+            """)
+        let provider = CopilotProvider(
+            http: http, files: LocalCredentialFiles(home: home))
+        let snapshot = try await provider.refresh(
+            account: try provider.accounts()[0])
+        XCTAssertEqual(http.requests.count, 2)
+        XCTAssertEqual(http.requests[0].headers["Authorization"],
+                       "Bearer gho_test123")
+        XCTAssertEqual(snapshot.windows.count, 2)
+        XCTAssertEqual(snapshot.windows[0].remaining, 62)
+    }
+
+    func test_geminiAbsentWithoutCreds() async throws {
+        let provider = GeminiProvider(
+            http: RecordingHTTP(),
+            files: LocalCredentialFiles(home: tempHome()))
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
+    }
+}
+
+final class CLIProviderTests: XCTestCase {
+    func test_missingBinaryHasNoAccounts() async throws {
+        let provider = CLIProvider(spec: .init(
+            id: "nope", displayName: "Nope", binary: "definitely-missing-cli",
+            args: ["--json"], windows: []), searchPath: ["/nonexistent"])
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
+    }
+
+    func test_scriptOutputMapsToWindows() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true)
+        let script = dir.appendingPathComponent("fakecli")
+        try Data("""
+            #!/bin/sh
+            echo '{"used": 30, "limit": 100}'
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let provider = CLIProvider(spec: .init(
+            id: "fake", displayName: "Fake", binary: "fakecli", args: [],
+            windows: [.init(label: "Month", used: "$.used", limit: "$.limit")]),
+            searchPath: [dir.path])
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.count, 1)
+        let snapshot = try await provider.refresh(account: accounts[0])
+        XCTAssertEqual(snapshot.windows[0].percentRemaining, 70)
+    }
+
+    func test_cliRegistryFindsBundledSpecs() {
+        let providers = CLIProviders.all(environment: ["PATH": "/usr/bin"])
+        XCTAssertEqual(providers.map(\.id), ["amp", "kiro", "augment"])
+    }
+}
+
+final class ProviderRegistryTests: XCTestCase {
+    func test_registryContainsSpecsAdaptersAndCLIs() {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let registry = ProviderRegistry(
+            http: RecordingHTTP(),
+            credentials: FileCredentialStore(directory: home),
+            environment: ["PATH": "/usr/bin"])
+        let ids = Set(registry.providers.map(\.id))
+        // spec library
+        for specID in SpecLibrary.all.map(\.id) {
+            XCTAssertTrue(ids.contains(specID), specID)
+        }
+        // adapters
+        for adapterID in ["claude", "codex", "gemini", "grok", "opencode",
+                          "devin", "cursor", "copilot"] {
+            XCTAssertTrue(ids.contains(adapterID), adapterID)
+        }
+        // cli providers
+        for cliID in ["amp", "kiro", "augment"] {
+            XCTAssertTrue(ids.contains(cliID), cliID)
+        }
+    }
+}

@@ -1,35 +1,77 @@
 # Provider endpoint matrix
 
-Researched endpoints + credential sources for each provider (from OpenUsage's and CodexBar's implementations, both open source).
+Coverage is layered by credential source — the rule is **no automatic browser
+cookie import, ever**. Spec-marked `unverified` rows ship field mappings from
+public docs/CodexBar's implementation, not yet exercised on a live account.
 
-| Provider | Credential source | Endpoint(s) | Returns | Multi-account |
-|---|---|---|---|---|
-| Claude | `~/.claude/.credentials.json` + Keychain `Claude Code*` | `GET api.anthropic.com/api/oauth/usage` (`?cedar_ember=1` adds reset grants), `anthropic-beta: oauth-2025-04-20`, Bearer OAuth; refresh via `platform.claude.com/v1/oauth/token` | 5h + 7d %, model limits, reset grants | Swap vaults / multiple homes. **Endpoint 429s aggressively — refresh token on 429, back off.** |
-| Codex / ChatGPT | `~/.codex/auth.json` + Keychain `Codex Auth` (per-home) | `GET chatgpt.com/backend-api/wham/usage`, Bearer + `ChatGPT-Account-Id` | 5h/weekly windows (`used_percent`, `reset_at`), plan, credits, reset credits | `CODEX_HOME` dirs, codex-switch vaults |
-| OpenCode Go | `opencode-go` key in `~/.local/share/opencode/auth.json` or channel SQLite `credential` table | `GET opencode.ai/zen/go/v1/usage`, Bearer API key | 5h/weekly/monthly caps | Multiple keys |
-| Devin | `~/.local/share/devin/credentials.toml` (`api_key`, `api_server_url`) | `POST {server}/exa.seat_management_pb.SeatManagementService/GetUserStatus` (Connect protocol, default `server.codeium.com`) | Weekly/daily quota, extra-usage balance | Multiple credential files |
-| Grok | `~/.grok/auth.json` (multi-entry file) | refresh `auth.x.ai/oauth2/token` → `cli-chat-proxy.grok.com/v1/billing?format=credits` + `/v1/settings` | Weekly shared pool, pay-as-you-go | Native — auth.json is already per-account |
-| Cursor | Cursor app session (`WorkosCursorSessionToken`) + refresh via `api2.cursor.sh/oauth/token` | `api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo,GetCreditGrantsBalance}`; web: `cursor.com/api/usage-summary` | Period usage, plan, credits | Session per account |
-| Mistral Vibe | Admin API key (preferred) or console cookies | `api.mistral.ai/v1/admin/usage` + `/v1/admin/analytics/vibe` (`x-api-key`); cookie path: `admin.mistral.ai/api/billing/v2/usage` + `console.mistral.ai` tRPC `billing.vibeUsage` | Monthly included %, pay-as-you-go spend | Multiple API keys |
-| OpenRouter | User-supplied API key | `GET openrouter.ai/api/v1/credits` + `/api/v1/key` | Credit balance, usage | N keys |
-| Requesty | User-supplied management key | `api-v2.requesty.ai/v1/manage/org` (balance), `/v1/manage/org/usage`, `/v1/manage/apikey/{id}/usage` | Org balance + usage | N keys |
+## API-key specs (Settings → Add API key)
 
-Notes:
+| Provider | Auth | Endpoint | Notes |
+|---|---|---|---|
+| OpenRouter | bearer | `openrouter.ai/api/v1/credits` + `/key` | verified |
+| Requesty | bearer | `api-v2.requesty.ai/v1/manage/org` | verified |
+| DeepSeek | bearer | `api.deepseek.com/user/balance` | USD balance |
+| Moonshot | bearer | `api.moonshot.ai/v1/users/me/balance` | unverified |
+| z.ai | bearer | `api.z.ai/api/monitor/usage/quota/limit` | 5h/weekly/search, unverified |
+| ElevenLabs | `xi-api-key` | `elevenlabs.io/v1/user/subscription` | char quota + reset |
+| MiniMax | bearer | `api.minimax.io/v1/api/openplatform/coding_plan/remains` | unverified |
+| Synthetic | bearer | `api.synthetic.new/v2/quotas` | unverified |
+| Kilo | bearer | `kilocode.ai/api/users/me/balance` | unverified |
+| Venice | bearer | `api.venice.ai/api/v1/apikeys` | unverified |
+| Mistral | `x-api-key` | `api.mistral.ai/v1/admin/usage` | admin key, unverified |
+| OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
+| Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 
-- **Requesty has the only documented, official management API** — most stable of all.
-- Mistral: prefer the admin API key path; CodexBar scrapes browser cookies (a known leak vector) — we don't do cookie imports.
-- Claude's `/api/oauth/usage` rate-limits hard and persistently (anthropics/claude-code#30930, #31637): poll gently, honor `retry-after`, refresh the OAuth token on persistent 429.
+## Local-credential adapters (auto-detected, no key entry)
+
+| Provider | Credential source | Endpoint(s) | Notes |
+|---|---|---|---|
+| Claude | `~/.claude/.credentials.json` | `GET api.anthropic.com/api/oauth/usage`, `anthropic-beta: oauth-2025-04-20`; refresh via `platform.claude.com/v1/oauth/token` | 5h/7d/Sonnet/Opus %. **429s aggressively — honor retry-after, refresh token on persistent 429.** |
+| Codex | `~/.codex/auth.json` | `GET chatgpt.com/backend-api/wham/usage` + `ChatGPT-Account-Id`; refresh via `auth.openai.com/oauth/token` | 5h/weekly %, plan, credits |
+| Gemini | `~/.gemini/oauth_creds.json` | `cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` → `retrieveUserQuota`; refresh via `oauth2.googleapis.com/token` | per-model buckets |
+| Grok | `~/.grok/auth.json` (multi-entry) | `cli-chat-proxy.grok.com/v1/billing?format=credits`; refresh via `auth.x.ai/oauth2/token` | weekly pool + PAYG balance |
+| OpenCode Go | `opencode-go` key in `~/.local/share/opencode/auth.json` | `GET opencode.ai/zen/go/v1/usage` | 5h/weekly/monthly |
+| Devin | `~/.local/share/devin/credentials.toml` | `POST {server}/exa.seat_management_pb.SeatManagementService/GetUserStatus` (Connect, default `server.codeium.com`) | daily/weekly + extra-usage ACUs |
+| Copilot | `~/.config/gh/hosts.yml` (gh CLI token) | `api.github.com/copilot_internal/v2/token` → `copilot_internal/user` | premium/chat/completions % |
+
+## Session-token provider (manual paste only)
+
+| Provider | Source | Endpoint(s) |
+|---|---|---|
+| Cursor | pasted `WorkosCursorSessionToken` (`userID::jwt`) | `api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo,GetCreditGrantsBalance}` |
+
+Cookie-token spec providers (e.g. Perplexity) use `auth: "cookie"` — the
+pasted value is sent as a `Cookie:` header. Rot is explicit: the row shows an
+error until re-pasted; other providers are unaffected.
+
+## CLI providers (run the provider's own binary)
+
+| Provider | Binary | Args |
+|---|---|---|
+| Amp | `amp` | `usage --json` |
+| Kiro | `kiro-cli` | `usage --json` |
+| Augment | `auggie` | `quota --json` |
+
+Absence of the binary = provider hidden. A 10s watchdog bounds every call.
+
+## Deliberately not covered
+
+- Providers exposing no usage endpoint (GroqCloud rate-limit headers only,
+  Doubao) and proxies needing a user base URL (LiteLLM, LLM Proxy) — a spec
+  `baseURL` field is the TODO for the proxy class.
+- CodexBar's remaining cookie-only tier (Qwen, Manus, Windsurf, …) — use a
+  `provider-specs.json` entry with `auth: "cookie"` if needed.
 
 ## Custom providers (`provider-specs.json`)
 
-Any "bearer key + JSON endpoint" provider can be added without code:
+Any "credential + JSON endpoint" provider can be added without code:
 
 ```json
 [
   {
     "id": "acme",
     "displayName": "Acme",
-    "url": "https://api.acme.com/usage",
+    "url": "https://api.acme.com/usage?from={d30}&to={now}",
     "auth": "bearer",
     "dashboardURL": "https://acme.com/billing",
     "windows": [
@@ -41,4 +83,10 @@ Any "bearer key + JSON endpoint" provider can be added without code:
 ]
 ```
 
-JSON-path syntax: `$.a.b[0].c` over a `JSONSerialization` tree.
+Path syntax: `$.a.b[0].c`, plus `[*]` wildcard-flatten, `[key=value]`
+first-match filter, and a `sum:` prefix that totals numeric leaves
+(`"used": "sum:$.data[*].results[*].amount.value"`). URL templates: `{now}`,
+`{today}`, `{d7}`, `{d30}` = epoch seconds. Auth: `bearer`, `apiKeyHeader`
+(`x-api-key`), `header` (+`authHeader`/`authPrefix`, e.g. xi-api-key),
+`cookie` (manual session cookie — never auto-imported). Requests default to
+GET; set `method`/`body`/`headers` for POST/GraphQL endpoints.

@@ -54,15 +54,25 @@ public enum BuiltinProviders {
     public static let all: [ProviderSpec] = [openRouter, requesty]
 }
 
-/// Assembles every provider the app knows: spec-driven built-ins + (later)
-/// hand-written adapters for Claude/Codex/Cursor/Grok/Devin/OpenCode/Mistral.
+/// Assembles every provider the app knows: the bundled spec library +
+/// user-defined specs + hand-written adapters (local credentials, OAuth
+/// refresh, Connect/protobuf — the shapes GenericProvider can't express).
 public struct ProviderRegistry: Sendable {
     public var providers: [any UsageProvider]
 
-    public init(http: any HTTPClient, credentials: any CredentialStore,
-                extraSpecs: [ProviderSpec] = []) {
-        self.providers = (BuiltinProviders.all + extraSpecs).map {
+    public init(
+        http: any HTTPClient,
+        credentials: any CredentialStore,
+        extraSpecs: [ProviderSpec] = [],
+        adapters: [any UsageProvider]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        var list: [any UsageProvider] = (SpecLibrary.all + extraSpecs).map {
             GenericProvider(spec: $0, http: http, credentials: credentials)
         }
+        list.append(contentsOf: adapters
+            ?? Adapters.all(http: http, credentials: credentials))
+        list.append(contentsOf: CLIProviders.all(environment: environment))
+        self.providers = list
     }
 }
