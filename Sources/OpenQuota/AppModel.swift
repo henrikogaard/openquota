@@ -14,7 +14,9 @@ final class AppModel {
 
     private let store = SnapshotStore()
     private var scheduler: RefreshScheduler?
-    private var observeTask: Task<Void, Never>?
+    // `nonisolated let` survives deinit; @Observable bars it on `var`, so the
+    // task lives in a Sendable box deinit can cancel from any context.
+    private nonisolated let observeTask = TaskBox()
     private let cache = SnapshotCache(url: AppModel.appSupportDir.appendingPathComponent("snapshots.json"))
     private let settings = AppSettings()
     private let http = URLSessionHTTPClient()
@@ -37,7 +39,7 @@ final class AppModel {
         rebuildProviders()
         let scheduler = RefreshScheduler(providers: providers, store: store)
         self.scheduler = scheduler
-        observeTask = Task { [weak self, store] in
+        observeTask.task = Task { [weak self, store] in
             await store.restore(cached)
             await scheduler.start()
             while !Task.isCancelled {
@@ -48,7 +50,7 @@ final class AppModel {
         }
     }
 
-    deinit { observeTask?.cancel() }
+    deinit { observeTask.task?.cancel() }
 
     nonisolated static var appSupportDir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -197,5 +199,10 @@ final class AppModel {
     func dashboardURL(_ id: String) -> URL? {
         providers.first(where: { $0.id == id })?.dashboardURL
     }
+}
+/// Sendable box for the store-observer task — lets a nonisolated `deinit`
+/// cancel the polling loop (see `observeTask`).
+final class TaskBox: @unchecked Sendable {
+    var task: Task<Void, Never>?
 }
 #endif
