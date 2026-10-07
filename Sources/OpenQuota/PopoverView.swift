@@ -142,6 +142,7 @@ struct PopoverView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 240)
             Button("Add Account…") { showSettings(addingAccount: true) }
                 .buttonStyle(.glassProminent)
