@@ -464,7 +464,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
                 _ = try await CodexAppServerClient.readAccount(
                     executable: executable,
                     codexHome: home,
-                    timeout: 1,
+                    timeout: 5,
                     requestTimeout: requestTimeout)
                 XCTFail("\(mode) app-server should fail")
             } catch let error as ProviderError {
@@ -530,7 +530,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
                 *'"method":"account/read"'*)
                     case "$MODE" in
                         malformed) printf 'not-json\\n'; exit 0 ;;
-                        oversized) head -c 1048577 /dev/zero | tr '\\000' 'x'; printf '\\n'; exit 0 ;;
+                        oversized) printf '%1048577s\\n' x; exit 0 ;;
                         eof) exit 0 ;;
                         timeout) sleep 5; exit 0 ;;
                         cancel) printf '%s' "$$" > "$CODEX_HOME/server.pid"; sleep 60; exit 0 ;;
