@@ -80,16 +80,20 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${SPARKLE_PRIVATE_ED_KEY}" ]]; then
-            echo "SPARKLE_PRIVATE_ED_KEY not set; skipping appcast generation (auto-updates will not be offered)."
-            exit 0
+            echo "::error::SPARKLE_PRIVATE_ED_KEY is not set; refusing to publish a release without an update feed."
+            exit 1
           fi
           mkdir -p /tmp/sparkle
           curl -fsSL -o /tmp/sparkle/sparkle.tar.xz \
             https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz
           tar -xJf /tmp/sparkle/sparkle.tar.xz -C /tmp/sparkle
           printf '%s' "${SPARKLE_PRIVATE_ED_KEY}" \
-            | /tmp/sparkle/bin/generate_appcast --ed-key-file - dist/
+            | /tmp/sparkle/bin/generate_appcast --ed-key-file - \
+                --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+                dist/
           test -f dist/appcast.xml
+          grep -q "releases/download/${GITHUB_REF_NAME}/OpenQuota-${VERSION}.dmg" dist/appcast.xml
+          grep -q 'sparkle:edSignature=' dist/appcast.xml
 
       # Stable-name copy gives users one always-working download link:
       # releases/latest/download/OpenQuota.dmg.

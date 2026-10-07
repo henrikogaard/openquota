@@ -274,10 +274,153 @@ public enum SpecLibrary {
     )
 
     /// Full bundled library: the two fixture-tested specs + the doc-mapped tail.
+    // MARK: - Documented API-key providers (endpoints mirrored from CodexBar's
+    // public-API integrations; all unverified against live accounts).
+
+    /// ClinePass — subscription limits (five_hour / weekly / monthly) by type.
+    public static let clinePass = ProviderSpec(
+        id: "clinepass",
+        displayName: "ClinePass",
+        url: "https://api.cline.bot/api/v1/users/me/plan/usage-limits",
+        dashboardURL: "https://app.cline.bot",
+        windows: ["five_hour": "5 hours", "weekly": "Week", "monthly": "Month"]
+            .sorted { $0.key < $1.key }
+            .map { type, label in
+                .init(label: label, kind: .consumption,
+                      used: "$.data.limits[type=\(type)].percentUsed",
+                      resetsAt: "$.data.limits[type=\(type)].resetsAt", unit: "%")
+            }
+    )
+
+    /// Vercel AI Gateway — team credit balance and lifetime spend (decimal strings).
+    public static let vercelGateway = ProviderSpec(
+        id: "vercel-ai-gateway",
+        displayName: "Vercel AI Gateway",
+        url: "https://ai-gateway.vercel.sh/v1/credits",
+        dashboardURL: "https://vercel.com/dashboard/ai-gateway",
+        map: {
+            var map = ProviderSpec.FieldMap()
+            map.creditsRemaining = "$.balance"
+            map.creditsUnitLabel = "USD"
+            return map
+        }(),
+        windows: [
+            .init(label: "Balance", kind: .credits, remaining: "$.balance", unit: "$"),
+            .init(label: "Lifetime spend", kind: .credits, used: "$.total_used", unit: "$"),
+        ]
+    )
+
+    /// Atlas Cloud — account-wide available USD balance.
+    public static let atlasCloud = ProviderSpec(
+        id: "atlascloud",
+        displayName: "Atlas Cloud",
+        url: "https://api.atlascloud.ai/public/v1/balance",
+        dashboardURL: "https://www.atlascloud.ai/console",
+        map: {
+            var map = ProviderSpec.FieldMap()
+            map.creditsRemaining = "$.available.value"
+            map.creditsUnitLabel = "USD"
+            return map
+        }(),
+        windows: [.init(label: "Balance", kind: .credits, remaining: "$.available.value", unit: "$")]
+    )
+
+    /// Poe — current point balance.
+    public static let poe = ProviderSpec(
+        id: "poe",
+        displayName: "Poe",
+        url: "https://api.poe.com/usage/current_balance",
+        dashboardURL: "https://poe.com/api/keys",
+        windows: [.init(label: "Points", kind: .credits,
+                        remaining: "$.current_point_balance", unit: "points")]
+    )
+
+    /// ZenMux — rolling 5-hour and 7-day flow quotas (Management API key).
+    public static let zenMux = ProviderSpec(
+        id: "zenmux",
+        displayName: "ZenMux",
+        url: "https://zenmux.ai/api/v1/management/subscription/detail",
+        dashboardURL: "https://zenmux.ai/platform/management",
+        map: {
+            var map = ProviderSpec.FieldMap()
+            map.plan = "$.data.plan.tier"
+            return map
+        }(),
+        windows: [
+            .init(label: "5 hours", kind: .consumption,
+                  used: "$.data.quota_5_hour.used_flows", limit: "$.data.quota_5_hour.max_flows",
+                  resetsAt: "$.data.quota_5_hour.resets_at", unit: "flows"),
+            .init(label: "Week", kind: .consumption,
+                  used: "$.data.quota_7_day.used_flows", limit: "$.data.quota_7_day.max_flows",
+                  resetsAt: "$.data.quota_7_day.resets_at", unit: "flows"),
+        ]
+    )
+
+    /// DevPass (LLM Gateway) — billing-cycle plan credits + premium weekly allowance.
+    public static let devPass = ProviderSpec(
+        id: "devpass",
+        displayName: "DevPass",
+        url: "https://api.llmgateway.io/v1/key",
+        dashboardURL: "https://llmgateway.io/dashboard",
+        map: {
+            var map = ProviderSpec.FieldMap()
+            map.plan = "$.data.devPlan"
+            return map
+        }(),
+        windows: [
+            .init(label: "Plan credits", kind: .consumption,
+                  used: "$.data.devPlanCreditsUsed", limit: "$.data.devPlanCreditsLimit", unit: "$"),
+            .init(label: "Premium week", kind: .consumption,
+                  used: "$.data.devPlanPremiumCreditsUsed", limit: "$.data.devPlanPremiumWeeklyLimit",
+                  resetsAt: "$.data.devPlanPremiumWeekResetsAt", unit: "$"),
+            .init(label: "Key spend", kind: .credits,
+                  used: "$.data.usage", limit: "$.data.limit", unit: "$"),
+        ]
+    )
+
+    /// v0 Platform API — token-billing balance (or legacy allowance) + request rate limit.
+    public static let v0 = ProviderSpec(
+        id: "v0",
+        displayName: "v0",
+        url: "https://api.v0.dev/v1/user/billing",
+        dashboardURL: "https://v0.app/settings/billing",
+        windows: [
+            .init(label: "Billing", kind: .credits,
+                  limit: "$.data.balance.total", remaining: "$.data.balance.remaining",
+                  resetsAt: "$.data.billingCycle.end", unit: "credits"),
+            .init(label: "Allowance", kind: .credits,
+                  limit: "$.data.limit", remaining: "$.data.remaining",
+                  resetsAt: "$.data.reset", unit: "credits"),
+            .init(label: "Requests", kind: .requests,
+                  url: "https://api.v0.dev/v1/rate-limits",
+                  limit: "$.limit", remaining: "$.remaining", resetsAt: "$.reset", unit: "requests"),
+        ]
+    )
+
+    /// Codebuff — credit usage/balance and next quota reset (API key).
+    public static let codebuff = ProviderSpec(
+        id: "codebuff",
+        displayName: "Codebuff",
+        url: "https://www.codebuff.com/api/v1/usage",
+        method: "POST",
+        body: #"{"fingerprintId":"openquota-usage"}"#,
+        dashboardURL: "https://www.codebuff.com/usage",
+        map: {
+            var map = ProviderSpec.FieldMap()
+            map.creditsRemaining = "$.remainingBalance"
+            map.creditsUnitLabel = "credits"
+            return map
+        }(),
+        windows: [.init(label: "Credits", kind: .consumption,
+                        used: "$.usage", limit: "$.quota",
+                        resetsAt: "$.next_quota_reset", unit: "credits")]
+    )
+
     public static let all: [ProviderSpec] = [
         BuiltinProviders.openRouter,
         BuiltinProviders.requesty,
         deepseek, moonshot, zai, elevenLabs, minimax, synthetic,
-        kilo, venice, mistral, openAIAdmin, warp, perplexity
+        kilo, venice, mistral, openAIAdmin, warp, perplexity,
+        clinePass, vercelGateway, atlasCloud, poe, zenMux, devPass, v0, codebuff
     ]
 }

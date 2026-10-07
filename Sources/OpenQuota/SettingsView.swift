@@ -3,242 +3,326 @@ import SwiftUI
 import AppKit
 import OpenQuotaCore
 
+/// Settings, laid out like Mail's Accounts pane: a list of accounts on the
+/// left, the selected account on the right, and +/− beneath the list.
 struct SettingsView: View {
     var model: AppModel
-    @State private var newKey = ""
-    @State private var newLabel = ""
-    @State private var selectedProvider = "openrouter"
-    @State private var sessionToken = ""
-    @State private var sessionLabel = ""
-    @State private var profileProvider = "grok"
-    @State private var profileLabel = ""
-    @State private var credentialPath = ""
-    @State private var errorText: String?
-    @State private var saved: [AccountDescriptor] = []
-    @State private var detected: [(id: String, name: String, accounts: Int)] = []
-    @State private var removingAccount: AccountDescriptor?
-    @State private var removingProfile: LocalAccountProfile?
-    @State private var renamingAccount: AccountDescriptor?
-    @State private var editedLabel = ""
-
-    private var selectedSpec: GenericProvider? {
-        model.specProviders().first { $0.id == selectedProvider }
-    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if model.isDemo {
-                Text("Demo data · Account changes are disabled").font(.caption).padding(8)
-            }
-            TabView {
-                accountsTab.tabItem { Label("Accounts", systemImage: "person.crop.circle") }
-                addTab.tabItem { Label("Add Account", systemImage: "plus.circle") }
-                SubscriptionSettingsView(model: model)
-                    .tabItem { Label("Subscriptions", systemImage: "person.badge.key") }
-            }
-            .disabled(model.isDemo)
-            if let errorText {
-                Text(errorText).font(.caption).foregroundStyle(.red)
-                    .textSelection(.enabled).padding()
-            }
+        TabView {
+            AccountsPane(model: model)
+                .tabItem { Label("Accounts", systemImage: "at") }
+            GeneralPane()
+                .tabItem { Label("General", systemImage: "gearshape") }
         }
-        .frame(width: 540, height: 580)
-        .task { await reload() }
-        .sheet(item: $renamingAccount) { account in
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Account Label").font(.headline)
-                TextField("Label", text: $editedLabel)
-                HStack {
-                    Spacer()
-                    Button("Cancel") { renamingAccount = nil }.keyboardShortcut(.cancelAction)
-                    Button("Save") {
-                        perform { try model.renameAccount(account, label: editedLabel) }
-                        renamingAccount = nil
-                    }.keyboardShortcut(.defaultAction)
-                }
-            }.padding(24).frame(width: 320)
-        }
-        .alert("Remove Saved Account?", isPresented: Binding(
-            get: { removingAccount != nil }, set: { if !$0 { removingAccount = nil } }
-        )) {
-            Button("Cancel", role: .cancel) { removingAccount = nil }
-            Button("Remove", role: .destructive) {
-                if let account = removingAccount {
-                    perform { try model.removeAccount(account) }
-                }
-                removingAccount = nil
-            }
-        } message: {
-            Text("This deletes this account's saved credential from OpenQuota. It does not delete your provider account.")
-        }
-        .alert("Remove Local Profile?", isPresented: Binding(
-            get: { removingProfile != nil }, set: { if !$0 { removingProfile = nil } }
-        )) {
-            Button("Cancel", role: .cancel) { removingProfile = nil }
-            Button("Remove", role: .destructive) {
-                if let profile = removingProfile {
-                    perform { try model.removeProfile(id: profile.id) }
-                }
-                removingProfile = nil
-            }
-        } message: {
-            Text("The original credential file will not be deleted.")
-        }
+        .frame(width: 640, height: 440)
+    }
+}
+
+/// Everything OpenQuota tracks, flattened for the list.
+struct AccountItem: Identifiable {
+    enum Kind {
+        case subscription(SubscriptionConnection)
+        case saved(AccountDescriptor)
+        case profile(LocalAccountProfile)
+        case detected(accounts: Int)
     }
 
-    private var accountsTab: some View {
-        Form {
-            Section("Saved Keys & Sessions") {
-                if saved.isEmpty {
-                    Text("No saved keys. Use Add Account to connect a provider.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(saved) { account in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(model.providerName(account.account.providerID))
-                            Text(account.account.label ?? "Unlabelled account").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Rename") {
-                            editedLabel = account.account.label ?? ""
-                            renamingAccount = account
-                        }
-                        Button("Remove", role: .destructive) { removingAccount = account }
-                    }
-                }
-            }
-            Section("Local Profiles") {
-                if model.profiles.isEmpty {
-                    Text("Add a separate credential file for each work or personal account.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(model.profiles) { profile in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("\(model.providerName(profile.providerID)) · \(profile.label)")
-                            if profile.providerID == "claude" || profile.providerID == "codex" {
-                                Text("Reconnect required · reconnect in Subscriptions")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            } else {
-                                Text(profile.credentialPath).font(.caption).foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.middle).help(profile.credentialPath)
+    var id: String
+    var providerID: String
+    var title: String
+    var kind: Kind
+
+    var section: String {
+        switch kind {
+        case .subscription: "Subscriptions"
+        case .saved: "API Keys & Sessions"
+        case .profile: "Local Profiles"
+        case .detected: "Detected on This Mac"
+        }
+    }
+}
+
+struct AccountsPane: View {
+    var model: AppModel
+    @State private var saved: [AccountDescriptor] = []
+    @State private var detected: [(id: String, name: String, accounts: Int)] = []
+    @State private var selection: String?
+    @State private var adding = false
+    @State private var confirmingRemoval = false
+    @State private var errorText: String?
+
+    private var items: [AccountItem] {
+        var out: [AccountItem] = []
+        out += model.subscriptionConnections.map {
+            AccountItem(id: "sub:\($0.id)", providerID: $0.kind == .claudeStatusLine ? "claude" : "codex",
+                        title: $0.label, kind: .subscription($0))
+        }
+        out += saved.map {
+            AccountItem(id: "key:\($0.id)", providerID: $0.account.providerID,
+                        title: $0.account.label ?? "Unlabelled", kind: .saved($0))
+        }
+        out += model.profiles.map {
+            AccountItem(id: "profile:\($0.id)", providerID: $0.providerID, title: $0.label, kind: .profile($0))
+        }
+        out += detected.filter { $0.accounts > 0 }.map {
+            AccountItem(id: "local:\($0.id)", providerID: $0.id, title: "Signed-in CLI",
+                        kind: .detected(accounts: $0.accounts))
+        }
+        return out
+    }
+
+    private var selected: AccountItem? { items.first { $0.id == selection } }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                List(selection: $selection) {
+                    ForEach(["Subscriptions", "API Keys & Sessions", "Local Profiles", "Detected on This Mac"],
+                            id: \.self) { section in
+                        let rows = items.filter { $0.section == section }
+                        if !rows.isEmpty {
+                            Section(section) {
+                                ForEach(rows) { item in
+                                    AccountListRow(name: model.providerName(item.providerID), title: item.title)
+                                        .tag(item.id)
+                                }
                             }
                         }
-                        Spacer()
-                        Button("Remove", role: .destructive) { removingProfile = profile }
+                    }
+                }
+                .listStyle(.sidebar)
+                .overlay {
+                    if items.isEmpty {
+                        Text("No Accounts").foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                HStack(spacing: 0) {
+                    Button { adding = true } label: {
+                        Image(systemName: "plus").frame(width: 24, height: 20)
+                    }
+                    .help("Add Account")
+                    Divider().frame(height: 14)
+                    Button { confirmingRemoval = true } label: {
+                        Image(systemName: "minus").frame(width: 24, height: 20)
+                    }
+                    .disabled(!canRemove)
+                    .help("Remove Account")
+                    Spacer()
+                }
+                .buttonStyle(.borderless)
+                .padding(4)
+            }
+            .frame(width: 220)
+            Divider()
+            Group {
+                if let selected {
+                    AccountDetail(model: model, item: selected, onChange: reloadSoon)
+                        .id(selected.id)
+                } else {
+                    ContentUnavailableView {
+                        Label("No Account Selected", systemImage: "person.crop.circle")
+                    } actions: {
+                        Button("Add Account…") { adding = true }
                     }
                 }
             }
-            Section("Detected on This Mac") {
-                ForEach(detected, id: \.id) { item in
-                    HStack {
-                        Text(item.name)
-                        Spacer()
-                        Text(item.accounts > 0 ? "\(item.accounts) account(s)" : "Not signed in")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Text("Other supported CLI credentials are detected locally. Claude and Codex subscriptions require an explicit connection in Subscriptions. OpenQuota never imports browser cookies.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Refresh Detection") { Task { await reload(); model.refreshNow() } }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .disabled(model.isDemo)
+        .overlay(alignment: .bottom) {
+            if let errorText {
+                Text(errorText).font(.caption).foregroundStyle(.red).padding(8)
             }
         }
-        .formStyle(.grouped)
-    }
-
-    private var addTab: some View {
-        Form {
-            Section("API Key") {
-                Text("API keys use separate provider billing and do not expose subscription quotas.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Picker("Provider", selection: $selectedProvider) {
-                    ForEach(model.specProviders(), id: \.id) { provider in
-                        Text(provider.unverified ? "\(provider.displayName) (experimental)" : provider.displayName)
-                            .tag(provider.id)
-                    }
-                }
-                if selectedProvider == "mistral" {
-                    Text("Requires an Admin API key. Shows 30-day Vibe activity, not your personal plan's remaining allowance.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if selectedProvider == "requesty" {
-                    Text("Requires a management key. Balance is organization-wide; keys in the same organization share it.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                SecureField(selectedSpec?.spec.auth == .cookie ? "Session cookie" : "API key", text: $newKey)
-                TextField("Label (e.g. Work)", text: $newLabel)
-                Button("Add Key") {
-                    guard let provider = selectedSpec else { return }
-                    perform {
-                        try model.addAPIKey(newKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                                            provider: provider, label: newLabel.isEmpty ? nil : newLabel)
-                        newKey = ""; newLabel = ""
-                    }
-                }.disabled(newKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            Section("Cursor Session") {
-                SecureField("userID::token", text: $sessionToken)
-                TextField("Label (e.g. Personal)", text: $sessionLabel)
-                Text("Paste manually from your Cursor session. Expired sessions must be replaced. Each session is stored separately in Keychain.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Add Session") {
-                    perform {
-                        try model.addSessionToken(sessionToken.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  label: sessionLabel.isEmpty ? nil : sessionLabel)
-                        sessionToken = ""; sessionLabel = ""
-                    }
-                }.disabled(sessionToken.isEmpty)
-            }
-            Section("Local Credential Profile") {
-                Picker("Provider", selection: $profileProvider) {
-                    ForEach(AppModel.credentialPaths.keys.sorted(), id: \.self) { id in
-                        Text(model.providerName(id)).tag(id)
-                    }
-                }
-                TextField("Label", text: $profileLabel)
-                HStack {
-                    TextField("Absolute credential file path", text: $credentialPath)
-                    Button("Choose…") { chooseCredential() }
-                }
-                Text("Select a separate CLI credential file for this account. OAuth refresh updates that file; do not share the same file between profiles.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Add Profile") {
-                    perform {
-                        try model.addProfile(providerID: profileProvider, label: profileLabel, path: credentialPath)
-                        profileLabel = ""; credentialPath = ""
-                    }
-                }.disabled(profileLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || credentialPath.isEmpty)
-            }
+        .task { await reload() }
+        .sheet(isPresented: $adding, onDismiss: reloadSoon) {
+            AddAccountSheet(model: model) { adding = false }
         }
-        .formStyle(.grouped)
+        .alert("Remove “\(selected?.title ?? "")”?", isPresented: $confirmingRemoval) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive, action: removeSelected)
+        } message: {
+            Text(removalMessage)
+        }
     }
 
-    private func chooseCredential() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        if panel.runModal() == .OK, let url = panel.url { credentialPath = url.path }
+    private var canRemove: Bool {
+        guard let selected else { return false }
+        if case .detected = selected.kind { return false }
+        return true
     }
 
-    private func perform(_ operation: () throws -> Void) {
+    private var removalMessage: String {
+        switch selected?.kind {
+        case .subscription(let connection) where connection.kind == .codexAppServer:
+            "Codex keeps its sign-in files in the account's private home."
+        case .subscription:
+            "Your Claude status line is restored if it hasn't changed since connecting."
+        case .profile:
+            "The credential file stays where it is."
+        default:
+            "The key is deleted from OpenQuota. Your provider account is unaffected."
+        }
+    }
+
+    private func removeSelected() {
+        guard let selected else { return }
         do {
-            try operation()
-            errorText = nil
-            Task { await reload() }
-        } catch {
-            if error is LocalAccountProfileError {
-                errorText = "Choose an existing credential file under 1 MB and enter a label (maximum 100 profiles)."
-            } else {
-                errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
+            switch selected.kind {
+            case .subscription(let connection): try model.removeSubscriptionConnection(connection)
+            case .saved(let account): try model.removeAccount(account)
+            case .profile(let profile): try model.removeProfile(id: profile.id)
+            case .detected: return
             }
+            selection = nil
+            errorText = nil
+            reloadSoon()
+        } catch {
+            errorText = (error as? ProviderError)?.userMessage ?? "The account could not be removed."
         }
     }
+
+    private func reloadSoon() { Task { await reload() } }
 
     private func reload() async {
         do { saved = try await model.savedAccounts() }
         catch { errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription }
         detected = await model.detectedLocalProviders()
+    }
+}
+
+struct AccountListRow: View {
+    var name: String
+    var title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(name)
+            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct AccountDetail: View {
+    var model: AppModel
+    var item: AccountItem
+    var onChange: () -> Void
+    @State private var label = ""
+    @State private var errorText: String?
+
+    private var snapshot: UsageSnapshot? {
+        switch item.kind {
+        case .saved(let account): model.snapshots.first { $0.account.id == account.id }
+        default: model.snapshots.first { $0.providerID == item.providerID && $0.account.label == item.title }
+        }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Provider", value: model.providerName(item.providerID))
+                if case .saved(let account) = item.kind {
+                    TextField("Label", text: $label)
+                        .onSubmit { rename(account) }
+                } else {
+                    LabeledContent("Label", value: item.title)
+                }
+                LabeledContent("Source", value: source)
+                if let plan = snapshot?.account.plan {
+                    LabeledContent("Plan", value: plan.capitalized)
+                }
+            }
+            if let snapshot, !snapshot.windows.isEmpty || snapshot.errorMessage != nil {
+                Section("Usage") {
+                    ForEach(snapshot.windows) { window in
+                        WindowRow(window: window).font(.callout)
+                    }
+                    if let error = snapshot.errorMessage {
+                        Text(error).foregroundStyle(.orange)
+                    }
+                }
+            }
+            if let note {
+                Section { Text(note).foregroundStyle(.secondary) }
+            }
+            if let url = model.dashboardURL(item.providerID) {
+                Section {
+                    Link("Open Usage Page", destination: url)
+                }
+            }
+            if let errorText {
+                Text(errorText).foregroundStyle(.red)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { label = item.title }
+    }
+
+    private var source: String {
+        switch item.kind {
+        case .subscription(let connection):
+            connection.kind == .claudeStatusLine ? "Claude Code status line" : "Codex sign-in"
+        case .saved(let account):
+            account.account.providerID == "cursor" ? "Session token in Keychain" : "API key in Keychain"
+        case .profile: "Credential file"
+        case .detected: "Provider CLI on this Mac"
+        }
+    }
+
+    private var note: String? {
+        switch item.kind {
+        case .subscription(let connection) where connection.kind == .claudeStatusLine:
+            "Updates while you use Claude Code. \(connection.directory)"
+        case .profile(let profile) where profile.providerID == "claude" || profile.providerID == "codex":
+            "This older profile is no longer used. Remove it and connect the account again."
+        case .profile(let profile): profile.credentialPath
+        case .saved(let account) where account.account.providerID == "mistral":
+            "Mistral shows 30-day workspace activity, not a personal allowance."
+        case .saved(let account) where account.account.providerID == "requesty":
+            "Balance is shared by every key in the organization."
+        case .saved(let account) where model.specProviders().first { $0.id == account.account.providerID }?.unverified == true:
+            "Experimental integration. Readings have not been verified against a live account."
+        default: nil
+        }
+    }
+
+    private func rename(_ account: AccountDescriptor) {
+        do {
+            try model.renameAccount(account, label: label)
+            errorText = nil
+            onChange()
+        } catch {
+            errorText = (error as? ProviderError)?.userMessage ?? "The label could not be saved."
+        }
+    }
+}
+
+struct GeneralPane: View {
+    @State private var automaticallyChecks = UpdateController.shared.automaticallyChecks
+
+    var body: some View {
+        Form {
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: $automaticallyChecks)
+                    .onChange(of: automaticallyChecks) { _, value in
+                        UpdateController.shared.automaticallyChecks = value
+                    }
+                LabeledContent("Version", value: Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
+                HStack {
+                    Spacer()
+                    Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
+                        .disabled(!UpdateController.shared.canCheckForUpdates)
+                }
+            }
+            Section {
+                Link("OpenQuota on GitHub", destination: URL(string: "https://github.com/henrikogaard/openquota")!)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 #endif

@@ -23,6 +23,30 @@ this is not live authentication or paid-account verification.
 | Mistral Vibe | bearer | `api.mistral.ai/v1/admin/analytics/vibe/code/usage/by_workspace` | admin access, 30-day sessions and tokens; **activity, not remaining quota**; unverified live |
 | OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
+| ClinePass | bearer | `api.cline.bot/api/v1/users/me/plan/usage-limits` | 5h/weekly/monthly % used + resets, unverified |
+| Vercel AI Gateway | bearer | `ai-gateway.vercel.sh/v1/credits` | team USD balance + lifetime spend, unverified |
+| Atlas Cloud | bearer (balance permission) | `api.atlascloud.ai/public/v1/balance` | USD balance only, unverified |
+| Poe | bearer | `api.poe.com/usage/current_balance` | point balance, unverified |
+| ZenMux | bearer (Management key) | `zenmux.ai/api/v1/management/subscription/detail` | 5h + 7d flows, plan tier; PAYG balance not yet fetched; unverified |
+| DevPass | bearer | `api.llmgateway.io/v1/key` | plan credits, premium weekly, key spend; unverified |
+| v0 | bearer | `api.v0.dev/v1/user/billing` + `/v1/rate-limits` | token or legacy billing branch + request limit; unverified |
+| Codebuff | bearer | `POST www.codebuff.com/api/v1/usage` | credits used/quota/remaining + reset; subscription metadata not fetched; unverified |
+
+## Next candidates (from the OpenUsage / CodexBar audit)
+
+Documented API-key endpoints that need a small handwritten adapter rather than a spec:
+
+- **DeepInfra** — prepaid balance, month spend, spending limit, suspension.
+- **Fireworks** — 30-day spend; needs account discovery.
+- **xAI platform** — prepaid balance + daily spend; Management key and team ID.
+- **Deepgram** — project discovery, then usage breakdown.
+- **LiteLLM / LLM Proxy** — user/team budget; needs a user-supplied base URL.
+- **Chutes** — subscription quota windows.
+
+Not planned: CodexBar's browser-cookie and private-endpoint integrations
+(Windsurf, Manus, Notion AI, Qwen, T3 Chat, Raycast and similar). They need
+imported web sessions, which OpenQuota does not do. Antigravity and Ollama
+(OpenUsage) read local app state with no documented interface yet.
 
 ## Subscription integrations (explicit opt-in)
 

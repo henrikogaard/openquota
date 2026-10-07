@@ -20,6 +20,13 @@ final class UpdateController {
         controller.updater.canCheckForUpdates
     }
 
+    var automaticallyChecks: Bool {
+        get { controller.updater.automaticallyChecksForUpdates }
+        set { controller.updater.automaticallyChecksForUpdates = newValue }
+    }
+
+    var lastCheck: Date? { controller.updater.lastUpdateCheckDate }
+
     func checkForUpdates() {
         controller.checkForUpdates(nil)
     }
