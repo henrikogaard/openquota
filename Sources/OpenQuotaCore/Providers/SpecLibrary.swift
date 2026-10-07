@@ -416,9 +416,33 @@ public enum SpecLibrary {
                         resetsAt: "$.next_quota_reset", unit: "credits")]
     )
 
+    /// OpenCode Go — the same key OpenCode stores as `opencode-go` in auth.json,
+    /// pasted directly so several subscriptions can be tracked side by side.
+    public static let opencodeGo = ProviderSpec(
+        id: "opencode-go",
+        displayName: "OpenCode Go",
+        url: "https://opencode.ai/zen/go/v1/usage",
+        dashboardURL: "https://opencode.ai/zen",
+        map: {
+            var map = ProviderSpec.FieldMap()
+            map.creditsRemaining = "$.usage.balance"
+            map.creditsUnit = "$"
+            return map
+        }(),
+        windows: [("5h", "rolling"), ("Week", "weekly"), ("Month", "monthly")].map { label, key in
+            .init(
+                label: label, kind: .consumption,
+                used: "$.usage.\(key).used_percent",
+                resetsAt: "$.usage.\(key).resetsAt",
+                unit: "%"
+            )
+        }
+    )
+
     public static let all: [ProviderSpec] = [
         BuiltinProviders.openRouter,
         BuiltinProviders.requesty,
+        opencodeGo,
         deepseek, moonshot, zai, elevenLabs, minimax, synthetic,
         kilo, venice, mistral, openAIAdmin, warp, perplexity,
         clinePass, vercelGateway, atlasCloud, poe, zenMux, devPass, v0, codebuff

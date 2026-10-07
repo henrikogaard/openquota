@@ -102,6 +102,7 @@ private struct APIKeyForm: View {
         case "requesty": "Needs a management key. Balance is shared across the organization."
         case "zenmux": "Needs a Management API key."
         case "atlascloud": "Needs a key with account balance permission."
+        case "opencode-go": "Paste the OpenCode Go key from opencode.ai/zen. Add one per subscription."
         default: provider.unverified
             ? "Experimental. Readings haven't been verified against a live account."
             : "API billing is separate from any subscription allowance."

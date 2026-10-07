@@ -245,7 +245,7 @@ public struct GrokProvider: UsageProvider {
 /// `opencode-go` entry in `~/.local/share/opencode/auth.json` → zen/go usage.
 public struct OpenCodeProvider: UsageProvider {
     public let id = "opencode"
-    public let displayName = "OpenCode"
+    public let displayName = "OpenCode Go"
     public let dashboardURL = URL(string: "https://opencode.ai/zen")
 
     static let authPath = ".local/share/opencode/auth.json"

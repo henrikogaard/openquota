@@ -9,14 +9,18 @@ struct PopoverView: View {
     var model: AppModel
     @Environment(\.openSettings) private var openSettings
 
+    /// Grouped by display name so one product (e.g. OpenCode Go from a local
+    /// file and from pasted keys) reads as a single section.
     private var groups: [(providerID: String, snapshots: [UsageSnapshot])] {
         var order: [String] = []
-        var byProvider: [String: [UsageSnapshot]] = [:]
+        var firstID: [String: String] = [:]
+        var byName: [String: [UsageSnapshot]] = [:]
         for snapshot in model.snapshots {
-            if byProvider[snapshot.providerID] == nil { order.append(snapshot.providerID) }
-            byProvider[snapshot.providerID, default: []].append(snapshot)
+            let name = model.providerName(snapshot.providerID)
+            if byName[name] == nil { order.append(name); firstID[name] = snapshot.providerID }
+            byName[name, default: []].append(snapshot)
         }
-        return order.map { ($0, byProvider[$0] ?? []) }
+        return order.map { (firstID[$0] ?? $0, byName[$0] ?? []) }
     }
 
     var body: some View {

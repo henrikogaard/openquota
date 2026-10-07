@@ -118,7 +118,7 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 |---|---|---|---|
 | Gemini | `~/.gemini/oauth_creds.json` | `cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` → `retrieveUserQuota`; refresh via `oauth2.googleapis.com/token` | per-model buckets |
 | Grok | `~/.grok/auth.json` (multi-entry) | `cli-chat-proxy.grok.com/v1/billing?format=credits`; refresh via `auth.x.ai/oauth2/token` | weekly pool + PAYG balance |
-| OpenCode Go | `opencode-go` key in `~/.local/share/opencode/auth.json` | `GET opencode.ai/zen/go/v1/usage` | 5h/weekly/monthly |
+| OpenCode Go | `opencode-go` key in `~/.local/share/opencode/auth.json`, or pasted keys (Add Account → OpenCode Go, one per subscription) | `GET opencode.ai/zen/go/v1/usage` | 5h/weekly/monthly |
 | Devin | `~/.local/share/devin/credentials.toml` | `POST {server}/exa.seat_management_pb.SeatManagementService/GetUserStatus` (Connect, default `server.codeium.com`) | daily/weekly remaining percentage; overage balance in USD |
 | Copilot | `~/.config/gh/hosts.yml` (gh CLI token) | `api.github.com/copilot_internal/v2/token` → `copilot_internal/user` | premium/chat/completions % |
 

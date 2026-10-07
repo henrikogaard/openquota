@@ -81,4 +81,31 @@ final class DocumentedAPIProviderTests: XCTestCase {
         XCTAssertEqual(devpass.account.plan, "pro")
         XCTAssertEqual(devpass.windows[0].percentRemaining, 75)
     }
+
+    func test_opencodeGoPastedKeyMapsWindowsAndBalance() async throws {
+        let (snapshot, http) = try await refresh(SpecLibrary.opencodeGo, body: """
+            {"usage":{"rolling":{"used_percent":25,"resetsAt":"2030-01-01T00:00:00Z"},
+              "weekly":{"used_percent":60},"monthly":{"used_percent":5},"balance":3.5}}
+            """)
+        let byLabel = Dictionary(uniqueKeysWithValues: snapshot.windows.map { ($0.label, $0) })
+        XCTAssertEqual(byLabel["5h"]?.percentRemaining, 75)
+        XCTAssertNotNil(byLabel["5h"]?.resetsAt)
+        XCTAssertEqual(byLabel["Week"]?.percentRemaining, 40)
+        XCTAssertEqual(byLabel["Month"]?.percentRemaining, 95)
+        XCTAssertEqual(snapshot.creditsRemaining, 3.5)
+        XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer sk-test")
+    }
+
+    func test_opencodeGoKeysStaySeparate() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let provider = GenericProvider(
+            spec: SpecLibrary.opencodeGo, http: RecordingHTTP(),
+            credentials: FileCredentialStore(directory: dir),
+            manifestURL: dir.appendingPathComponent("keys.json"))
+        _ = try provider.addKey("go-key-personal", label: "Personal")
+        _ = try provider.addKey("go-key-work", label: "Work")
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(Set(accounts.map(\.account.id)).count, 2)
+        XCTAssertEqual(Set(accounts.map(\.account.label)), ["Personal", "Work"])
+    }
 }
