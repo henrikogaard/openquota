@@ -36,6 +36,8 @@ sed -e "s/\$(MARKETING_VERSION)/$VERSION/g" \
     -e "s/\$(CURRENT_PROJECT_VERSION)/${CURRENT_PROJECT_VERSION:-1}/g" \
     Resources/Info.plist > "$APP/Contents/Info.plist"
 
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
 # --- Embed Sparkle.framework (SwiftPM fetches it as an xcframework under .build/artifacts) ---
 FRAMEWORKS="$APP/Contents/Frameworks"
 SPARKLE_FW="$(find .build/artifacts -type d -name "Sparkle.framework" -path "*macos*" 2>/dev/null | head -1)"
