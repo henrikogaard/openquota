@@ -122,6 +122,11 @@ enum SpendCopy {
         text("Includes default CLI homes and connected configurations, not other devices. Shared histories cannot be attributed to a subscription. Prices are bundled snapshots, updated with the app—not your invoice.",
              "Inkluderer standard CLI-mapper og tilkoblede konfigurasjoner, ikke andre enheter. Delt historikk kan ikke knyttes til et abonnement. Prisene følger appoppdateringer – dette er ikke fakturaen din.")
     }
+    static var settingsToggle: String { text("Read local Claude and Codex logs", "Les lokale Claude- og Codex-logger") }
+    static var settingsFooter: String {
+        text("Estimates API-rate value from token counts on this Mac. Nothing is uploaded, and it isn't your bill.",
+             "Anslår API-verdi fra tokenantall på denne Macen. Ingenting lastes opp, og det er ikke fakturaen din.")
+    }
     static var period: String { text("Period", "Periode") }
     static func period(_ value: SpendPeriod) -> String {
         switch value {
