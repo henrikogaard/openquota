@@ -250,13 +250,21 @@ struct OpenQuotaBridge {
             failed = !writeAll(output, deadline: deadline)
         }
         inputBuffer.removeAll(keepingCapacity: false)
-        return timedOut || failed ? 1 : (reapedStatus ?? process.terminationStatus)
+        if timedOut || failed { return 1 }
+        if let reapedStatus { return reapedStatus }
+        // terminationStatus is only valid once Foundation knows the task
+        // ended; give its monitor a moment after our waitpid/ECHILD, then
+        // fail rather than query a task it still reports as running.
+        let settle = Date().addingTimeInterval(0.5)
+        while process.isRunning, Date() < settle { usleep(10_000) }
+        return process.isRunning ? 1 : process.terminationStatus
     }
 
     // NSConcreteTask.waitUntilExit() can spin a runloop forever on macOS when
     // the termination notification is delivered to a blocked thread; reap via
     // waitpid with a hard bound instead. Returns the child's exit status when
-    // we reap it; nil when Foundation's own monitor already did (ECHILD).
+    // we reap it; nil on ECHILD (Foundation already reaped) or any other
+    // error — the caller then resolves the status through the task object.
     private static func reap(pid: pid_t) -> Int32? {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
@@ -266,7 +274,10 @@ struct OpenQuotaBridge {
                 if status & 0x7f == 0 { return (status >> 8) & 0xff }
                 return 128 + (status & 0x7f)
             }
-            if result == -1 { return nil }
+            if result == -1 {
+                if errno == EINTR { continue }
+                return nil
+            }
             usleep(10_000)
         }
         return nil

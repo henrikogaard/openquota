@@ -563,9 +563,16 @@ private final class CodexAppServerSession: @unchecked Sendable {
         terminationLock.lock()
         defer { terminationLock.unlock() }
         lock.lock()
-        let process = processStarted ? self.process : nil
+        guard processStarted else {
+            lock.unlock()
+            return
+        }
+        // Claim the process atomically: a second terminate() (cancel plus the
+        // deferred close) must not group-kill a pid that may already be
+        // reaped and reused.
+        processStarted = false
+        let process = self.process
         lock.unlock()
-        guard let process else { return }
         let pid = process.processIdentifier
         if process.isRunning { process.terminate() }
         _ = kill(-pid, SIGKILL)
@@ -575,14 +582,18 @@ private final class CodexAppServerSession: @unchecked Sendable {
 
     // NSConcreteTask.waitUntilExit() can spin a runloop forever on macOS when
     // the termination notification is delivered to a blocked thread; reap via
-    // waitpid with a hard bound instead. ECHILD means NSConcreteTask's own
-    // monitor already reaped it — either way the child is gone.
+    // waitpid with a hard bound instead. ECHILD means Foundation's monitor
+    // already reaped it — any other error stops the wait.
     private func reap(pid: pid_t) {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             var status: Int32 = 0
             let result = waitpid(pid, &status, WNOHANG)
-            if result != 0 { return }
+            if result == pid { return }
+            if result == -1 {
+                if errno == EINTR { continue }
+                return
+            }
             usleep(10_000)
         }
     }
