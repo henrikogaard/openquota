@@ -51,11 +51,8 @@ struct SpendPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let updated = model.spend.scannedAt {
-                    HStack(spacing: 3) {
-                        Text(SpendCopy.checked)
-                        Text(updated, format: .relative(presentation: .named))
-                    }
-                    .font(.caption2).foregroundStyle(.tertiary)
+                    Text(SpendCopy.checked + " " + updated.formatted(.relative(presentation: .named).locale(Localized.appLocale)))
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
             } else {
                 HStack(alignment: .center, spacing: 12) {

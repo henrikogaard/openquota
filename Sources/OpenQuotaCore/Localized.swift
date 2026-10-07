@@ -4,11 +4,18 @@ import Foundation
 /// UI never mixes languages.
 public enum Localized {
     public static var norwegian: Bool {
-        ["nb", "nn", "no"].contains(Locale.current.language.languageCode?.identifier ?? "")
+        guard let code = Locale.preferredLanguages.first?.split(separator: "-").first else { return false }
+        return ["nb", "nn", "no"].contains(code)
     }
 
     public static func text(_ en: String, _ nb: String) -> String {
         norwegian ? nb : en
+    }
+
+    /// Locale for user-facing date/relative-time formatting; follows the app's
+    /// resolved language (`-AppleLanguages`-aware), not the region locale.
+    public static var appLocale: Locale {
+        Locale(identifier: Locale.preferredLanguages.first ?? "en")
     }
 
     /// Provider-supplied window labels are English; translate the common ones.

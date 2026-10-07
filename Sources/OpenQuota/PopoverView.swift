@@ -82,7 +82,7 @@ struct PopoverView: View {
                 } else if model.refreshing {
                     Text(L("Refreshing…", "Oppdaterer…"))
                 } else if let lastUpdated {
-                    Text(L("Updated", "Oppdatert") + " " + lastUpdated.formatted(.relative(presentation: .named)))
+                    Text(L("Updated", "Oppdatert") + " " + lastUpdated.formatted(.relative(presentation: .named).locale(Localized.appLocale)))
                 }
             }
             .font(.system(size: 11))
@@ -241,7 +241,7 @@ struct AccountUsage: View {
                     .textSelection(.enabled)
             }
             if snapshot.isStale {
-                Text(L("Last updated", "Sist oppdatert") + " " + snapshot.fetchedAt.formatted(.relative(presentation: .named)))
+                Text(L("Last updated", "Sist oppdatert") + " " + snapshot.fetchedAt.formatted(.relative(presentation: .named).locale(Localized.appLocale)))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

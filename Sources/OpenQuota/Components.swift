@@ -206,7 +206,7 @@ enum Format {
     static func countdown(to date: Date, now: Date = Date()) -> String {
         let seconds = Int(date.timeIntervalSince(now))
         let days = seconds / 86_400, hours = (seconds % 86_400) / 3_600, minutes = (seconds % 3_600) / 60
-        if days >= 2 { return date.formatted(.dateTime.weekday(.abbreviated)) }
+        if days >= 2 { return date.formatted(.dateTime.weekday(.abbreviated).locale(Localized.appLocale)) }
         let h = L("h", "t")
         if days >= 1 { return "\(days)d \(hours)\(h)" }
         if hours >= 1 { return "\(hours)\(h) \(minutes)m" }
