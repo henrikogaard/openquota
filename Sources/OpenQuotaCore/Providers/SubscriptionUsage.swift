@@ -25,7 +25,7 @@ public struct ClaudeUsageReading: Codable, Sendable, Equatable {
             let rate_limits: Limits?
         }
         guard input.count <= 1_048_576 else {
-            throw ProviderError.badResponse("Claude status input too large")
+            throw ProviderError.badResponse(Localized.text("Claude status input too large", "Statusdata fra Claude er for store"))
         }
         let decoded = try JSONDecoder().decode(Input.self, from: input)
         let reading = Self(
@@ -39,13 +39,13 @@ public struct ClaudeUsageReading: Codable, Sendable, Equatable {
     public func snapshot(account: AccountIdentity, now: Date = Date()) throws -> UsageSnapshot {
         try validate()
         guard recordedAt <= now.addingTimeInterval(60) else {
-            throw ProviderError.badResponse("Claude reading has a future timestamp")
+            throw ProviderError.badResponse(Localized.text("Claude reading has a future timestamp", "Claude-målingen har et tidspunkt i fremtiden"))
         }
         let windows = [
             usageWindow(fiveHour, id: "claude.5h", label: "5h"),
             usageWindow(sevenDay, id: "claude.week", label: "Week"),
         ].compactMap { $0 }
-        guard !windows.isEmpty else { throw ProviderError.badResponse("No Claude usage reported yet") }
+        guard !windows.isEmpty else { throw ProviderError.badResponse(Localized.text("No Claude usage reported yet", "Claude har ikke rapportert bruk ennå")) }
         return UsageSnapshot(
             account: account, providerID: "claude", windows: windows,
             fetchedAt: recordedAt, isStale: now.timeIntervalSince(recordedAt) > 600)
@@ -55,7 +55,7 @@ public struct ClaudeUsageReading: Codable, Sendable, Equatable {
         for window in [fiveHour, sevenDay].compactMap({ $0 }) {
             guard window.usedPercentage.isFinite, (0...100).contains(window.usedPercentage),
                   window.resetsAt.map({ $0.isFinite && $0 >= 0 }) ?? true else {
-                throw ProviderError.badResponse("Invalid Claude usage window")
+                throw ProviderError.badResponse(Localized.text("Invalid Claude usage window", "Ugyldig bruksvindu fra Claude"))
             }
         }
     }
@@ -103,7 +103,7 @@ public enum CodexUsageMapping {
                 balance = number
             } else if let string = try c.decodeIfPresent(String.self, forKey: .balance) {
                 guard let number = Double(string), number.isFinite else {
-                    throw ProviderError.badResponse("Invalid Codex credit balance")
+                    throw ProviderError.badResponse(Localized.text("Invalid Codex credit balance", "Ugyldig kredittsaldo fra Codex"))
                 }
                 balance = number
             } else {
@@ -116,17 +116,17 @@ public enum CodexUsageMapping {
         result: Data, account: AccountIdentity, now: Date = Date()
     ) throws -> UsageSnapshot {
         guard result.count <= 1_048_576 else {
-            throw ProviderError.badResponse("Codex response too large")
+            throw ProviderError.badResponse(Localized.text("Codex response too large", "Svaret fra Codex er for stort"))
         }
         let response = try JSONDecoder().decode(Response.self, from: result)
         let buckets: [(String, Bucket)]
         if let all = response.rateLimitsByLimitId, !all.isEmpty {
-            guard all.count <= 32 else { throw ProviderError.badResponse("Too many Codex quota buckets") }
+            guard all.count <= 32 else { throw ProviderError.badResponse(Localized.text("Too many Codex quota buckets", "For mange kvoter fra Codex")) }
             buckets = all.sorted { $0.key < $1.key }
         } else if let one = response.rateLimits {
             buckets = [(one.limitId ?? "codex", one)]
         } else {
-            throw ProviderError.badResponse("No Codex usage reported")
+            throw ProviderError.badResponse(Localized.text("No Codex usage reported", "Codex har ikke rapportert bruk"))
         }
         var windows: [UsageWindow] = []
         for (key, bucket) in buckets {
@@ -134,7 +134,7 @@ public enum CodexUsageMapping {
                 guard let window else { continue }
                 guard window.usedPercent.isFinite, (0...100).contains(window.usedPercent),
                       window.resetsAt.map({ $0.isFinite && $0 >= 0 }) ?? true else {
-                    throw ProviderError.badResponse("Invalid Codex usage window")
+                    throw ProviderError.badResponse(Localized.text("Invalid Codex usage window", "Ugyldig bruksvindu fra Codex"))
                 }
                 let duration = window.windowDurationMins.flatMap { minutes -> String? in
                     guard minutes > 0 else { return nil }
@@ -155,7 +155,7 @@ public enum CodexUsageMapping {
             ?? (buckets.count == 1 ? buckets.first?.1 : nil)
         let balance = primary?.credits?.unlimited == true ? nil : primary?.credits?.balance
         guard !windows.isEmpty || balance != nil else {
-            throw ProviderError.badResponse("No Codex usage windows or credit balance")
+            throw ProviderError.badResponse(Localized.text("No Codex usage windows or credit balance", "Codex rapporterte verken bruk eller kredittsaldo"))
         }
         var identity = account
         identity.plan = primary?.planType ?? identity.plan

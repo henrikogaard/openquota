@@ -60,7 +60,7 @@ struct WindowRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            MetricLine(label: window.label, value: Format.value(window), detail: Format.reset(window))
+            MetricLine(label: Localized.windowLabel(window.label), value: Format.value(window), detail: Format.reset(window).map { $0 == Format.resetting ? L("Resetting now", "Nullstilles nå") : $0 })
             if let fraction = window.fractionUsed { Meter(fractionUsed: fraction) }
         }
     }
@@ -72,13 +72,13 @@ struct QuotaRow: View {
 
     private var resetText: String? {
         guard let reset = Format.reset(window) else { return nil }
-        return reset == "resetting" ? "Resetting now" : "Resets in \(reset)"
+        return reset == Format.resetting ? L("Resetting now", "Nullstilles nå") : L("Resets in \(reset)", "Nullstilles om \(reset)")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(window.label).font(.system(size: 12, weight: .medium))
+                Text(Localized.windowLabel(window.label)).font(.system(size: 12, weight: .medium))
                 Spacer(minLength: 8)
                 if let resetText {
                     Text(resetText).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -88,7 +88,7 @@ struct QuotaRow: View {
             if let fraction = window.fractionUsed {
                 HStack(spacing: 8) {
                     Meter(fractionUsed: fraction)
-                    Text(Format.value(window) + " left")
+                    Text(L("\(Format.value(window)) left", "\(Format.value(window)) igjen"))
                         .font(.system(size: 11, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(fraction >= Tokens.warnThreshold
@@ -186,17 +186,20 @@ enum Format {
         }
         if let remaining = window.remaining {
             if let limit = window.limit {
-                return "\(amount(remaining, unit: window.unit)) of \(amount(limit, unit: window.unit))"
+                return L("\(amount(remaining, unit: window.unit)) of \(amount(limit, unit: window.unit))",
+                         "\(amount(remaining, unit: window.unit)) av \(amount(limit, unit: window.unit))")
             }
-            return "\(amount(remaining, unit: window.unit)) left"
+            return L("\(amount(remaining, unit: window.unit)) left", "\(amount(remaining, unit: window.unit)) igjen")
         }
-        if let used = window.used { return "\(amount(used, unit: window.unit)) used" }
+        if let used = window.used { return L("\(amount(used, unit: window.unit)) used", "\(amount(used, unit: window.unit)) brukt") }
         return "—"
     }
 
+    static let resetting = "resetting"
+
     static func reset(_ window: UsageWindow) -> String? {
         guard let resetsAt = window.resetsAt else { return nil }
-        guard resetsAt > Date() else { return "resetting" }
+        guard resetsAt > Date() else { return resetting }
         return countdown(to: resetsAt)
     }
 
@@ -204,8 +207,9 @@ enum Format {
         let seconds = Int(date.timeIntervalSince(now))
         let days = seconds / 86_400, hours = (seconds % 86_400) / 3_600, minutes = (seconds % 3_600) / 60
         if days >= 2 { return date.formatted(.dateTime.weekday(.abbreviated)) }
-        if days >= 1 { return "\(days)d \(hours)h" }
-        if hours >= 1 { return "\(hours)h \(minutes)m" }
+        let h = L("h", "t")
+        if days >= 1 { return "\(days)d \(hours)\(h)" }
+        if hours >= 1 { return "\(hours)\(h) \(minutes)m" }
         return "\(max(minutes, 1))m"
     }
 }

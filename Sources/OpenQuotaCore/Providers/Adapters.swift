@@ -497,7 +497,7 @@ public struct CursorProvider: UsageProvider {
         guard let usage = try await AdapterHTTP.postJSON(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
             body: [:], headers: headers, http: http) as? [String: Any] else {
-            throw ProviderError.badResponse("Cursor usage")
+            throw ProviderError.badResponse("cursor usage")
         }
         let reset = usage["billingCycleEnd"]
         if let plan = usage["planUsage"] as? [String: Any] {

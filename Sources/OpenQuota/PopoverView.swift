@@ -78,11 +78,11 @@ struct PopoverView: View {
         HStack(spacing: 8) {
             Group {
                 if model.isDemo {
-                    Text("Demo Data")
+                    Text(L("Demo Data", "Demodata"))
                 } else if model.refreshing {
-                    Text("Refreshing…")
+                    Text(L("Refreshing…", "Oppdaterer…"))
                 } else if let lastUpdated {
-                    Text("Updated \(lastUpdated, format: .relative(presentation: .named))")
+                    Text(L("Updated", "Oppdatert") + " " + lastUpdated.formatted(.relative(presentation: .named)))
                 }
             }
             .font(.system(size: 11))
@@ -90,24 +90,24 @@ struct PopoverView: View {
             .padding(.leading, 4)
             Spacer()
             Button { model.refreshNow() } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label(L("Refresh", "Oppdater"), systemImage: "arrow.clockwise")
                     .symbolEffect(.rotate, isActive: model.refreshing)
             }
             .keyboardShortcut("r")
             .disabled(model.refreshing || model.isDemo)
-            .help("Refresh")
+            .help(L("Refresh", "Oppdater"))
             Menu {
-                Button("Add Account…") { showSettings(addingAccount: true) }
+                Button(L("Add Account…", "Legg til konto…")) { showSettings(addingAccount: true) }
                     .disabled(model.isDemo)
-                Button("Settings…") { showSettings() }
+                Button(L("Settings…", "Innstillinger…")) { showSettings() }
                     .keyboardShortcut(",")
-                Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
+                Button(L("Check for Updates…", "Se etter oppdateringer…")) { UpdateController.shared.checkForUpdates() }
                     .disabled(!UpdateController.shared.canCheckForUpdates)
                 Divider()
-                Button("Quit OpenQuota") { NSApp.terminate(nil) }
+                Button(L("Quit OpenQuota", "Avslutt OpenQuota")) { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
             } label: {
-                Label("Options", systemImage: "ellipsis")
+                Label(L("Options", "Valg"), systemImage: "ellipsis")
             }
             .menuIndicator(.hidden)
             .fixedSize()
@@ -122,15 +122,16 @@ struct PopoverView: View {
             Image(systemName: "gauge.with.dots.needle.33percent")
                 .font(.system(size: 28, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("No Accounts")
+            Text(L("No Accounts", "Ingen kontoer"))
                 .font(.headline)
-            Text("Connect a subscription or add an API key to see what you have left.")
+            Text(L("Connect a subscription or add an API key to see what you have left.",
+                   "Koble til et abonnement eller legg til en API-nøkkel for å se hva du har igjen."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 240)
-            Button("Add Account…") { showSettings(addingAccount: true) }
+            Button(L("Add Account…", "Legg til konto…")) { showSettings(addingAccount: true) }
                 .buttonStyle(.glassProminent)
                 .padding(.top, 4)
         }
@@ -179,8 +180,8 @@ struct ProviderSection: View {
                             .contentShape(.rect)
                     }
                     .foregroundStyle(.secondary)
-                    .help("Open Usage Page")
-                    .accessibilityLabel("Open \(name) Usage Page")
+                    .help(L("Open Usage Page", "Åpne bruksside"))
+                    .accessibilityLabel(L("Open \(name) Usage Page", "Åpne bruksside for \(name)"))
                 }
             }
             ForEach(Array(snapshots.enumerated()), id: \.element.account.id) { index, snapshot in
@@ -208,7 +209,7 @@ struct AccountUsage: View {
         VStack(alignment: .leading, spacing: 9) {
             if showsHeader {
                 HStack(spacing: 6) {
-                    Text(snapshot.account.label ?? "Default")
+                    Text(snapshot.account.label ?? L("Default", "Standard"))
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -221,10 +222,13 @@ struct AccountUsage: View {
             }
             ForEach(snapshot.windows) { window in QuotaRow(window: window) }
             if let balance {
-                MetricLine(label: "Balance", value: balance, detail: nil)
+                MetricLine(label: L("Balance", "Saldo"), value: balance, detail: nil)
             }
             if snapshot.windows.isEmpty && balance == nil && snapshot.errorMessage == nil {
-                Text("Waiting for the first reading")
+                Text(snapshot.providerID == "claude"
+                     ? L("Usage appears after your next Claude Code reply.",
+                         "Bruken vises etter neste svar i Claude Code.")
+                     : ProviderError.awaitingReading.userMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -237,7 +241,7 @@ struct AccountUsage: View {
                     .textSelection(.enabled)
             }
             if snapshot.isStale {
-                Text("Last updated \(snapshot.fetchedAt, format: .relative(presentation: .named))")
+                Text(L("Last updated", "Sist oppdatert") + " " + snapshot.fetchedAt.formatted(.relative(presentation: .named)))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

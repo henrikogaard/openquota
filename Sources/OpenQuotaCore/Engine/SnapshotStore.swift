@@ -66,6 +66,10 @@ public actor SnapshotStore {
         case .success(let snapshot):
             snapshots[accountID] = snapshot
             registeredAccounts[accountID] = snapshot.account
+        case .failure(.awaitingReading) where snapshots[accountID] == nil:
+            if let account = registeredAccounts[accountID] {
+                snapshots[accountID] = UsageSnapshot(account: account, providerID: account.providerID)
+            }
         case .failure(let error):
             if var existing = snapshots[accountID] {
                 existing.isStale = true

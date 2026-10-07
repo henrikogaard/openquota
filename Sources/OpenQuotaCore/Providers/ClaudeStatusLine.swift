@@ -35,7 +35,7 @@ public struct ClaudeStatusLineProvider: UsageProvider {
         do {
             handle = try FileHandle(forReadingFrom: readingURL)
         } catch {
-            throw ProviderError.badResponse("Waiting for Claude Code status line")
+            throw ProviderError.awaitingReading
         }
         let data: Data
         do {
@@ -43,21 +43,21 @@ public struct ClaudeStatusLineProvider: UsageProvider {
             try handle.close()
         } catch {
             try? handle.close()
-            throw ProviderError.badResponse("Could not read Claude usage")
+            throw ProviderError.badResponse(Localized.text("Could not read Claude usage", "Kunne ikke lese bruk fra Claude"))
         }
         guard data.count <= SubscriptionConnectionStore.maxFileBytes else {
-            throw ProviderError.badResponse("Claude reading is too large")
+            throw ProviderError.badResponse(Localized.text("Claude reading is too large", "Claude-målingen er for stor"))
         }
         let reading: ClaudeUsageReading
         do {
             reading = try JSONDecoder.openQuota.decode(ClaudeUsageReading.self, from: data)
         } catch {
-            throw ProviderError.badResponse("Invalid Claude usage reading")
+            throw ProviderError.badResponse(Localized.text("Invalid Claude usage reading", "Ugyldig måling fra Claude"))
         }
         do {
             return try reading.snapshot(account: account.account)
         } catch {
-            throw ProviderError.badResponse("Invalid Claude usage reading")
+            throw ProviderError.badResponse(Localized.text("Invalid Claude usage reading", "Ugyldig måling fra Claude"))
         }
     }
 }

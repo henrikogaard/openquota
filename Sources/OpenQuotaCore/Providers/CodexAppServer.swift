@@ -122,7 +122,7 @@ public struct CodexUsageProvider: UsageProvider {
         guard let executable = CodexExecutableResolver.resolve(
             preferredPath: storedExecutable?.path ?? executablePath,
             environment: environment) else {
-            throw ProviderError.badResponse("Codex CLI was not found")
+            throw ProviderError.badResponse(Localized.text("Codex CLI was not found", "Fant ikke Codex CLI"))
         }
         let home = try store.codexHome(for: connection)
         let accountRead = try await CodexAppServerClient.readAccount(
@@ -187,12 +187,12 @@ public enum CodexAppServerClient {
                   !loginID.isEmpty,
                   let rawURL = object["authUrl"] as? String,
                   let authURL = validatedAuthURL(rawURL) else {
-                throw ProviderError.badResponse("Invalid Codex sign-in response")
+                throw ProviderError.badResponse(Localized.text("Invalid Codex sign-in response", "Ugyldig påloggingssvar fra Codex"))
             }
             session.setLoginID(loginID)
             openAuthURL(authURL)
             guard try session.waitForLoginCompletion(loginID: loginID) else {
-                throw ProviderError.badResponse("ChatGPT sign-in was not completed")
+                throw ProviderError.badResponse(Localized.text("ChatGPT sign-in was not completed", "ChatGPT-påloggingen ble ikke fullført"))
             }
             let account = try session.request(
                 method: "account/read",
@@ -205,10 +205,10 @@ public enum CodexAppServerClient {
         guard let object = result as? [String: Any],
               let account = object["account"] as? [String: Any],
               let type = account["type"] as? String else {
-            throw ProviderError.badResponse("Codex account information is unavailable")
+            throw ProviderError.badResponse(Localized.text("Codex account information is unavailable", "Kontoinformasjon fra Codex er ikke tilgjengelig"))
         }
         guard type == "chatgpt" else {
-            throw ProviderError.badResponse("Sign in with ChatGPT to use subscription limits")
+            throw ProviderError.badResponse(Localized.text("Sign in with ChatGPT to use subscription limits", "Logg inn med ChatGPT for å se abonnementsgrensene"))
         }
         return (account["planType"] as? String, type)
     }
@@ -349,8 +349,9 @@ private final class CodexAppServerSession: @unchecked Sendable {
             try process.run()
         } catch {
             closePipes()
-            throw ProviderError.badResponse(
-                "Could not launch Codex. Choose an executable Codex CLI and check that its installation and account directory are accessible.")
+            throw ProviderError.badResponse(Localized.text(
+                "Could not launch Codex. Choose an executable Codex CLI and check that its installation and account directory are accessible.",
+                "Kunne ikke starte Codex. Velg en kjørbar Codex CLI og sjekk at installasjonen og kontomappen er tilgjengelige."))
         }
         _ = setpgid(process.processIdentifier, process.processIdentifier)
         closeHandle(inputPipe.fileHandleForReading)
@@ -413,11 +414,12 @@ private final class CodexAppServerSession: @unchecked Sendable {
             }
             guard numericID(message["id"]) == requestID else { continue }
             guard message["error"] == nil else {
-                throw ProviderError.badResponse(
-                    "Codex rejected \(method). Update the selected Codex CLI and try again.")
+                throw ProviderError.badResponse(Localized.text(
+                    "Codex rejected \(method). Update the selected Codex CLI and try again.",
+                    "Codex avviste \(method). Oppdater Codex CLI og prøv igjen."))
             }
             guard let result = message["result"] else {
-                throw ProviderError.badResponse("Codex app-server response is incomplete")
+                throw ProviderError.badResponse(Localized.text("Codex app-server response is incomplete", "Svaret fra Codex app-server er ufullstendig"))
             }
             return result
         }
@@ -443,7 +445,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
             }
             guard let params = message["params"] as? [String: Any],
                   let notifiedID = params["loginId"] as? String else {
-                throw ProviderError.badResponse("Invalid Codex sign-in status")
+                throw ProviderError.badResponse(Localized.text("Invalid Codex sign-in status", "Ugyldig påloggingsstatus fra Codex"))
             }
             if notifiedID == loginID { return completionSuccess(message) }
             try bufferNotification(message)
@@ -496,11 +498,11 @@ private final class CodexAppServerSession: @unchecked Sendable {
         timeout: TimeInterval? = nil
     ) throws {
         guard JSONSerialization.isValidJSONObject(message) else {
-            throw ProviderError.badResponse("Invalid Codex app-server request")
+            throw ProviderError.badResponse(Localized.text("Invalid Codex app-server request", "Ugyldig forespørsel til Codex app-server"))
         }
         var data = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys])
         guard data.count + 1 <= Self.maxBytes else {
-            throw ProviderError.badResponse("Codex app-server request too large")
+            throw ProviderError.badResponse(Localized.text("Codex app-server request too large", "Forespørselen til Codex app-server er for stor"))
         }
         data.append(0x0A)
         let end = min(deadline, Date().addingTimeInterval(timeout ?? requestTimeout))
@@ -515,7 +517,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
             let ready = poll(&descriptor, 1, max(1, Int32(min(remaining * 1_000, Double(Int32.max)))))
             if ready < 0 && errno == EINTR { continue }
             guard ready > 0, descriptor.revents & Int16(POLLOUT) != 0 else {
-                throw ProviderError.badResponse("Codex app-server input closed")
+                throw ProviderError.badResponse(Localized.text("Codex app-server input closed", "Inndata til Codex app-server ble lukket"))
             }
             let count = data.withUnsafeBytes { bytes -> Int in
                 guard let base = bytes.baseAddress else { return 0 }
@@ -528,7 +530,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
             } else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue
             } else {
-                throw ProviderError.badResponse("Codex app-server input failed")
+                throw ProviderError.badResponse(Localized.text("Codex app-server input failed", "Kunne ikke skrive til Codex app-server"))
             }
         }
     }
@@ -544,12 +546,12 @@ private final class CodexAppServerSession: @unchecked Sendable {
                 guard !line.isEmpty,
                       let value = try? JSONSerialization.jsonObject(with: line),
                       let message = value as? [String: Any] else {
-                    throw ProviderError.badResponse("Malformed Codex app-server response")
+                    throw ProviderError.badResponse(Localized.text("Malformed Codex app-server response", "Ugyldig svar fra Codex app-server"))
                 }
                 return message
             }
             guard lineBuffer.count <= Self.maxBytes else {
-                throw ProviderError.badResponse("Codex app-server line too large")
+                throw ProviderError.badResponse(Localized.text("Codex app-server line too large", "Linjen fra Codex app-server er for lang"))
             }
             let remaining = messageDeadline.timeIntervalSinceNow
             guard remaining > 0 else { throw ProviderError.timedOut }
@@ -557,7 +559,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
             let ready = poll(&descriptor, 1, max(1, Int32(min(remaining * 1_000, 100))))
             if ready < 0 && errno == EINTR { continue }
             if ready == 0 { continue }
-            guard ready > 0 else { throw ProviderError.badResponse("Codex app-server read failed") }
+            guard ready > 0 else { throw ProviderError.badResponse(Localized.text("Codex app-server read failed", "Kunne ikke lese fra Codex app-server")) }
             var buffer = [UInt8](repeating: 0, count: 32 * 1024)
             let count = buffer.withUnsafeMutableBytes {
                 read(outputFD, $0.baseAddress, $0.count)
@@ -568,11 +570,11 @@ private final class CodexAppServerSession: @unchecked Sendable {
             }
             if count < 0 {
                 if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK { continue }
-                throw ProviderError.badResponse("Codex app-server read failed")
+                throw ProviderError.badResponse(Localized.text("Codex app-server read failed", "Kunne ikke lese fra Codex app-server"))
             }
             guard totalOutput + count <= Self.maxBytes,
                   lineBuffer.count + count <= Self.maxBytes else {
-                throw ProviderError.badResponse("Codex app-server output too large")
+                throw ProviderError.badResponse(Localized.text("Codex app-server output too large", "Utdata fra Codex app-server er for store"))
             }
             totalOutput += count
             lineBuffer.append(contentsOf: buffer.prefix(count))
@@ -599,26 +601,27 @@ private final class CodexAppServerSession: @unchecked Sendable {
         // tokens or account data. Only emit fixed, actionable categories.
         if diagnostic.contains("node") &&
             (diagnostic.contains("no such file") || diagnostic.contains("not found")) {
-            return .badResponse("Codex could not find Node.js. Reinstall Codex with Homebrew, or choose the Codex executable from your active Node.js installation.")
+            return .badResponse(Localized.text("Codex could not find Node.js. Reinstall Codex with Homebrew, or choose the Codex executable from your active Node.js installation.", "Codex fant ikke Node.js. Installer Codex på nytt med Homebrew, eller velg Codex-filen fra Node.js-installasjonen du bruker."))
         }
         if diagnostic.contains("app-server") &&
             (diagnostic.contains("unrecognized") || diagnostic.contains("unexpected argument")) {
-            return .badResponse("This Codex CLI does not support app-server. Update Codex, then choose the updated executable.")
+            return .badResponse(Localized.text("This Codex CLI does not support app-server. Update Codex, then choose the updated executable.", "Denne Codex CLI-en støtter ikke app-server. Oppdater Codex og velg den oppdaterte filen."))
         }
         let status = process.isRunning ? "" : " (exit \(process.terminationStatus))"
-        return .badResponse(
-            "Codex app-server stopped\(status). Check that the selected CLI runs “codex app-server” in Terminal, update Codex, then try again.")
+        return .badResponse(Localized.text(
+            "Codex app-server stopped\(status). Check that the selected CLI runs “codex app-server” in Terminal, update Codex, then try again.",
+            "Codex app-server stoppet\(status). Sjekk at «codex app-server» kjører i Terminal, oppdater Codex og prøv igjen."))
     }
 
     private func bufferNotification(_ message: [String: Any]) throws {
         guard let params = message["params"] as? [String: Any],
               params["loginId"] as? String != nil else {
-            throw ProviderError.badResponse("Invalid Codex sign-in status")
+            throw ProviderError.badResponse(Localized.text("Invalid Codex sign-in status", "Ugyldig påloggingsstatus fra Codex"))
         }
         lock.lock()
         defer { lock.unlock() }
         guard earlyNotifications.count < 32 else {
-            throw ProviderError.badResponse("Too many Codex app-server notifications")
+            throw ProviderError.badResponse(Localized.text("Too many Codex app-server notifications", "For mange varsler fra Codex app-server"))
         }
         earlyNotifications.append(message)
     }

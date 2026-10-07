@@ -38,7 +38,7 @@ enum DemoSnapshots {
             UsageSnapshot(
                 account: .init(providerID: "opencode-go", id: "demo-oc2", label: "Work key"),
                 providerID: "opencode-go",
-                errorMessage: "Credentials rejected (re-login?)"),
+                errorMessage: ProviderError.unauthorized.userMessage),
             UsageSnapshot(
                 account: .init(providerID: "openrouter", id: "demo-key1", label: "Personal key"),
                 providerID: "openrouter", creditsRemaining: 18.75, creditsUnit: "USD"),

@@ -34,7 +34,7 @@ struct MenuBarLabel: View {
                     .opacity(tightest.isStale ? 0.5 : 1)
             }
         }
-        .accessibilityLabel(tightest?.lowestPercentRemaining.map { "OpenQuota, \(Int($0)) percent left" } ?? "OpenQuota")
+        .accessibilityLabel(tightest?.lowestPercentRemaining.map { L("OpenQuota, \(Int($0)) percent left", "OpenQuota, \(Int($0)) prosent igjen") } ?? "OpenQuota")
     }
 }
 #endif

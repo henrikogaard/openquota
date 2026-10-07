@@ -132,3 +132,27 @@ final class SnapshotStoreTests: XCTestCase {
         XCTAssertEqual(snapshot?.errorMessage, ProviderError.timedOut.userMessage)
     }
 }
+
+final class AwaitingReadingTests: XCTestCase {
+    func test_awaitingReadingIsNotAnError() async {
+        let store = SnapshotStore()
+        let account = AccountIdentity(providerID: "claude", id: "claude@1", label: "Claude")
+        await store.register(account: account)
+        await store.finishRefresh(accountID: "claude@1", result: .failure(.awaitingReading))
+        let snapshot = await store.snapshot(for: "claude@1")
+        XCTAssertNotNil(snapshot)
+        XCTAssertNil(snapshot?.errorMessage)
+        XCTAssertEqual(snapshot?.isStale, false)
+    }
+
+    func test_diagnosticBadResponsesAreWrappedButSentencesShowAsIs() {
+        XCTAssertEqual(ProviderError.badResponse("Codex CLI was not found").userMessage, "Codex CLI was not found")
+        XCTAssertTrue(ProviderError.badResponse("billing payload").userMessage.contains("billing payload"))
+        XCTAssertFalse(ProviderError.badResponse("billing payload").userMessage.hasPrefix("Bad response"))
+    }
+
+    func test_windowLabelsPassThroughInEnglish() {
+        if !Localized.norwegian { XCTAssertEqual(Localized.windowLabel("Week"), "Week") }
+        XCTAssertEqual(Localized.windowLabels["Week"], "Uke")
+    }
+}

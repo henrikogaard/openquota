@@ -104,7 +104,7 @@ final class SubscriptionUsageTests: XCTestCase {
             _ = try await provider.refresh(account: accounts[1])
             XCTFail("Missing status-line reading must not be a zero-quota success")
         } catch let error as ProviderError {
-            XCTAssertEqual(error, .badResponse("Waiting for Claude Code status line"))
+            XCTAssertEqual(error, .awaitingReading)
         }
     }
 

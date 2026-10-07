@@ -56,17 +56,27 @@ public enum ProviderError: Error, Sendable, Equatable {
     case network(String)
     case badResponse(String)
     case timedOut
+    /// Nothing to show yet (e.g. Claude Code hasn't written a status line). Not an error.
+    case awaitingReading
 
     public var userMessage: String {
         switch self {
-        case .notLoggedIn: "Not logged in"
-        case .noAccounts: "No accounts configured"
-        case .unauthorized: "Credentials rejected (re-login?)"
-        case .rateLimited(let t): t.map { "Rate limited, retry in \(Int($0))s" } ?? "Rate limited"
-        case .serverError(let code): "Provider error \(code)"
-        case .network(let msg): "Network: \(msg)"
-        case .badResponse(let msg): "Bad response: \(msg)"
-        case .timedOut: "Request timed out"
+        case .notLoggedIn: Localized.text("Not signed in", "Ikke logget inn")
+        case .noAccounts: Localized.text("No accounts configured", "Ingen kontoer er lagt til")
+        case .unauthorized:
+            Localized.text("Sign-in rejected. Sign in again or replace the key in Settings.",
+                           "Påloggingen ble avvist. Logg inn på nytt eller bytt nøkkel i Innstillinger.")
+        case .rateLimited(let t):
+            t.map { Localized.text("Rate limited, retry in \(Int($0))s", "For mange forespørsler, prøv igjen om \(Int($0)) s") }
+                ?? Localized.text("Rate limited", "For mange forespørsler")
+        case .serverError(let code): Localized.text("Provider error \(code)", "Feil hos leverandøren (\(code))")
+        case .network(let msg): Localized.text("Network: \(msg)", "Nettverk: \(msg)")
+        case .badResponse(let msg):
+            // Sentence-case messages are written for people; lowercase ones are diagnostics.
+            msg.first?.isUppercase == true ? msg
+                : Localized.text("Unexpected response (\(msg))", "Uventet svar (\(msg))")
+        case .awaitingReading: Localized.text("Waiting for the first reading", "Venter på første måling")
+        case .timedOut: Localized.text("Request timed out", "Forespørselen tok for lang tid")
         }
     }
 }

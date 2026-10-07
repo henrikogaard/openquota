@@ -94,17 +94,17 @@ final class AppModel {
         guard snapshots != updated else { return }
         snapshots = updated
         do { try cache.save(state.snapshots) }
-        catch { statusMessage = "Couldn't save usage cache: \(error.localizedDescription)" }
+        catch { statusMessage = L("Couldn't save usage cache: \(error.localizedDescription)", "Kunne ikke lagre bruksbufferen: \(error.localizedDescription)") }
     }
 
     private func rebuildProviders() {
         do { profiles = try profileStore.profiles() }
-        catch { statusMessage = "Couldn't load account profiles: \(error.localizedDescription)" }
+        catch { statusMessage = L("Couldn't load account profiles: \(error.localizedDescription)", "Kunne ikke laste kontoprofiler: \(error.localizedDescription)") }
         do { subscriptionConnections = try subscriptionStore.connections() }
-        catch { statusMessage = "Couldn't load subscription connections" }
+        catch { statusMessage = L("Couldn't load subscription connections", "Kunne ikke laste abonnementstilkoblinger") }
         var customSpecs: [ProviderSpec] = []
         do { customSpecs = try settings.userSpecs() }
-        catch { statusMessage = "Couldn't load custom providers: \(error.localizedDescription)" }
+        catch { statusMessage = L("Couldn't load custom providers: \(error.localizedDescription)", "Kunne ikke laste egne leverandører: \(error.localizedDescription)") }
         let registry = ProviderRegistry(
             http: http, credentials: credentials, extraSpecs: customSpecs)
         providers = registry.providers
@@ -128,6 +128,8 @@ final class AppModel {
             }
         }
     }
+
+    static var codexConnectedStatus: String { L("Codex account connected.", "Codex-kontoen er koblet til.") }
 
     static let credentialPaths: [String: String] = [
         "grok": ".grok/auth.json", "opencode": ".local/share/opencode/auth.json",
@@ -237,17 +239,17 @@ final class AppModel {
         guard !isDemo, !codexLoginBusy else { return }
         let normalizedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedLabel.isEmpty else {
-            codexLoginStatus = "Enter an account label."
+            codexLoginStatus = L("Enter an account label.", "Skriv inn et kontonavn.")
             return
         }
         let expandedPath = executablePath.map { ($0 as NSString).expandingTildeInPath }
         if let expandedPath, !expandedPath.hasPrefix("/") {
-            codexLoginStatus = "Choose an absolute Codex executable path."
+            codexLoginStatus = L("Choose an absolute Codex executable path.", "Velg en absolutt sti til Codex.")
             return
         }
         guard let executable = CodexExecutableResolver.resolve(
             preferredPath: expandedPath) else {
-            codexLoginStatus = "Codex CLI was not found. Install it or choose its executable."
+            codexLoginStatus = L("Codex CLI was not found. Install it or choose its executable.", "Fant ikke Codex CLI. Installer den eller velg filen.")
             return
         }
         let id = UUID()
@@ -262,14 +264,14 @@ final class AppModel {
                     .appendingPathComponent("codex-home", isDirectory: true).path)
             home = try subscriptionStore.codexHome(for: candidate)
         } catch {
-            codexLoginStatus = "Couldn't prepare a private Codex account home."
+            codexLoginStatus = L("Couldn't prepare a private Codex account home.", "Kunne ikke klargjøre en privat Codex-kontomappe.")
             return
         }
 
         codexLoginGeneration &+= 1
         let generation = codexLoginGeneration
         codexLoginBusy = true
-        codexLoginStatus = "Starting Codex sign-in…"
+        codexLoginStatus = L("Starting Codex sign-in…", "Starter Codex-pålogging…")
         codexLoginTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -279,7 +281,7 @@ final class AppModel {
                     openAuthURL: { url in
                         Task { @MainActor [weak self] in
                             guard let self, self.codexLoginGeneration == generation else { return }
-                            self.codexLoginStatus = "Complete sign-in in your browser…"
+                            self.codexLoginStatus = L("Complete sign-in in your browser…", "Fullfør påloggingen i nettleseren…")
                             openAuthURL(url)
                         }
                     })
@@ -297,19 +299,19 @@ final class AppModel {
                 _ = try self.subscriptionStore.addCodex(id: id, label: normalizedLabel)
                 self.codexLoginBusy = false
                 self.codexLoginTask = nil
-                self.codexLoginStatus = "Codex account connected."
+                self.codexLoginStatus = Self.codexConnectedStatus
                 self.configurationChanged()
             } catch is CancellationError {
                 guard self.codexLoginGeneration == generation else { return }
                 self.codexLoginBusy = false
                 self.codexLoginTask = nil
-                self.codexLoginStatus = "Codex sign-in cancelled."
+                self.codexLoginStatus = L("Codex sign-in cancelled.", "Codex-påloggingen ble avbrutt.")
             } catch {
                 guard self.codexLoginGeneration == generation else { return }
                 self.codexLoginBusy = false
                 self.codexLoginTask = nil
                 self.codexLoginStatus = (error as? ProviderError)?.userMessage
-                    ?? "Codex sign-in failed. Try again."
+                    ?? L("Codex sign-in failed. Try again.", "Codex-påloggingen mislyktes. Prøv igjen.")
             }
         }
     }
@@ -320,7 +322,7 @@ final class AppModel {
         codexLoginTask?.cancel()
         codexLoginTask = nil
         codexLoginBusy = false
-        codexLoginStatus = "Codex sign-in cancelled."
+        codexLoginStatus = L("Codex sign-in cancelled.", "Codex-påloggingen ble avbrutt.")
     }
 
     func removeSubscriptionConnection(_ connection: SubscriptionConnection) throws {
@@ -329,7 +331,7 @@ final class AppModel {
             let restored = try ClaudeStatusLineInstaller(store: subscriptionStore)
                 .disconnect(connection)
             if !restored {
-                statusMessage = "Claude settings changed; their status-line command was kept."
+                statusMessage = L("Claude settings changed; their status-line command was kept.", "Claude-innstillingene er endret; statuslinjekommandoen ble beholdt.")
             }
         }
         try subscriptionStore.remove(id: connection.id)
@@ -409,8 +411,8 @@ final class AppModel {
 
     func sourceNote(_ id: String) -> String? {
         switch id {
-        case "claude": "Claude Code status line · updates while you use Claude Code"
-        case "codex": "Codex managed ChatGPT sign-in · subscription limits"
+        case "claude": L("Claude Code status line · updates while you use Claude Code", "Claude Code-statuslinje · oppdateres mens du bruker Claude Code")
+        case "codex": L("Codex managed ChatGPT sign-in · subscription limits", "ChatGPT-pålogging via Codex · abonnementsgrenser")
         default: nil
         }
     }

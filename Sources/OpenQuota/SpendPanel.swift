@@ -106,8 +106,7 @@ struct SpendPanel: View {
 }
 
 enum SpendCopy {
-    private static var norwegian: Bool { ["nb", "nn", "no"].contains(Locale.current.language.languageCode?.identifier ?? "") }
-    private static func text(_ en: String, _ nb: String) -> String { norwegian ? nb : en }
+    private static func text(_ en: String, _ nb: String) -> String { Localized.text(en, nb) }
     static var title: String { text("Estimated Spend", "Estimert forbruk") }
     static var thisMac: String { text("This Mac", "Denne Macen") }
     static var enable: String { text("Read Local Claude & Codex Usage Logs", "Les lokale brukslogger for Claude og Codex") }

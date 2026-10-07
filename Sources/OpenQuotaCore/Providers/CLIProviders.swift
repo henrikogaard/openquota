@@ -268,7 +268,7 @@ private final class CLIProcessRun: @unchecked Sendable {
                     return
                 }
                 if output.count + count > Self.maxOutputBytes {
-                    failure = ProviderError.badResponse("CLI output too large")
+                    failure = ProviderError.badResponse(Localized.text("CLI output too large", "Utdata fra CLI er for store"))
                     lock.unlock()
                     break
                 }
@@ -280,7 +280,7 @@ private final class CLIProcessRun: @unchecked Sendable {
             } else if errno == EAGAIN || errno == EWOULDBLOCK {
                 break
             } else {
-                failure = ProviderError.badResponse("CLI output read failed")
+                failure = ProviderError.badResponse(Localized.text("CLI output read failed", "Kunne ikke lese utdata fra CLI"))
                 break
             }
         }

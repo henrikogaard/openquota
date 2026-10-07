@@ -29,7 +29,7 @@ struct SubscriptionConnectForm: View {
         }
         .onDisappear { model.cancelCodexLogin() }
         .onChange(of: model.codexLoginStatus) { _, status in
-            if status == "Codex account connected." { onConnected() }
+            if status == AppModel.codexConnectedStatus { onConnected() }
         }
     }
 
@@ -37,26 +37,27 @@ struct SubscriptionConnectForm: View {
         VStack(alignment: .leading, spacing: 16) {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 GridRow {
-                    fieldLabel("Label")
-                    TextField("Label", text: $claudeLabel, prompt: Text(Self.claudeDefaultLabel))
+                    fieldLabel(L("Label", "Navn"))
+                    TextField(L("Label", "Navn"), text: $claudeLabel, prompt: Text(Self.claudeDefaultLabel))
                         .labelsHidden().textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    fieldLabel("Configuration")
+                    fieldLabel(L("Configuration", "Konfigurasjon"))
                     HStack {
                         Text(claudeDirectory).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Choose…", action: chooseClaudeDirectory)
+                        Button(L("Choose…", "Velg…"), action: chooseClaudeDirectory)
                     }
                 }
             }
-            Text("Adds a status-line bridge to this configuration. Usage appears after your next Claude Code reply. Your existing status line keeps working.")
+            Text(L("Adds a status-line bridge to this configuration. Usage appears after your next Claude Code reply. Your existing status line keeps working.",
+                    "Legger til en statuslinjebro i denne konfigurasjonen. Bruken vises etter neste svar i Claude Code. Den eksisterende statuslinjen fortsetter å virke."))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                Button("Connect", action: installClaude)
+                Button(L("Connect", "Koble til"), action: installClaude)
                     .buttonStyle(.glassProminent)
                     .keyboardShortcut(.defaultAction)
             }
@@ -67,8 +68,8 @@ struct SubscriptionConnectForm: View {
         VStack(alignment: .leading, spacing: 16) {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 GridRow {
-                    fieldLabel("Label")
-                    TextField("Label", text: $codexLabel, prompt: Text(Self.codexDefaultLabel))
+                    fieldLabel(L("Label", "Navn"))
+                    TextField(L("Label", "Navn"), text: $codexLabel, prompt: Text(Self.codexDefaultLabel))
                         .labelsHidden().textFieldStyle(.roundedBorder)
                 }
                 GridRow {
@@ -78,12 +79,13 @@ struct SubscriptionConnectForm: View {
                             .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .help(codexPath)
-                        Button("Choose…", action: chooseCodexExecutable)
+                        Button(L("Choose…", "Velg…"), action: chooseCodexExecutable)
                             .disabled(model.codexLoginBusy)
                     }
                 }
             }
-            Text("Sign in through Codex in your browser. Each account gets its own private Codex home.")
+            Text(L("Sign in through Codex in your browser. Each account gets its own private Codex home.",
+                    "Logg inn via Codex i nettleseren. Hver konto får sin egen private Codex-mappe."))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let status = model.codexLoginStatus {
@@ -97,12 +99,12 @@ struct SubscriptionConnectForm: View {
                 HStack {
                     ProgressView().controlSize(.small)
                     Spacer()
-                    Button("Cancel") { model.cancelCodexLogin() }
+                    Button(L("Cancel", "Avbryt")) { model.cancelCodexLogin() }
                 }
             } else {
                 HStack {
                     Spacer()
-                    Button("Sign In with ChatGPT…", action: startCodexLogin)
+                    Button(L("Sign In with ChatGPT…", "Logg inn med ChatGPT…"), action: startCodexLogin)
                         .buttonStyle(.glassProminent)
                         .keyboardShortcut(.defaultAction)
                 }
@@ -112,7 +114,7 @@ struct SubscriptionConnectForm: View {
 
     private var codexPath: String {
         if !codexExecutable.isEmpty { return codexExecutable }
-        return CodexExecutableResolver.resolve()?.path ?? "Not found — choose Codex CLI"
+        return CodexExecutableResolver.resolve()?.path ?? L("Not found — choose Codex CLI", "Ikke funnet – velg Codex CLI")
     }
 
     private func fieldLabel(_ title: String) -> some View {
@@ -130,7 +132,7 @@ struct SubscriptionConnectForm: View {
 
     private func installClaude() {
         guard let helper = helperExecutable() else {
-            errorText = "The openquota-bridge helper is missing. Reinstall the app or run it from a complete build."
+            errorText = L("The openquota-bridge helper is missing. Reinstall the app or run it from a complete build.", "Hjelpeprogrammet openquota-bridge mangler. Installer appen på nytt.")
             return
         }
         perform {
@@ -205,22 +207,22 @@ struct SubscriptionConnectForm: View {
         } catch let error as ClaudeStatusLineInstallError {
             switch error {
             case .duplicateConfigurationDirectory:
-                errorText = "That Claude configuration is already connected."
+                errorText = L("That Claude configuration is already connected.", "Denne Claude-konfigurasjonen er allerede koblet til.")
             case .configurationDirectoryNotFound:
-                errorText = "Choose an existing Claude configuration directory."
+                errorText = L("Choose an existing Claude configuration directory.", "Velg en eksisterende Claude-konfigurasjonsmappe.")
             case .invalidHelper:
-                errorText = "The OpenQuota bridge helper is unavailable."
+                errorText = L("The OpenQuota bridge helper is unavailable.", "Hjelpeprogrammet til OpenQuota er utilgjengelig.")
             case .recursiveBridge:
-                errorText = "This status line already invokes OpenQuota. Disconnect it before reconnecting."
+                errorText = L("This status line already invokes OpenQuota. Disconnect it before reconnecting.", "Denne statuslinjen bruker allerede OpenQuota. Koble den fra før du kobler til på nytt.")
             case .unsupportedStatusLine:
-                errorText = "The existing status-line type is unsupported; settings were not changed."
+                errorText = L("The existing status-line type is unsupported; settings were not changed.", "Den eksisterende statuslinjetypen støttes ikke; innstillingene ble ikke endret.")
             case .malformedSettings, .settingsTooLarge:
-                errorText = "Claude settings could not be read safely; no changes were made."
+                errorText = L("Claude settings could not be read safely; no changes were made.", "Claude-innstillingene kunne ikke leses trygt; ingenting ble endret.")
             default:
-                errorText = "Claude could not be connected. Check the label and configuration directory."
+                errorText = L("Claude could not be connected. Check the label and configuration directory.", "Claude kunne ikke kobles til. Sjekk navnet og konfigurasjonsmappen.")
             }
         } catch {
-            errorText = "The subscription connection could not be saved."
+            errorText = L("The subscription connection could not be saved.", "Abonnementstilkoblingen kunne ikke lagres.")
         }
     }
 }

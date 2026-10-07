@@ -15,10 +15,10 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $tab) {
             AccountsPane(model: model, adding: $adding)
-                .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
+                .tabItem { Label(L("Accounts", "Kontoer"), systemImage: "person.crop.circle") }
                 .tag(Tab.accounts)
             GeneralPane(model: model)
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label(L("General", "Generelt"), systemImage: "gearshape") }
                 .tag(Tab.general)
         }
         .onAppear(perform: consumeAddRequest)
@@ -42,7 +42,7 @@ struct AccountsPane: View {
     @State private var errorText: String?
     @State private var confirmingRemoval = false
 
-    private static let sections = ["Subscriptions", "API Keys & Sessions", "Local Profiles", "Detected on This Mac"]
+    private static var sections: [String] { AccountItem.sectionTitles }
 
     private var items: [AccountItem] {
         var out: [AccountItem] = []
@@ -52,13 +52,13 @@ struct AccountsPane: View {
         }
         out += saved.map {
             AccountItem(id: "key:\($0.id)", providerID: $0.account.providerID,
-                        title: $0.account.label ?? "Unlabelled", kind: .saved($0))
+                        title: $0.account.label ?? L("Unlabelled", "Uten navn"), kind: .saved($0))
         }
         out += model.profiles.map {
             AccountItem(id: "profile:\($0.id)", providerID: $0.providerID, title: $0.label, kind: .profile($0))
         }
         out += detected.filter { $0.accounts > 0 }.map {
-            AccountItem(id: "local:\($0.id)", providerID: $0.id, title: "Signed-in CLI",
+            AccountItem(id: "local:\($0.id)", providerID: $0.id, title: L("Signed-in CLI", "Pålogget CLI"),
                         kind: .detected(accounts: $0.accounts))
         }
         return out
@@ -91,13 +91,13 @@ struct AccountsPane: View {
                         Image(systemName: "plus").frame(width: 24, height: 22)
                     }
                     .disabled(model.isDemo)
-                    .help("Add Account")
+                    .help(L("Add Account", "Legg til konto"))
                     Divider().frame(height: 16)
                     Button { confirmingRemoval = true } label: {
                         Image(systemName: "minus").frame(width: 24, height: 22)
                     }
                     .disabled(selected?.isRemovable != true)
-                    .help("Remove Account")
+                    .help(L("Remove Account", "Fjern konto"))
                     Spacer()
                 }
                 .buttonStyle(.borderless)
@@ -113,13 +113,13 @@ struct AccountsPane: View {
                         .id(selected.id)
                 } else {
                     ContentUnavailableView {
-                        Label(model.isDemo ? "Demo Data" : "No Accounts", systemImage: "person.crop.circle")
+                        Label(model.isDemo ? L("Demo Data", "Demodata") : L("No Accounts", "Ingen kontoer"), systemImage: "person.crop.circle")
                     } description: {
-                        Text(model.isDemo ? "Accounts can't be edited while demo data is shown."
-                             : "Add a subscription or API key to track what you have left.")
+                        Text(model.isDemo ? L("Accounts can't be edited while demo data is shown.", "Kontoer kan ikke endres mens demodata vises.")
+                             : L("Add a subscription or API key to track what you have left.", "Legg til et abonnement eller en API-nøkkel for å følge med på hva du har igjen."))
                     } actions: {
                         if !model.isDemo {
-                            Button("Add Account…") { adding = true }
+                            Button(L("Add Account…", "Legg til konto…")) { adding = true }
                         }
                     }
                 }
@@ -137,9 +137,9 @@ struct AccountsPane: View {
         .sheet(isPresented: $adding, onDismiss: reloadSoon) {
             AddAccountSheet(model: model) { adding = false }
         }
-        .alert("Remove “\(selected?.title ?? "")”?", isPresented: $confirmingRemoval) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove", role: .destructive, action: remove)
+        .alert(L("Remove “\(selected?.title ?? "")”?", "Fjerne «\(selected?.title ?? "")»?"), isPresented: $confirmingRemoval) {
+            Button(L("Cancel", "Avbryt"), role: .cancel) {}
+            Button(L("Remove", "Fjern"), role: .destructive, action: remove)
         } message: {
             Text(selected?.removalMessage ?? "")
         }
@@ -158,7 +158,7 @@ struct AccountsPane: View {
             selection = nil
             reloadSoon()
         } catch {
-            errorText = (error as? ProviderError)?.userMessage ?? "The account could not be removed."
+            errorText = (error as? ProviderError)?.userMessage ?? L("The account could not be removed.", "Kontoen kunne ikke fjernes.")
         }
     }
 
@@ -187,12 +187,17 @@ struct AccountItem: Identifiable {
     var title: String
     var kind: Kind
 
+    static var sectionTitles: [String] {
+        [L("Subscriptions", "Abonnementer"), L("API Keys & Sessions", "API-nøkler og økter"),
+         L("Local Profiles", "Lokale profiler"), L("Detected on This Mac", "Funnet på denne Macen")]
+    }
+
     var section: String {
         switch kind {
-        case .subscription: "Subscriptions"
-        case .saved: "API Keys & Sessions"
-        case .profile: "Local Profiles"
-        case .detected: "Detected on This Mac"
+        case .subscription: Self.sectionTitles[0]
+        case .saved: Self.sectionTitles[1]
+        case .profile: Self.sectionTitles[2]
+        case .detected: Self.sectionTitles[3]
         }
     }
 
@@ -204,13 +209,13 @@ struct AccountItem: Identifiable {
     var removalMessage: String {
         switch kind {
         case .subscription(let connection) where connection.kind == .codexAppServer:
-            "Codex keeps its sign-in files in the account's private home."
+            L("Codex keeps its sign-in files in the account's private home.", "Codex beholder påloggingsfilene i kontoens private mappe.")
         case .subscription:
-            "Your Claude status line is restored if it hasn't changed since connecting."
+            L("Your Claude status line is restored if it hasn't changed since connecting.", "Claude-statuslinjen gjenopprettes hvis den ikke er endret siden tilkoblingen.")
         case .profile:
-            "The credential file stays where it is."
+            L("The credential file stays where it is.", "Påloggingsfilen blir liggende der den er.")
         default:
-            "The key is deleted from OpenQuota. Your provider account is unaffected."
+            L("The key is deleted from OpenQuota. Your provider account is unaffected.", "Nøkkelen slettes fra OpenQuota. Kontoen hos leverandøren påvirkes ikke.")
         }
     }
 }
@@ -249,25 +254,25 @@ struct AccountDetail: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Provider") {
+                LabeledContent(L("Provider", "Leverandør")) {
                     HStack(spacing: 6) {
                         ProviderGlyph(providerID: item.providerID, name: model.providerName(item.providerID), size: 20)
                         Text(model.providerName(item.providerID))
                     }
                 }
                 if case .saved(let account) = item.kind {
-                    TextField("Label", text: $label)
+                    TextField(L("Label", "Navn"), text: $label)
                         .onSubmit { rename(account) }
                 } else {
-                    LabeledContent("Label", value: item.title)
+                    LabeledContent(L("Label", "Navn"), value: item.title)
                 }
-                LabeledContent("Source", value: source)
+                LabeledContent(L("Source", "Kilde"), value: source)
                 if let plan = snapshot?.account.plan {
-                    LabeledContent("Plan", value: plan.capitalized)
+                    LabeledContent(L("Plan", "Plan"), value: plan.capitalized)
                 }
             }
             if let snapshot, !snapshot.windows.isEmpty || snapshot.errorMessage != nil {
-                Section("Usage") {
+                Section(L("Usage", "Bruk")) {
                     ForEach(snapshot.windows) { window in
                         WindowRow(window: window).font(.callout)
                     }
@@ -281,7 +286,7 @@ struct AccountDetail: View {
             }
             if let url = model.dashboardURL(item.providerID) {
                 Section {
-                    Link("Open Usage Page", destination: url)
+                    Link(L("Open Usage Page", "Åpne bruksside"), destination: url)
                 }
             }
             if let errorText {
@@ -295,27 +300,27 @@ struct AccountDetail: View {
     private var source: String {
         switch item.kind {
         case .subscription(let connection):
-            connection.kind == .claudeStatusLine ? "Claude Code status line" : "Codex sign-in"
+            connection.kind == .claudeStatusLine ? L("Claude Code status line", "Claude Code-statuslinje") : L("Codex sign-in", "Codex-pålogging")
         case .saved(let account):
-            account.account.providerID == "cursor" ? "Session token in Keychain" : "API key in Keychain"
-        case .profile: "Credential file"
-        case .detected: "Provider CLI on this Mac"
+            account.account.providerID == "cursor" ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen") : L("API key in Keychain", "API-nøkkel i nøkkelringen")
+        case .profile: L("Credential file", "Påloggingsfil")
+        case .detected: L("Provider CLI on this Mac", "Leverandørens CLI på denne Macen")
         }
     }
 
     private var note: String? {
         switch item.kind {
         case .subscription(let connection) where connection.kind == .claudeStatusLine:
-            "Updates while you use Claude Code. \(connection.directory)"
+            L("Updates while you use Claude Code. \(connection.directory)", "Oppdateres mens du bruker Claude Code. \(connection.directory)")
         case .profile(let profile) where profile.providerID == "claude" || profile.providerID == "codex":
-            "This older profile is no longer used. Remove it and connect the account again."
+            L("This older profile is no longer used. Remove it and connect the account again.", "Denne eldre profilen brukes ikke lenger. Fjern den og koble til kontoen på nytt.")
         case .profile(let profile): profile.credentialPath
         case .saved(let account) where account.account.providerID == "mistral":
-            "Mistral shows 30-day workspace activity, not a personal allowance."
+            L("Mistral shows 30-day workspace activity, not a personal allowance.", "Mistral viser aktivitet i arbeidsområdet siste 30 dager, ikke en personlig kvote.")
         case .saved(let account) where account.account.providerID == "requesty":
-            "Balance is shared by every key in the organization."
+            L("Balance is shared by every key in the organization.", "Saldoen deles av alle nøklene i organisasjonen.")
         case .saved(let account) where model.specProviders().first { $0.id == account.account.providerID }?.unverified == true:
-            "Experimental integration. Readings have not been verified against a live account."
+            L("Experimental integration. Readings have not been verified against a live account.", "Eksperimentell integrasjon. Målingene er ikke bekreftet mot en ekte konto.")
         default: nil
         }
     }
@@ -326,7 +331,7 @@ struct AccountDetail: View {
             errorText = nil
             onChange()
         } catch {
-            errorText = (error as? ProviderError)?.userMessage ?? "The label could not be saved."
+            errorText = (error as? ProviderError)?.userMessage ?? L("The label could not be saved.", "Navnet kunne ikke lagres.")
         }
     }
 }
@@ -338,8 +343,8 @@ struct GeneralPane: View {
 
     var body: some View {
         Form {
-            Section("Menu Bar") {
-                Toggle("Show percentage next to the gauge", isOn: $menuBarShowsPercent)
+            Section(L("Menu Bar", "Menylinje")) {
+                Toggle(L("Show percentage next to the gauge", "Vis prosent ved siden av måleren"), isOn: $menuBarShowsPercent)
             }
             Section {
                 Toggle(SpendCopy.settingsToggle, isOn: Binding(
@@ -352,13 +357,13 @@ struct GeneralPane: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Section("Updates") {
-                Toggle("Check for updates automatically", isOn: $automaticallyChecks)
+            Section(L("Updates", "Oppdateringer")) {
+                Toggle(L("Check for updates automatically", "Se etter oppdateringer automatisk"), isOn: $automaticallyChecks)
                     .onChange(of: automaticallyChecks) { _, value in
                         UpdateController.shared.automaticallyChecks = value
                     }
-                LabeledContent("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")") {
-                    Button("Check Now") { UpdateController.shared.checkForUpdates() }
+                LabeledContent(L("Version", "Versjon") + " " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development", "Utvikling"))) {
+                    Button(L("Check Now", "Se etter nå")) { UpdateController.shared.checkForUpdates() }
                         .disabled(!UpdateController.shared.canCheckForUpdates)
                 }
             }

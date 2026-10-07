@@ -9,6 +9,14 @@ struct AddAccountSheet: View {
         case claude, codex, cursor
         case apiKey(String)
         case profile(String)
+
+        /// Forms with a primary button draw their own Cancel/Add bar.
+        var ownsActions: Bool {
+            switch self {
+            case .claude, .codex: false
+            case .cursor, .apiKey, .profile: true
+            }
+        }
     }
 
     struct Tile: Identifiable {
@@ -36,7 +44,8 @@ struct AddAccountSheet: View {
         let keys = model.specProviders()
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
             .map { Tile(target: .apiKey($0.id), providerID: $0.id, name: $0.displayName) }
-        return [("Subscriptions", subscriptions), ("Sign-Ins", signIns), ("API Keys", keys)]
+        return [(L("Subscriptions", "Abonnementer"), subscriptions), (L("Sign-Ins", "Pålogginger"), signIns),
+                (L("API Keys", "API-nøkler"), keys)]
             .map { ($0.0, $0.1.filter(matches)) }
             .filter { !$0.1.isEmpty }
     }
@@ -67,14 +76,16 @@ struct AddAccountSheet: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            HStack {
-                Spacer()
-                Button("Cancel", action: onDone).keyboardShortcut(.cancelAction)
+            if target?.ownsActions != true {
+                Divider()
+                HStack {
+                    Spacer()
+                    Button(L("Cancel", "Avbryt"), action: onDone).keyboardShortcut(.cancelAction)
+                }
+                .padding(12)
             }
-            .padding(12)
         }
-        .frame(width: 560, height: target == nil ? 470 : 340)
+        .frame(width: 560, height: target == nil ? 470 : (target.map { if case .profile = $0 { true } else { false } } == true ? 420 : 340))
         .onAppear { searchFocused = true }
     }
 
@@ -82,7 +93,7 @@ struct AddAccountSheet: View {
         HStack(spacing: 8) {
             if let target {
                 Button { self.target = nil } label: {
-                    Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
+                    Label(L("Back", "Tilbake"), systemImage: "chevron.left").labelStyle(.iconOnly)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
@@ -90,9 +101,9 @@ struct AddAccountSheet: View {
                 Text(title(for: target)).font(.headline)
                 Spacer()
             } else {
-                Text("Add Account").font(.headline)
+                Text(L("Add Account", "Legg til konto")).font(.headline)
                 Spacer()
-                TextField("Search Providers", text: $search)
+                TextField(L("Search Providers", "Søk etter leverandører"), text: $search)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 200)
                     .focused($searchFocused)
@@ -179,43 +190,49 @@ private struct APIKeyForm: View {
 
     private var note: String {
         switch provider.id {
-        case "mistral": "Needs an Admin API key. Shows 30-day workspace activity, not a personal allowance."
-        case "requesty": "Needs a management key. Balance is shared across the organization."
-        case "zenmux": "Needs a Management API key."
-        case "atlascloud": "Needs a key with account balance permission."
-        case "opencode-go": "Paste the OpenCode Go key from opencode.ai/zen. Add one per subscription."
+        case "mistral": L("Needs an Admin API key. Shows 30-day workspace activity, not a personal allowance.",
+                           "Krever en admin-API-nøkkel. Viser aktivitet i arbeidsområdet siste 30 dager, ikke en personlig kvote.")
+        case "requesty": L("Needs a management key. Balance is shared across the organization.",
+                            "Krever en administrasjonsnøkkel. Saldoen deles i hele organisasjonen.")
+        case "zenmux": L("Needs a Management API key.", "Krever en administrasjons-API-nøkkel.")
+        case "atlascloud": L("Needs a key with account balance permission.", "Krever en nøkkel med tilgang til kontosaldo.")
+        case "opencode-go": L("Paste the OpenCode Go key from opencode.ai/zen. Add one per subscription.",
+                               "Lim inn OpenCode Go-nøkkelen fra opencode.ai/zen. Legg til én per abonnement.")
         default: provider.unverified
-            ? "Experimental. Readings haven't been verified against a live account."
-            : "API billing is separate from any subscription allowance."
+            ? L("Experimental. Readings haven't been verified against a live account.",
+                "Eksperimentell. Målingene er ikke bekreftet mot en ekte konto.")
+            : L("API billing is separate from any subscription allowance.",
+                "API-fakturering er atskilt fra abonnementskvoter.")
         }
     }
 
     var body: some View {
-        Form {
-            Section {
-                SecureField(provider.spec.auth == .cookie ? "Session Cookie" : "API Key", text: $key)
-                TextField("Label", text: $label, prompt: Text("Work"))
-                HStack {
-                    Spacer()
-                    Button("Add") {
-                        do {
-                            try model.addAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                provider: provider, label: label.isEmpty ? nil : label)
-                            onDone()
-                        } catch {
-                            errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    SecureField(provider.spec.auth == .cookie ? L("Session Cookie", "Øktcookie") : L("API Key", "API-nøkkel"), text: $key)
+                    TextField(L("Label", "Navn"), text: $label, prompt: Text(L("Work", "Jobb")))
+                } header: {
+                    Text(provider.displayName)
+                } footer: {
+                    Text(errorText ?? note).foregroundStyle(errorText == nil ? Color.secondary : .red)
                 }
-            } header: {
-                Text(provider.displayName)
-            } footer: {
-                Text(errorText ?? note).foregroundStyle(errorText == nil ? Color.secondary : .red)
             }
+            .formStyle(.grouped)
+            FormActions(primary: L("Add", "Legg til"),
+                        disabled: key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        action: add, cancel: onDone)
         }
-        .formStyle(.grouped)
+    }
+
+    private func add() {
+        do {
+            try model.addAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines),
+                                provider: provider, label: label.isEmpty ? nil : label)
+            onDone()
+        } catch {
+            errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
+        }
     }
 }
 
@@ -227,32 +244,32 @@ private struct CursorSessionForm: View {
     @State private var errorText: String?
 
     var body: some View {
-        Form {
-            Section {
-                SecureField("Session Token", text: $token, prompt: Text("userID::token"))
-                TextField("Label", text: $label, prompt: Text("Personal"))
-                HStack {
-                    Spacer()
-                    Button("Add") {
-                        do {
-                            try model.addSessionToken(token.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                      label: label.isEmpty ? nil : label)
-                            onDone()
-                        } catch {
-                            errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(token.isEmpty)
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    SecureField(L("Session Token", "Øktnøkkel"), text: $token, prompt: Text("userID::token"))
+                    TextField(L("Label", "Navn"), text: $label, prompt: Text(L("Personal", "Privat")))
+                } header: {
+                    Text("Cursor")
+                } footer: {
+                    Text(errorText ?? L("Paste a session token from Cursor. Replace it when it expires.",
+                                        "Lim inn en øktnøkkel fra Cursor. Bytt den ut når den utløper."))
+                        .foregroundStyle(errorText == nil ? Color.secondary : .red)
                 }
-            } header: {
-                Text("Cursor")
-            } footer: {
-                Text(errorText ?? "Paste a session token from Cursor. Replace it when it expires.")
-                    .foregroundStyle(errorText == nil ? Color.secondary : .red)
             }
+            .formStyle(.grouped)
+            FormActions(primary: L("Add", "Legg til"), disabled: token.isEmpty, action: add, cancel: onDone)
         }
-        .formStyle(.grouped)
+    }
+
+    private func add() {
+        do {
+            try model.addSessionToken(token.trimmingCharacters(in: .whitespacesAndNewlines),
+                                      label: label.isEmpty ? nil : label)
+            onDone()
+        } catch {
+            errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
+        }
     }
 }
 
@@ -264,38 +281,62 @@ private struct CredentialProfileForm: View {
     @State private var path = ""
     @State private var errorText: String?
 
+    private var defaultPath: String? { AppModel.credentialPaths[providerID].map { "~/" + $0 } }
+    private var defaultExists: Bool {
+        defaultPath.map { FileManager.default.fileExists(atPath: ($0 as NSString).expandingTildeInPath) } ?? false
+    }
+    private var canAdd: Bool {
+        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !path.isEmpty
+    }
+
     var body: some View {
-        Form {
-            Section {
-                TextField("Label", text: $label, prompt: Text("Work"))
-                LabeledContent("Credential File") {
-                    HStack {
-                        Text(path.isEmpty ? "None" : (path as NSString).abbreviatingWithTildeInPath)
-                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        Button("Choose…", action: choose)
+        VStack(spacing: 0) {
+            Form {
+                if let defaultPath {
+                    Section {
+                        LabeledContent(L("Main Account", "Hovedkonto")) {
+                            Label(defaultExists ? L("Detected", "Funnet") : L("Not signed in", "Ikke logget inn"),
+                                  systemImage: defaultExists ? "checkmark.circle.fill" : "minus.circle")
+                                .foregroundStyle(defaultExists ? Color.green : .secondary)
+                        }
+                    } footer: {
+                        Text(defaultExists
+                             ? L("Read automatically from \(defaultPath).", "Leses automatisk fra \(defaultPath).")
+                             : L("Sign in with the \(model.providerName(providerID)) CLI; OpenQuota then reads \(defaultPath) automatically.",
+                                 "Logg inn med \(model.providerName(providerID))-CLI-en, så leser OpenQuota \(defaultPath) automatisk."))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
-                HStack {
-                    Spacer()
-                    Button("Add") {
-                        do {
-                            try model.addProfile(providerID: providerID, label: label, path: path)
-                            onDone()
-                        } catch {
-                            errorText = "Choose an existing credential file under 1 MB and enter a label."
+                Section {
+                    TextField(L("Label", "Navn"), text: $label, prompt: Text(L("Work", "Jobb")))
+                    LabeledContent(L("Credential File", "Påloggingsfil")) {
+                        HStack {
+                            Text(path.isEmpty ? L("Not chosen", "Ikke valgt") : (path as NSString).abbreviatingWithTildeInPath)
+                                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            Button(L("Choose…", "Velg…"), action: choose)
                         }
                     }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || path.isEmpty)
+                } header: {
+                    Text(L("Another Account", "En annen konto"))
+                } footer: {
+                    Text(errorText ?? L("Pick a copy of another account's credential file. Press ⌘⇧. in the file dialog to show hidden folders.",
+                                        "Velg en kopi av påloggingsfilen til en annen konto. Trykk ⌘⇧. i fildialogen for å vise skjulte mapper."))
+                        .foregroundStyle(errorText == nil ? Color.secondary : .red)
                 }
-            } header: {
-                Text(model.providerName(providerID))
-            } footer: {
-                Text(errorText ?? "Your default sign-in is detected automatically. Add a profile for each additional account's credential file.")
-                    .foregroundStyle(errorText == nil ? Color.secondary : .red)
             }
+            .formStyle(.grouped)
+            FormActions(primary: L("Add", "Legg til"), disabled: !canAdd, action: add, cancel: onDone)
         }
-        .formStyle(.grouped)
+    }
+
+    private func add() {
+        do {
+            try model.addProfile(providerID: providerID, label: label, path: path)
+            onDone()
+        } catch {
+            errorText = L("Choose an existing credential file under 1 MB.", "Velg en eksisterende påloggingsfil under 1 MB.")
+        }
     }
 
     private func choose() {
@@ -303,7 +344,33 @@ private struct CredentialProfileForm: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
+        if let defaultPath {
+            panel.directoryURL = URL(fileURLWithPath: (defaultPath as NSString).expandingTildeInPath)
+                .deletingLastPathComponent()
+        }
         if panel.runModal() == .OK, let url = panel.url { path = url.path }
+    }
+}
+
+/// Cancel + primary button along the sheet's bottom edge.
+private struct FormActions: View {
+    var primary: String
+    var disabled: Bool
+    var action: () -> Void
+    var cancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack {
+                Spacer()
+                Button(L("Cancel", "Avbryt"), action: cancel).keyboardShortcut(.cancelAction)
+                Button(primary, action: action)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(disabled)
+            }
+            .padding(12)
+        }
     }
 }
 #endif
