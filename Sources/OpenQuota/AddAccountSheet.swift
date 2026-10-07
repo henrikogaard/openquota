@@ -37,7 +37,7 @@ struct AddAccountSheet: View {
             Tile(target: .claude, providerID: "claude", name: "Claude Code"),
             Tile(target: .codex, providerID: "codex", name: "Codex / ChatGPT"),
         ]
-        let signIns = [Tile(target: .cursor, providerID: "cursor", name: "Cursor")]
+        let signIns = [Tile(target: .cursor, providerID: "cursor", name: L("Cursor (Experimental)", "Cursor (eksperimentell)"))]
             + AppModel.credentialPaths.keys.sorted().map {
                 Tile(target: .profile($0), providerID: $0, name: model.providerName($0))
             }
@@ -85,7 +85,7 @@ struct AddAccountSheet: View {
                 .padding(12)
             }
         }
-        .frame(width: 560, height: target == nil ? 470 : (target.map { if case .profile = $0 { true } else { false } } == true ? 420 : 340))
+        .frame(width: 560, height: target == .cursor ? 480 : (target == nil ? 470 : (target.map { if case .profile = $0 { true } else { false } } == true ? 420 : 340)))
         .onAppear { searchFocused = true }
     }
 
@@ -242,6 +242,7 @@ private struct CursorSessionForm: View {
     @State private var token = ""
     @State private var label = ""
     @State private var errorText: String?
+    @State private var consent = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -250,25 +251,42 @@ private struct CursorSessionForm: View {
                     SecureField(L("Session Token", "Øktnøkkel"), text: $token, prompt: Text("userID::token"))
                     TextField(L("Label", "Navn"), text: $label, prompt: Text(L("Personal", "Privat")))
                 } header: {
-                    Text("Cursor")
+                    Text(L("Cursor · Experimental", "Cursor · Eksperimentell"))
                 } footer: {
-                    Text(errorText ?? L("Paste a session token from Cursor. Replace it when it expires.",
-                                        "Lim inn en øktnøkkel fra Cursor. Bytt den ut når den utløper."))
+                    Text(errorText ?? L("Adding a new token for the same Cursor account replaces its saved token.",
+                                        "En ny øktnøkkel for samme Cursor-konto erstatter den lagrede nøkkelen."))
                         .foregroundStyle(errorText == nil ? Color.secondary : .red)
+                }
+                Section {
+                    Link(L("Open Cursor Dashboard", "Åpne Cursor-kontrollpanelet"),
+                         destination: URL(string: "https://cursor.com/dashboard?tab=usage")!)
+                    Text(L("In your signed-in browser, open Developer Tools → Application/Storage → Cookies → cursor.com. Copy only the WorkosCursorSessionToken value.",
+                           "Åpne utviklerverktøy i nettleseren der du er logget inn → Application/Storage → Cookies → cursor.com. Kopier bare verdien til WorkosCursorSessionToken."))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle(L("Enable experimental access", "Aktiver eksperimentell tilgang"), isOn: $consent)
+                        .toggleStyle(.checkbox)
+                } footer: {
+                    Text(L("Uses unofficial endpoints that may break. This is a sensitive account session, not a read-only API key. Stored in this Mac’s Keychain; no browser import or automatic renewal. Never share it in chat or screenshots.",
+                           "Bruker uoffisielle endepunkter som kan slutte å virke. Dette er en sensitiv kontoøkt, ikke en skrivebeskyttet API-nøkkel. Lagres i nøkkelringen på denne Macen; ingen nettleserimport eller automatisk fornyelse. Del den aldri i chat eller skjermbilder."))
                 }
             }
             .formStyle(.grouped)
-            FormActions(primary: L("Add", "Legg til"), disabled: token.isEmpty, action: add, cancel: onDone)
+            FormActions(primary: L("Save", "Lagre"),
+                        disabled: !consent || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        action: add, cancel: onDone)
         }
     }
 
     private func add() {
+        guard consent else { return }
         do {
             try model.addSessionToken(token.trimmingCharacters(in: .whitespacesAndNewlines),
                                       label: label.isEmpty ? nil : label)
             onDone()
         } catch {
-            errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
+            let message = (error as? ProviderError)?.userMessage
+                ?? L("The session token could not be saved.", "Øktnøkkelen kunne ikke lagres.")
+            errorText = providerError(message, providerID: "cursor")
         }
     }
 }

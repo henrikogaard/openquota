@@ -150,6 +150,16 @@ public struct GenericProvider: UsageProvider {
         try saveConfiguredKeys(entries)
     }
 
+    func replaceKey(_ secret: String, accountID: String, label: String?) throws -> AccountIdentity {
+        guard let entry = try configuredKeys().first(where: { $0.id == accountID }) else {
+            throw ProviderError.notLoggedIn
+        }
+        try credentials.setSecret(secret, for: credentialKey(accountID))
+        let resolvedLabel = label ?? entry.label
+        try renameKey(accountID: accountID, label: resolvedLabel)
+        return AccountIdentity(providerID: spec.id, id: accountID, label: resolvedLabel)
+    }
+
     public func renameKey(accountID: String, label: String?) throws {
         var entries = try configuredKeys()
         guard let index = entries.firstIndex(where: { $0.id == accountID }) else { return }

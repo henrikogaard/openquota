@@ -24,7 +24,7 @@ Each saved key/session has its own row. Other local providers discover their def
 | OpenCode Go | Local API key | Rolling, weekly and monthly usage |
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
 | Grok | Local OAuth | Billing-period usage; named local accounts |
-| Cursor | Manual session token | Plan usage and credit grants; no browser-cookie import |
+| Cursor | Experimental, manual session token | Cursor Models / Other Models allowance and on-demand spend; internal dashboard with legacy RPC fallback |
 | Mistral Vibe | Admin API key | **30-day activity**, not personal remaining allowance |
 | OpenRouter | API key | Remaining account credits and independent key usage/limit |
 | Requesty | Management API key | Organization balance |

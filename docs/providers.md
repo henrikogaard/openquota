@@ -52,6 +52,41 @@ Not planned: CodexBar's browser-cookie and private-endpoint integrations
 imported web sessions, which OpenQuota does not do. Antigravity and Ollama
 (OpenUsage) read local app state with no documented interface yet.
 
+## Cursor (experimental, explicit opt-in)
+
+Settings → Accounts → + → **Cursor (Experimental)** accepts the
+`WorkosCursorSessionToken` value (`userID::token`, including the URL-encoded
+variant). Obtain it locally from the signed-in Cursor dashboard's browser
+Developer Tools → Application/Storage → Cookies → cursor.com. Paste only the
+value, not a full Cookie header. Never share it in chat, logs, or screenshots.
+
+This is a sensitive account session, **not a read-only API key**. It is stored
+in this Mac's device-only, non-synchronizing Keychain. OpenQuota does not import
+browser cookies or automatically renew Cursor sessions. Cursor's internal
+endpoints are not a supported public personal-quota API; they may change or stop
+working, and using them is not evidence of permission under Cursor's terms.
+
+Adding a token with the same Cursor user ID replaces the saved token and
+preserves its account ID and label (unless a new label is supplied). Old duplicate
+entries with readable tokens for that user are removed. Accounts whose stored
+token is missing cannot be matched to a user: remove those broken entries
+manually. Saved accounts never borrow another account's credential. A legacy
+shared token is only used for its matching legacy account.
+
+The dashboard `https://cursor.com/api/usage-summary` is preferred. It reads only
+`individualUsage`, not team-wide totals. Cursor Models and Other Models are
+shown separately when present; otherwise a combined plan reading is used.
+On-demand spend is shown in USD, not as remaining included allowance. Unknown
+or disabled fields are omitted, never assumed to mean zero usage.
+
+If the dashboard fails or has no usable fields, the same account's token is
+tried against `api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
+with optional `GetPlanInfo` and `GetCreditGrantsBalance` metadata. Rate limits,
+cancellation, and redirects stop requests rather than triggering fallback.
+Redirects are refused on all Cursor requests; credentials are sent only in
+headers to the two fixed HTTPS hosts. Known expired tokens fail locally and can
+be replaced through Add Account. Fixture coverage is not live account verification.
+
 ## Subscription integrations (explicit opt-in)
 
 Claude and Codex subscriptions are not read from their legacy token files or
@@ -139,7 +174,7 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 
 | Provider | Source | Endpoint(s) |
 |---|---|---|
-| Cursor | pasted `WorkosCursorSessionToken` (`userID::jwt`) | `api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo,GetCreditGrantsBalance}` |
+| Cursor (experimental) | pasted `WorkosCursorSessionToken` (`userID::jwt`) | `cursor.com/api/usage-summary`, with `api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo,GetCreditGrantsBalance}` fallback |
 
 Cookie-token spec providers (e.g. Perplexity) use `auth: "cookie"` — the
 pasted value is sent as a `Cookie:` header. Rot is explicit: the row shows an
@@ -162,7 +197,7 @@ profiles. Unsupported commands show an error card.
 
 - API-key providers: add, label, rename and remove independent keys in Settings.
   Adding an identical key updates its existing label, without another account.
-- Cursor: paste and label each `userID::jwt` session separately. Sessions expire;
+- Cursor: paste and label each `userID::jwt` session separately; new tokens for the same user replace the saved token. Sessions expire;
   remove/re-add a changed token when needed. No browser cookies are read.
 - OpenCode, Devin, Grok: Settings → Add Account → Local Credential Profile
   references a separate credential file. Profile IDs namespace account IDs,

@@ -8,6 +8,9 @@ func L(_ en: String, _ nb: String) -> String { Localized.text(en, nb) }
 func providerError(_ message: String, providerID: String) -> String {
     guard message == ProviderError.unauthorized.userMessage else { return message }
     switch providerID {
+    case "cursor":
+        return L("Cursor session expired or rejected. Add a new Cursor session token in Settings to reconnect.",
+                 "Cursor-økten er utløpt eller avvist. Legg til en ny Cursor-øktnøkkel i Innstillinger for å koble til igjen.")
     case "mistral":
         return L("Key rejected. Mistral needs an Admin API key from admin.mistral.ai; a regular API key won't work.",
                  "Nøkkelen ble avvist. Mistral krever en admin-API-nøkkel fra admin.mistral.ai; en vanlig API-nøkkel fungerer ikke.")

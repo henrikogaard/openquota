@@ -310,6 +310,9 @@ struct AccountDetail: View {
 
     private var note: String? {
         switch item.kind {
+        case .saved(let account) where account.account.providerID == "cursor":
+            L("Experimental: unofficial endpoints and a sensitive session token. To renew, add a new Cursor token for the same account. No automatic renewal or browser import.",
+              "Eksperimentell: uoffisielle endepunkter og en sensitiv øktnøkkel. Legg til en ny Cursor-nøkkel for samme konto for å fornye. Ingen automatisk fornyelse eller nettleserimport.")
         case .subscription(let connection) where connection.kind == .claudeStatusLine:
             L("Updates while you use Claude Code. \(connection.directory)", "Oppdateres mens du bruker Claude Code. \(connection.directory)")
         case .profile(let profile) where profile.providerID == "claude" || profile.providerID == "codex":

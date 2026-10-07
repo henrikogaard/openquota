@@ -10,19 +10,22 @@ public struct HTTPRequest: Sendable {
     public var body: Data?
     /// Per-request ceiling, seconds. Hard-bounded by the client.
     public var timeout: TimeInterval
+    public var allowsRedirects: Bool
 
     public init(
         method: String = "GET",
         url: URL,
         headers: [String: String] = [:],
         body: Data? = nil,
-        timeout: TimeInterval = 15
+        timeout: TimeInterval = 15,
+        allowsRedirects: Bool = true
     ) {
         self.method = method
         self.url = url
         self.headers = headers
         self.body = body
         self.timeout = timeout
+        self.allowsRedirects = allowsRedirects
     }
 }
 
@@ -78,9 +81,10 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
         let (data, response): (Data, URLResponse)
+        let delegate = request.allowsRedirects ? nil : NoRedirectsDelegate()
         do {
             #if os(macOS)
-            let (bytes, streamedResponse) = try await session.bytes(for: urlRequest)
+            let (bytes, streamedResponse) = try await session.bytes(for: urlRequest, delegate: delegate)
             var buffer = Data()
             for try await byte in bytes {
                 guard buffer.count < maxResponseBytes else {
@@ -90,12 +94,14 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
             }
             (data, response) = (buffer, streamedResponse)
             #else
-            (data, response) = try await session.data(for: urlRequest)
+            (data, response) = try await session.data(for: urlRequest, delegate: delegate)
             guard data.count <= maxResponseBytes else {
                 throw ProviderError.badResponse("response exceeds 2 MB")
             }
             #endif
         } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch let error as ProviderError {
             throw error
@@ -112,6 +118,16 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
             headers[key] = value
         }
         return HTTPResponse(status: http.statusCode, headers: headers, body: data)
+    }
+}
+
+final class NoRedirectsDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 

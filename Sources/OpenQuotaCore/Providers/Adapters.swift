@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -481,11 +482,16 @@ public struct CursorProvider: UsageProvider {
 
     /// The cookie value is `userID::jwt` (or %-encoded `userID%3A%3Ajwt`).
     private func parseToken(_ raw: String) -> (userID: String, jwt: String)? {
+        guard raw.utf8.count <= 16_384 else { return nil }
         let decoded = raw.removingPercentEncoding ?? raw
         guard let range = decoded.range(of: "::") else { return nil }
         let userID = String(decoded[..<range.lowerBound])
         let jwt = String(decoded[range.upperBound...])
-        guard !userID.isEmpty, !jwt.isEmpty else { return nil }
+        let userCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        let tokenCharacters = userCharacters.union(CharacterSet(charactersIn: "."))
+        guard !userID.isEmpty, !jwt.isEmpty,
+              userID.unicodeScalars.allSatisfy(userCharacters.contains),
+              jwt.unicodeScalars.allSatisfy(tokenCharacters.contains) else { return nil }
         return (userID, jwt)
     }
 
@@ -497,7 +503,10 @@ public struct CursorProvider: UsageProvider {
             providerID: id,
             id: AccountIdentity.makeID(providerID: id, identityKey: parsed.userID),
             label: parsed.userID)
-        if !accounts.contains(where: { $0.id == identity.id }) {
+        let savedUsers = try storage.configuredKeys().compactMap { entry in
+            try credentials.secret(for: storage.credentialKey(entry.id)).flatMap(parseToken)?.userID
+        }
+        if !savedUsers.contains(parsed.userID) && !accounts.contains(where: { $0.id == identity.id }) {
             accounts.append(AccountDescriptor(account: identity, source: .userSuppliedKey))
         }
         return accounts
@@ -506,9 +515,29 @@ public struct CursorProvider: UsageProvider {
     /// Register a pasted session token (Settings → Cursor → paste cookie value).
     public func addSessionToken(_ raw: String, label: String? = nil) throws -> AccountIdentity {
         guard let parsed = parseToken(raw) else {
-            throw ProviderError.badResponse("expected userID::token format")
+            throw ProviderError.badResponse(Localized.text(
+                "Paste only the WorkosCursorSessionToken value (userID::token), not a Cookie header.",
+                "Lim inn bare verdien til WorkosCursorSessionToken (userID::token), ikke en Cookie-header."))
         }
-        return try storage.addKey(raw, label: label ?? parsed.userID)
+        try checkExpiry(parsed.jwt)
+        let canonical = "\(parsed.userID)::\(parsed.jwt)"
+        let matching = try storage.configuredKeys().filter { entry in
+            try credentials.secret(for: storage.credentialKey(entry.id)).flatMap(parseToken)?.userID == parsed.userID
+        }
+        let account: AccountIdentity
+        if let existing = matching.first {
+            account = try storage.replaceKey(canonical, accountID: existing.id, label: label)
+            for duplicate in matching.dropFirst() {
+                try storage.removeKey(accountID: duplicate.id)
+            }
+        } else {
+            account = try storage.addKey(canonical, label: label ?? parsed.userID)
+        }
+        if let legacy = try credentials.secret(for: "cursor/session"),
+           parseToken(legacy)?.userID == parsed.userID {
+            try credentials.removeSecret(for: "cursor/session")
+        }
+        return account
     }
 
     public func removeSessionToken(accountID: String) throws {
@@ -525,72 +554,149 @@ public struct CursorProvider: UsageProvider {
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
-        let stored = try credentials.secret(for: storage.credentialKey(account.id))
-        guard let raw = try stored ?? credentials.secret(for: "cursor/session"),
+        let raw: String?
+        if try storage.configuredKeys().contains(where: { $0.id == account.id }) {
+            raw = try credentials.secret(for: storage.credentialKey(account.id))
+        } else if let legacy = try credentials.secret(for: "cursor/session"),
+                  let parsed = parseToken(legacy),
+                  account.id == AccountIdentity.makeID(providerID: id, identityKey: parsed.userID) {
+            raw = legacy
+        } else {
+            raw = nil
+        }
+        guard account.account.providerID == id, let raw,
               let parsed = parseToken(raw) else { throw ProviderError.notLoggedIn }
+        try checkExpiry(parsed.jwt)
+        try Task.checkCancellation()
+        // Prefer the richer dashboard response. Both routes use this account's token only.
+        do {
+            let summary = try await request(
+                "https://cursor.com/api/usage-summary",
+                headers: ["Cookie": "WorkosCursorSessionToken=\(parsed.userID)%3A%3A\(parsed.jwt)"])
+            let individual = summary["individualUsage"] as? [String: Any]
+            var windows = planWindows(individual?["plan"] as? [String: Any], reset: summary["billingCycleEnd"])
+            if let demand = individual?["onDemand"] as? [String: Any],
+               demand["enabled"] as? Bool != false, let used = number(demand, "used") {
+                // Spending is not remaining included allowance; do not feed it into quota meters.
+                windows.append(UsageWindow(
+                    id: "cursor.ondemand", label: "On-demand spend", kind: .credits,
+                    used: used / 100, unit: "USD",
+                    resetsAt: percentWindow("date", "", used: 0, resetsAt: summary["billingCycleEnd"])?.resetsAt))
+            }
+            guard !windows.isEmpty else { throw noQuotaError }
+            var identity = account.account
+            identity.plan = summary["membershipType"] as? String
+            return UsageSnapshot(account: identity, providerID: id, windows: windows)
+        } catch {
+            try allowFallback(after: error)
+        }
+        try Task.checkCancellation()
         let headers = [
             "Authorization": "Bearer \(parsed.jwt)",
             "Connect-Protocol-Version": "1",
             "X-Client-Key": parsed.userID,
         ]
-        var windows: [UsageWindow] = []
         var identity = account.account
         var credits: Double?
-        guard let usage = try await AdapterHTTP.postJSON(
+        let usage = try await request(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
-            body: [:], headers: headers, http: http) as? [String: Any] else {
-            throw ProviderError.badResponse("cursor usage")
-        }
-        let reset = usage["billingCycleEnd"]
-        if let plan = usage["planUsage"] as? [String: Any] {
-            if let percent = adapterNum(plan, ["totalPercentUsed"]),
-               let window = percentWindow("cursor.plan", "Plan", used: percent, resetsAt: reset) {
-                windows.append(window)
-            } else if let limit = adapterNum(plan, ["limit"]),
-                      let used = adapterNum(plan, ["totalSpend"])
-                        ?? adapterNum(plan, ["remaining"]).map({ limit - $0 }) {
-                windows.append(UsageWindow(
-                    id: "cursor.plan", label: "Plan", kind: .credits,
-                    used: used / 100, limit: limit / 100, unit: "USD",
-                    resetsAt: percentWindow("date", "", used: 0, resetsAt: reset)?.resetsAt))
-            }
-            for (key, label) in [("autoPercentUsed", "Cursor Models"), ("apiPercentUsed", "Other Models")] {
-                if let window = percentWindow("cursor.\(key)", label, used: plan[key], resetsAt: reset) {
-                    windows.append(window)
-                }
-            }
-        }
+            headers: headers, post: true)
+        let windows = planWindows(usage["planUsage"] as? [String: Any], reset: usage["billingCycleEnd"])
 
-        if let plan = try? await AdapterHTTP.postJSON(
+        if let plan = try await optionalRequest(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo",
-            body: [:], headers: headers, http: http) as? [String: Any] {
+            headers: headers) {
             identity.plan = (plan["planInfo"] as? [String: Any])?["planName"] as? String
                 ?? plan["planName"] as? String
         }
-        if let grants = try? await AdapterHTTP.postJSON(
+        if let grants = try await optionalRequest(
             "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCreditGrantsBalance",
-            body: [:], headers: headers, http: http) as? [String: Any] {
-            if let total = adapterNum(grants, ["totalCents"]),
-               let used = adapterNum(grants, ["usedCents"]) {
+            headers: headers) {
+            if let total = number(grants, "totalCents"),
+               let used = number(grants, "usedCents") {
                 credits = max(0, total - used) / 100
             }
         }
 
-        if windows.isEmpty {
-            let summary = try await AdapterHTTP.getJSON("https://cursor.com/api/usage-summary",
-                headers: ["Cookie": "WorkosCursorSessionToken=\(parsed.userID)%3A%3A\(parsed.jwt)"], http: http)
-            if let summary = summary as? [String: Any],
-               let individual = summary["individualUsage"] as? [String: Any],
-               let plan = individual["plan"] as? [String: Any],
-               let window = percentWindow("cursor.plan", "Plan", used: plan["totalPercentUsed"],
-                                          resetsAt: summary["billingCycleEnd"]) {
-                windows.append(window)
-            }
-        }
-        if windows.isEmpty && credits == nil { throw ProviderError.badResponse("no Cursor quota fields") }
+        try Task.checkCancellation()
+        if windows.isEmpty && credits == nil { throw noQuotaError }
         return UsageSnapshot(
             account: identity, providerID: id, windows: windows,
             creditsRemaining: credits, creditsUnit: "$")
+    }
+
+    private func checkExpiry(_ token: String) throws {
+        guard let expiry = OAuthTokens.jwtExpiry(token), expiry.isFinite else { return }
+        if expiry <= Date().timeIntervalSince1970 + 60 { throw ProviderError.unauthorized }
+    }
+
+    private var noQuotaError: ProviderError {
+        .badResponse(Localized.text(
+            "Cursor returned no recognized quota data. Check the Cursor dashboard.",
+            "Cursor returnerte ingen gjenkjente kvotedata. Sjekk Cursor-kontrollpanelet."))
+    }
+
+    private func number(_ dict: [String: Any], _ key: String) -> Double? {
+        if let value = dict[key] as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID() { return nil }
+        guard let raw = dict[key], !(raw is NSNull),
+              let value = adapterNum(dict, [key]), value.isFinite, value >= 0 else { return nil }
+        return value
+    }
+
+    private func planWindows(_ plan: [String: Any]?, reset: Any?) -> [UsageWindow] {
+        guard let plan, plan["enabled"] as? Bool != false else { return [] }
+        var windows: [UsageWindow] = []
+        for (key, label) in [("autoPercentUsed", "Cursor Models"), ("apiPercentUsed", "Other Models")] {
+            if let percent = number(plan, key),
+               let window = percentWindow("cursor.\(key)", label, used: percent, resetsAt: reset) {
+                windows.append(window)
+            }
+        }
+        if !windows.isEmpty { return windows }
+        if let percent = number(plan, "totalPercentUsed"),
+           let window = percentWindow("cursor.plan", "Plan", used: percent, resetsAt: reset) {
+            return [window]
+        }
+        if let limit = number(plan, "limit"), limit > 0,
+           let used = number(plan, "used") ?? number(plan, "totalSpend")
+            ?? number(plan, "remaining").flatMap({ $0 <= limit ? limit - $0 : nil }) {
+            return [UsageWindow(
+                id: "cursor.plan", label: "Plan", kind: .credits,
+                used: used / 100, limit: limit / 100, unit: "USD",
+                resetsAt: percentWindow("date", "", used: 0, resetsAt: reset)?.resetsAt)]
+        }
+        return []
+    }
+
+    private func request(_ url: String, headers: [String: String], post: Bool = false) async throws -> [String: Any] {
+        try Task.checkCancellation()
+        var headers = headers
+        headers["Accept"] = "application/json"
+        if post { headers["Content-Type"] = "application/json" }
+        let response = try await http.send(HTTPRequest(
+            method: post ? "POST" : "GET", url: URL(string: url)!, headers: headers,
+            body: post ? Data("{}".utf8) : nil, allowsRedirects: false))
+        let data = try requireOK(response)
+        guard let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw noQuotaError
+        }
+        return result
+    }
+
+    private func allowFallback(after error: Error) throws {
+        if error is CancellationError { throw error }
+        if let urlError = error as? URLError, urlError.code == .cancelled { throw CancellationError() }
+        if case ProviderError.rateLimited = error { throw error }
+        if case ProviderError.serverError(let status) = error, (300..<400).contains(status) { throw error }
+        try Task.checkCancellation()
+    }
+
+    private func optionalRequest(_ url: String, headers: [String: String]) async throws -> [String: Any]? {
+        do { return try await request(url, headers: headers, post: true) }
+        catch {
+            try allowFallback(after: error)
+            return nil
+        }
     }
 }
 
