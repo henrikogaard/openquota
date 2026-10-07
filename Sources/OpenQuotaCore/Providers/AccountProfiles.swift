@@ -99,9 +99,7 @@ public struct LocalAccountProfileStore: Sendable {
 
     private func save(_ profiles: [LocalAccountProfile]) throws {
         let data = try JSONEncoder.openQuota.encode(profiles)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
+        try PrivateFile.write(data, to: url)
     }
 
     private static func validatedCredentialPath(_ path: String) throws -> String {

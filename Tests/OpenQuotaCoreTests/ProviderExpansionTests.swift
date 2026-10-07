@@ -333,6 +333,30 @@ final class AdapterTests: XCTestCase {
         XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer db-key")
     }
 
+    func test_accountIDsAndCacheNeverContainSecrets() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/opencode/opencode.db", "")
+        let http = RecordingHTTP()
+        http.defaultBody = #"{"usage":{"weekly":{"percent":8}}}"#
+        let provider = OpenCodeProvider(
+            http: http, files: LocalCredentialFiles(home: home),
+            sqlite: { _, sql in sql.contains("sqlite_master") ? "1" : "secret-db-key" })
+        let account = try await provider.accounts()[0]
+        XCTAssertNotEqual(account.account.id,
+                          AccountIdentity.makeID(providerID: "opencode", identityKey: "secret-db-key"))
+        let snapshot = try await provider.refresh(account: account)
+
+        let cacheURL = home.appendingPathComponent("cache/snapshots.json")
+        try SnapshotCache(url: cacheURL).save([snapshot.account.id: snapshot])
+        let cached = try String(contentsOf: cacheURL, encoding: .utf8)
+        XCTAssertFalse(cached.contains("secret-db-key"))
+        let fileMode = try FileManager.default.attributesOfItem(atPath: cacheURL.path)[.posixPermissions] as? Int
+        let dirMode = try FileManager.default.attributesOfItem(
+            atPath: cacheURL.deletingLastPathComponent().path)[.posixPermissions] as? Int
+        XCTAssertEqual(fileMode, 0o600)
+        XCTAssertEqual(dirMode, 0o700)
+    }
+
     func test_opencodeLogoutInDatabaseIgnoresStaleAuthFile() async throws {
         let home = tempHome()
         try write(home, ".local/share/opencode/auth.json", """

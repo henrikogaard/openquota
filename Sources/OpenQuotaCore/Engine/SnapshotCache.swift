@@ -28,9 +28,7 @@ public struct SnapshotCache: Sendable {
         guard data.count <= Self.maxBytes else {
             throw ProviderError.badResponse("snapshot cache exceeds 256 KB")
         }
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
+        try PrivateFile.write(data, to: url)
     }
 }
 

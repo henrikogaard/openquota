@@ -14,7 +14,7 @@ public struct LocalCredentialFiles: Sendable {
         self.overridePaths = overridePaths
     }
 
-    private func url(_ path: String) -> URL {
+    func url(_ path: String) -> URL {
         overridePaths[path] ?? home.appendingPathComponent(path)
     }
 
@@ -34,10 +34,7 @@ public struct LocalCredentialFiles: Sendable {
 
     public func writeJSON(_ relativePath: String, _ dict: [String: Any]) throws {
         let url = url(relativePath)
-        let data = try JSONSerialization.data(withJSONObject: dict)
-        try data.write(to: url, options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                              ofItemAtPath: url.path)
+        try PrivateFile.write(try JSONSerialization.data(withJSONObject: dict), to: url)
     }
 
     public func readText(_ relativePath: String) -> String? {

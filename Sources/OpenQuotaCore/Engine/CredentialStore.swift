@@ -26,14 +26,19 @@ public struct KeychainCredentialStore: CredentialStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key
         ]
-        let update = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let update = SecItemUpdate(query as CFDictionary, [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ] as CFDictionary)
         if update == errSecSuccess { return }
         guard update == errSecItemNotFound else {
             throw ProviderError.badResponse("keychain write failed: \(update)")
         }
         var attrs = query
         attrs[kSecValueData as String] = data
-        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        // Never synced to iCloud Keychain and never restored onto another Mac.
+        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        attrs[kSecAttrSynchronizable as String] = false
         let status = SecItemAdd(attrs as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw ProviderError.badResponse("keychain write failed: \(status)")
@@ -54,6 +59,15 @@ public struct KeychainCredentialStore: CredentialStore {
         guard status == errSecSuccess, let data = item as? Data else {
             throw ProviderError.badResponse("keychain read failed: \(status)")
         }
+        // Items saved by ≤0.1.4 used the syncable/migratable class; tighten in place.
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        _ = SecItemUpdate(base as CFDictionary, [
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ] as CFDictionary)
         return String(data: data, encoding: .utf8)
     }
 
@@ -88,12 +102,7 @@ public struct FileCredentialStore: CredentialStore {
     }
 
     private func save(_ dict: [String: String]) throws {
-        let data = try JSONEncoder().encode(dict)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try PrivateFile.write(try JSONEncoder().encode(dict), to: url)
     }
 
     public func setSecret(_ secret: String, for key: String) throws {

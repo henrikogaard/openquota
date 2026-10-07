@@ -321,10 +321,10 @@ public struct OpenCodeProvider: UsageProvider {
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
-        guard let key = await apiKey() else { return [] }
+        guard await apiKey() != nil else { return [] }
         let identity = AccountIdentity(
             providerID: id,
-            id: AccountIdentity.makeID(providerID: id, identityKey: key),
+            id: AccountIdentity.makeID(providerID: id, identityKey: files.url(Self.authPath).path),
             label: "OpenCode Go")
         return [AccountDescriptor(account: identity, source: .configFile, isDefaultHome: true)]
     }
@@ -405,7 +405,7 @@ public struct DevinProvider: UsageProvider {
         guard let c = credentials() else { return [] }
         let identity = AccountIdentity(
             providerID: id,
-            id: AccountIdentity.makeID(providerID: id, identityKey: c.apiKey),
+            id: AccountIdentity.makeID(providerID: id, identityKey: files.url(Self.credsPath).path),
             label: "Devin CLI")
         return [AccountDescriptor(account: identity, source: .configFile, isDefaultHome: true)]
     }
@@ -625,10 +625,10 @@ public struct CopilotProvider: UsageProvider {
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
-        guard let token = ghToken() else { return [] }
+        guard ghToken() != nil else { return [] }
         let identity = AccountIdentity(
             providerID: id,
-            id: AccountIdentity.makeID(providerID: id, identityKey: token),
+            id: AccountIdentity.makeID(providerID: id, identityKey: files.url(Self.hostsPath).path),
             label: "gh CLI")
         return [AccountDescriptor(account: identity, source: .configFile)]
     }

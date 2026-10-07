@@ -175,9 +175,7 @@ public struct GenericProvider: UsageProvider {
 
     private func saveConfiguredKeys(_ entries: [KeyEntry]) throws {
         let data = try JSONEncoder.openQuota.encode(entries)
-        try FileManager.default.createDirectory(
-            at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: manifestURL, options: .atomic)
+        try PrivateFile.write(data, to: manifestURL)
     }
 
     // MARK: - HTTP
