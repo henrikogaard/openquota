@@ -8,6 +8,9 @@ enum PrivateFile {
         let dir = url.deletingLastPathComponent()
         try fm.createDirectory(at: dir, withIntermediateDirectories: true,
                                attributes: [.posixPermissions: 0o700])
+        // createDirectory ignores attributes on pre-existing dirs; tighten in
+        // place so installs from before PrivateFile converge on 0700 too.
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         let temp = dir.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         guard fm.createFile(atPath: temp.path, contents: data,
                             attributes: [.posixPermissions: 0o600]) else {
