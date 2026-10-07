@@ -43,7 +43,7 @@ scripts/bundle.sh        # builds + assembles dist/OpenQuota.app (ad-hoc signed 
 swift test               # core suite — also runs on Linux
 ```
 
-For development: `swift run` shows the menu-bar item without an app bundle (icon may render in the Dock until bundled as a `.app` with `LSUIElement`).
+For development: `swift run OpenQuota` shows the menu-bar item without an app bundle (icon may render in the Dock until bundled as a `.app` with `LSUIElement`).
 Run `swift build` before installing the Claude status-line integration during development so the sibling `openquota-bridge` executable is available.
 
 To review populated cards without credentials:

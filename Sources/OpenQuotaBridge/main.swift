@@ -133,9 +133,13 @@ struct OpenQuotaBridge {
         var timedOut = false
         var inputBuffer = [UInt8](input)
         var readBuffer = [UInt8](repeating: 0, count: 32 * 1024)
-        if inputBuffer.isEmpty {
+        let closeChildInput = {
+            guard !childInputClosed else { return }
             stdin.fileHandleForWriting.closeFile()
             childInputClosed = true
+        }
+        if inputBuffer.isEmpty {
+            closeChildInput()
         }
 
         while true {
@@ -149,8 +153,12 @@ struct OpenQuotaBridge {
             }
 
             var descriptors: [pollfd] = []
-            if inputOffset < inputBuffer.count {
+            let inputIndex: Int?
+            if !childInputClosed && inputOffset < inputBuffer.count {
+                inputIndex = descriptors.count
                 descriptors.append(pollfd(fd: inputFD, events: Int16(POLLOUT | POLLERR | POLLHUP), revents: 0))
+            } else {
+                inputIndex = nil
             }
             let readIndex = descriptors.count
             if !childOutputClosed {
@@ -165,25 +173,30 @@ struct OpenQuotaBridge {
                 break
             }
 
-            if inputOffset < inputBuffer.count,
-               !descriptors.isEmpty,
-               descriptors[0].revents & Int16(POLLOUT) != 0 {
-                let count = inputBuffer.withUnsafeBytes { bytes -> Int in
-                    guard let base = bytes.baseAddress else { return 0 }
-                    return write(inputFD, base.advanced(by: inputOffset),
-                                 min(bytes.count - inputOffset, 32 * 1024))
-                }
-                if count > 0 {
-                    inputOffset += count
-                } else if count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
+            if let inputIndex, descriptors.indices.contains(inputIndex) {
+                let events = descriptors[inputIndex].revents
+                if events & Int16(POLLNVAL) != 0 {
                     failed = true
                     break
                 }
-            } else if inputOffset < inputBuffer.count,
-                      !descriptors.isEmpty,
-                      descriptors[0].revents & Int16(POLLERR | POLLHUP) != 0 {
-                failed = true
-                break
+                if events & Int16(POLLOUT) != 0 {
+                    let count = inputBuffer.withUnsafeBytes { bytes -> Int in
+                        guard let base = bytes.baseAddress else { return 0 }
+                        return write(inputFD, base.advanced(by: inputOffset),
+                                     min(bytes.count - inputOffset, 32 * 1024))
+                    }
+                    if count > 0 {
+                        inputOffset += count
+                    } else if count == 0 || errno == EPIPE {
+                        closeChildInput()
+                    } else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
+                        failed = true
+                        break
+                    }
+                }
+                if !childInputClosed && events & Int16(POLLERR | POLLHUP) != 0 {
+                    closeChildInput()
+                }
             }
 
             if !childOutputClosed {
@@ -217,9 +230,8 @@ struct OpenQuotaBridge {
                 }
             }
 
-            if inputOffset == inputBuffer.count && !childInputClosed {
-                stdin.fileHandleForWriting.closeFile()
-                childInputClosed = true
+            if inputOffset == inputBuffer.count {
+                closeChildInput()
             }
             if !process.isRunning && !childOutputClosed && ready == 0 {
                 continue
@@ -229,6 +241,7 @@ struct OpenQuotaBridge {
         if timedOut || failed {
             if process.isRunning { process.terminate() }
             _ = kill(-pid, SIGKILL)
+            if process.isRunning { _ = kill(pid, SIGKILL) }
         }
         if process.isRunning { process.waitUntilExit() }
         if !childInputClosed { stdin.fileHandleForWriting.closeFile() }

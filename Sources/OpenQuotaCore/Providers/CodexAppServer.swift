@@ -167,7 +167,7 @@ public enum CodexAppServerClient {
         guard type == "chatgpt" else {
             throw ProviderError.badResponse("Sign in with ChatGPT to use subscription limits")
         }
-        return (object["planType"] as? String, type)
+        return (account["planType"] as? String, type)
     }
 
     private static func validatedAuthURL(_ value: String) -> URL? {

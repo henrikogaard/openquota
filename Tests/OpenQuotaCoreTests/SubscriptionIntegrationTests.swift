@@ -545,7 +545,8 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
                     time.sleep(60)
                     break
                 emit({"jsonrpc":"2.0","id":message["id"],
-                      "result":{"account":{"type":TYPE},"planType":"plus"}})
+                      "result":{"account":{"type":TYPE,"planType":"plus"},
+                                "requiresOpenaiAuth":True}})
             elif method == "account/rateLimits/read":
                 emit({"jsonrpc":"2.0","id":message["id"],
                       "result":{"rateLimits":{"limitId":"codex","primary":
