@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 import OpenQuotaCore
 
-/// A searchable grid of providers; choosing one pushes its short form.
+/// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
         case claude, codex, cursor
@@ -20,8 +20,9 @@ struct AddAccountSheet: View {
 
     var model: AppModel
     var onDone: () -> Void
-    @State private var path: [Target] = []
+    @State private var target: Target?
     @State private var search = ""
+    @FocusState private var searchFocused: Bool
 
     private var sections: [(title: String, tiles: [Tile])] {
         let subscriptions = [
@@ -35,7 +36,7 @@ struct AddAccountSheet: View {
         let keys = model.specProviders()
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
             .map { Tile(target: .apiKey($0.id), providerID: $0.id, name: $0.displayName) }
-        return [("Subscriptions", subscriptions), ("Sign-ins", signIns), ("API Keys", keys)]
+        return [("Subscriptions", subscriptions), ("Sign-Ins", signIns), ("API Keys", keys)]
             .map { ($0.0, $0.1.filter(matches)) }
             .filter { !$0.1.isEmpty }
     }
@@ -45,56 +46,94 @@ struct AddAccountSheet: View {
             || (tile.target == .codex && "chatgpt".localizedCaseInsensitiveContains(search))
     }
 
+    private func title(for target: Target) -> String {
+        switch target {
+        case .claude: "Claude Code"
+        case .codex: "Codex / ChatGPT"
+        case .cursor: "Cursor"
+        case .apiKey(let id), .profile(let id): model.providerName(id)
+        }
+    }
+
     var body: some View {
-        NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(sections, id: \.title) { section in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(section.title)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-                                ForEach(section.tiles) { tile in
-                                    Button { path.append(tile.target) } label: {
-                                        VStack(spacing: 8) {
-                                            ProviderGlyph(providerID: tile.providerID, name: tile.name, size: 32)
-                                            Text(tile.name)
-                                                .font(.callout)
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.85)
-                                        }
-                                        .frame(maxWidth: .infinity, minHeight: 76)
-                                        .contentShape(.rect(cornerRadius: 12))
+        VStack(spacing: 0) {
+            header
+            Divider()
+            Group {
+                if let target {
+                    form(for: target)
+                } else {
+                    grid
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel", action: onDone).keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 560, height: 470)
+        .onAppear { searchFocused = true }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            if let target {
+                Button { self.target = nil } label: {
+                    Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .keyboardShortcut("[", modifiers: .command)
+                Text(title(for: target)).font(.headline)
+                Spacer()
+            } else {
+                Text("Add Account").font(.headline)
+                Spacer()
+                TextField("Search Providers", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                    .focused($searchFocused)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+    }
+
+    private var grid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(sections, id: \.title) { section in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(section.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                            ForEach(section.tiles) { tile in
+                                Button { target = tile.target } label: {
+                                    VStack(spacing: 8) {
+                                        ProviderGlyph(providerID: tile.providerID, name: tile.name, size: 32)
+                                        Text(tile.name)
+                                            .font(.callout)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.85)
                                     }
-                                    .buttonStyle(ProviderTileStyle())
+                                    .frame(maxWidth: .infinity, minHeight: 76)
+                                    .contentShape(.rect(cornerRadius: 12))
                                 }
+                                .buttonStyle(ProviderTileStyle())
                             }
                         }
                     }
-                    if sections.isEmpty {
-                        ContentUnavailableView.search(text: search)
-                    }
                 }
-                .padding(20)
-            }
-            .navigationTitle("Add Account")
-            .searchable(text: $search, placement: .toolbar, prompt: "Search Providers")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onDone)
+                if sections.isEmpty {
+                    ContentUnavailableView.search(text: search)
                 }
             }
-            .navigationDestination(for: Target.self) { target in
-                form(for: target)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel", action: onDone)
-                        }
-                    }
-            }
+            .padding(20)
         }
-        .frame(width: 600, height: 480)
     }
 
     @ViewBuilder

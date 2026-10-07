@@ -66,6 +66,48 @@ struct WindowRow: View {
     }
 }
 
+/// One usage window: label and reset time, then a bar with what's left.
+struct QuotaRow: View {
+    var window: UsageWindow
+
+    private var resetText: String? {
+        guard let reset = Format.reset(window) else { return nil }
+        return reset == "resetting" ? "Resetting now" : "Resets in \(reset)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(window.label).font(.system(size: 12, weight: .medium))
+                Spacer(minLength: 8)
+                if let resetText {
+                    Text(resetText).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            if let fraction = window.fractionUsed {
+                HStack(spacing: 8) {
+                    Meter(fractionUsed: fraction)
+                    Text(Format.value(window) + " left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(fraction >= Tokens.warnThreshold
+                                         ? AnyShapeStyle(Tokens.tint(fractionUsed: fraction))
+                                         : AnyShapeStyle(.secondary))
+                        .frame(minWidth: 52, alignment: .trailing)
+                        .lineLimit(1)
+                }
+            } else {
+                Text(Format.value(window))
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Capsule meter showing what's left. Neutral until usage gets tight.
 struct Meter: View {
     var fractionUsed: Double
@@ -105,19 +147,19 @@ struct Ring: View {
 
 enum Tokens {
     static let popoverWidth: CGFloat = 340
-    static let popoverMaxContentHeight: CGFloat = 520
+    static let popoverMaxContentHeight: CGFloat = 600
     static let inset: CGFloat = 12
     static let moduleSpacing: CGFloat = 8
     static let moduleRadius: CGFloat = 16
     static let modulePadding: CGFloat = 12
-    static let meterHeight: CGFloat = 5
+    static let meterHeight: CGFloat = 6
     static let warnThreshold = 0.8
     static let criticalThreshold = 0.9
 
     static func tint(fractionUsed: Double) -> Color {
         if fractionUsed >= criticalThreshold { return .red }
         if fractionUsed >= warnThreshold { return .orange }
-        return .primary.opacity(0.6)
+        return .accentColor
     }
 }
 

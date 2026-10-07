@@ -32,7 +32,7 @@ struct SubscriptionConnectForm: View {
 
     private var claudeSection: some View {
         Section {
-            TextField("Label", text: $claudeLabel, prompt: Text("Personal"))
+            TextField("Label", text: $claudeLabel, prompt: Text(Self.claudeDefaultLabel))
             LabeledContent("Configuration") {
                 HStack {
                     Text(claudeDirectory).foregroundStyle(.secondary)
@@ -44,7 +44,6 @@ struct SubscriptionConnectForm: View {
                 Spacer()
                 Button("Connect", action: installClaude)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(claudeLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         } header: {
             Text("Claude Code")
@@ -56,7 +55,7 @@ struct SubscriptionConnectForm: View {
 
     private var codexSection: some View {
         Section {
-            TextField("Label", text: $codexLabel, prompt: Text("Work"))
+            TextField("Label", text: $codexLabel, prompt: Text(Self.codexDefaultLabel))
             LabeledContent("Codex CLI") {
                 HStack {
                     Text(codexExecutable.isEmpty ? "Automatic" : codexExecutable)
@@ -79,7 +78,6 @@ struct SubscriptionConnectForm: View {
                     Spacer()
                     Button("Sign In with ChatGPT…", action: startCodexLogin)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(codexLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         } header: {
@@ -90,6 +88,15 @@ struct SubscriptionConnectForm: View {
         }
     }
 
+    static let claudeDefaultLabel = "Claude"
+    static let codexDefaultLabel = "ChatGPT"
+
+    /// An empty label falls back to the placeholder the field shows.
+    static func resolvedLabel(_ label: String, fallback: String) -> String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
     private func installClaude() {
         guard let helper = helperExecutable() else {
             errorText = "The openquota-bridge helper is missing. Reinstall the app or run it from a complete build."
@@ -97,7 +104,7 @@ struct SubscriptionConnectForm: View {
         }
         perform {
             try model.installClaudeStatusLine(
-                label: claudeLabel,
+                label: Self.resolvedLabel(claudeLabel, fallback: Self.claudeDefaultLabel),
                 configurationDirectory: claudeDirectory,
                 helper: helper)
             claudeLabel = ""
@@ -109,7 +116,7 @@ struct SubscriptionConnectForm: View {
     private func startCodexLogin() {
         errorText = nil
         model.startCodexLogin(
-            label: codexLabel,
+            label: Self.resolvedLabel(codexLabel, fallback: Self.codexDefaultLabel),
             executablePath: codexExecutable.isEmpty ? nil : codexExecutable,
             openAuthURL: { url in NSWorkspace.shared.open(url) })
         codexLabel = ""

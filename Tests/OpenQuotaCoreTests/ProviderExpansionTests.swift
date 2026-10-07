@@ -242,6 +242,32 @@ final class AdapterTests: XCTestCase {
         XCTAssertEqual(http.requests[0].headers["X-XAI-Token-Auth"], "xai-grok-cli")
     }
 
+    func test_codexResolverFindsNpmGlobalWithMinimalPath() throws {
+        let home = tempHome()
+        let bin = home.appendingPathComponent(".npm-global/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let codex = bin.appendingPathComponent("codex")
+        try Data("#!/bin/sh\n".utf8).write(to: codex)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codex.path)
+        let found = CodexExecutableResolver.resolve(
+            environment: ["PATH": "/nonexistent"], homeDirectory: home)
+        XCTAssertEqual(found?.path, codex.standardizedFileURL.path)
+    }
+
+    func test_grokLabelsUseEmailNotEntryKey() async throws {
+        let home = tempHome()
+        let payload = Data(#"{"email":"henrik@example.com"}"#.utf8).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+        try write(home, ".grok/auth.json", """
+            {"https://auth.x.ai::b1a00492":{"key":"a1","id_token":"h.\(payload).s"},
+             "https://auth.x.ai::other":{"key":"a2"}}
+            """)
+        let provider = GrokProvider(
+            http: RecordingHTTP(), files: LocalCredentialFiles(home: home))
+        let labels = try await provider.accounts().map(\.account.label)
+        XCTAssertEqual(labels, ["henrik@example.com", "Grok CLI"])
+    }
+
     func test_opencodeReadsApiKey() async throws {
         let home = tempHome()
         try write(home, ".local/share/opencode/auth.json", """

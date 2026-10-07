@@ -432,7 +432,7 @@ public enum SpecLibrary {
         windows: [("5h", "rolling"), ("Week", "weekly"), ("Month", "monthly")].map { label, key in
             .init(
                 label: label, kind: .consumption,
-                used: "$.usage.\(key).used_percent",
+                used: "$.usage.\(key).percent",
                 resetsAt: "$.usage.\(key).resetsAt",
                 unit: "%"
             )

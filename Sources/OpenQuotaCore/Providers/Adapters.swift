@@ -172,14 +172,28 @@ public struct GrokProvider: UsageProvider {
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
-        entries().map { name, _ in
+        entries().map { name, entry in
             AccountDescriptor(
                 account: AccountIdentity(
                     providerID: id,
                     id: AccountIdentity.makeID(providerID: id, identityKey: name),
-                    label: name == "default" ? "Grok CLI" : name),
+                    label: Self.label(entryKey: name, entry: entry)),
                 source: .configFile, isDefaultHome: name == "default")
         }
+    }
+
+    /// The signed-in email from the entry's ID token, else a readable entry
+    /// name. CLI entry keys like `https://auth.x.ai::<client-id>` are not shown.
+    static func label(entryKey: String, entry: [String: Any]) -> String {
+        if let idToken = entry["id_token"] as? String ?? entry["idToken"] as? String,
+           let claims = JWTClaims.decode(idToken),
+           let email = claims["email"] as? String, !email.isEmpty {
+            return email
+        }
+        if entryKey == "default" || entryKey.contains("::") || entryKey.contains("://") {
+            return "Grok CLI"
+        }
+        return entryKey
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {

@@ -24,12 +24,25 @@ public enum CodexExecutableResolver {
         }
         let pathDirectories = (environment["PATH"] ?? "")
             .split(separator: ":").map(String.init)
+        // GUI apps inherit launchd's minimal PATH, so also try the usual
+        // install locations for npm, bun, pnpm, Volta, nvm and Homebrew.
+        let home = homeDirectory.path
+        let fileManager = FileManager.default
+        let nvmVersions = homeDirectory.appendingPathComponent(".nvm/versions/node").path
+        let nvmBins = ((try? fileManager.contentsOfDirectory(atPath: nvmVersions)) ?? [])
+            .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            .map { "\(nvmVersions)/\($0)/bin" }
         let directories = pathDirectories + [
-            homeDirectory.appendingPathComponent(".local/bin").path,
+            "\(home)/.local/bin",
             "/opt/homebrew/bin",
             "/usr/local/bin",
-            "/usr/bin",
-        ]
+            "\(home)/.npm-global/bin",
+            "\(home)/.bun/bin",
+            "\(home)/.volta/bin",
+            "\(home)/Library/pnpm",
+            "\(home)/.local/share/pnpm",
+            "\(home)/.cargo/bin",
+        ] + nvmBins + ["/usr/bin"]
         var seen = Set<String>()
         for directory in directories where seen.insert(directory).inserted {
             let candidate = URL(fileURLWithPath: directory).appendingPathComponent("codex")

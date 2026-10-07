@@ -84,8 +84,8 @@ final class DocumentedAPIProviderTests: XCTestCase {
 
     func test_opencodeGoPastedKeyMapsWindowsAndBalance() async throws {
         let (snapshot, http) = try await refresh(SpecLibrary.opencodeGo, body: """
-            {"usage":{"rolling":{"used_percent":25,"resetsAt":"2030-01-01T00:00:00Z"},
-              "weekly":{"used_percent":60},"monthly":{"used_percent":5},"balance":3.5}}
+            {"usage":{"rolling":{"percent":25,"resetsAt":"2030-01-01T00:00:00Z"},
+              "weekly":{"percent":60},"monthly":{"percent":5},"balance":3.5}}
             """)
         let byLabel = Dictionary(uniqueKeysWithValues: snapshot.windows.map { ($0.label, $0) })
         XCTAssertEqual(byLabel["5h"]?.percentRemaining, 75)
