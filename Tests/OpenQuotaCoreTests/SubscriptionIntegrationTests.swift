@@ -365,6 +365,11 @@ final class SubscriptionClaudeStatusLineInstallerTests: XCTestCase {
     }
 }
 
+private func canonicalPath(_ url: URL) -> String {
+    var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
+    return url.path.withCString { realpath($0, &resolved) != nil ? String(cString: resolved) : url.path }
+}
+
 final class SubscriptionCodexAppServerTests: XCTestCase {
     func test_appServerHandshakeAccountReadAndGuidedLoginWithEarlyNotification() async throws {
         let directory = try makeDirectory()
@@ -378,7 +383,8 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
             encoding: .utf8)
         let observedLines = observed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         XCTAssertEqual(Array(observedLines[0..<4]), [
-            home.path,
+            // getcwd resolves symlinks; macOS /var -> /private/var
+            canonicalPath(home),
             "app-server", "-c", #"cli_auth_credentials_store="file""#,
         ])
         XCTAssertTrue(observedLines[4].contains(#""name":"openquota""#))

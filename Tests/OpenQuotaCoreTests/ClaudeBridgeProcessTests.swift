@@ -137,13 +137,22 @@ final class ClaudeBridgeProcessTests: XCTestCase {
     }
 
     private func findBridgeExecutable() throws -> URL {
-        var directory = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
-        for _ in 0..<8 {
-            let candidate = directory.appendingPathComponent("openquota-bridge")
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
+        // macOS runs the bundle inside Xcode's xctest host, so arguments[0]
+        // points at the runner, not the build dir — also search from the
+        // test bundle's own location.
+        let roots = [
+            URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent(),
+            Bundle(for: Self.self).bundleURL,
+        ]
+        for root in roots {
+            var directory = root
+            for _ in 0..<8 {
+                let candidate = directory.appendingPathComponent("openquota-bridge")
+                if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                    return candidate
+                }
+                directory.deleteLastPathComponent()
             }
-            directory.deleteLastPathComponent()
         }
         throw BridgeTestError.helperNotFound
     }

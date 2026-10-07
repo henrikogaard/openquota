@@ -566,10 +566,25 @@ private final class CodexAppServerSession: @unchecked Sendable {
         let process = processStarted ? self.process : nil
         lock.unlock()
         guard let process else { return }
+        let pid = process.processIdentifier
         if process.isRunning { process.terminate() }
-        _ = kill(-process.processIdentifier, SIGKILL)
-        if process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }
-        process.waitUntilExit()
+        _ = kill(-pid, SIGKILL)
+        if process.isRunning { _ = kill(pid, SIGKILL) }
+        reap(pid: pid)
+    }
+
+    // NSConcreteTask.waitUntilExit() can spin a runloop forever on macOS when
+    // the termination notification is delivered to a blocked thread; reap via
+    // waitpid with a hard bound instead. ECHILD means NSConcreteTask's own
+    // monitor already reaped it — either way the child is gone.
+    private func reap(pid: pid_t) {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            var status: Int32 = 0
+            let result = waitpid(pid, &status, WNOHANG)
+            if result != 0 { return }
+            usleep(10_000)
+        }
     }
 
     private func closePipes() {

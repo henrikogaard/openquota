@@ -243,14 +243,33 @@ struct OpenQuotaBridge {
             _ = kill(-pid, SIGKILL)
             if process.isRunning { _ = kill(pid, SIGKILL) }
         }
-        if process.isRunning { process.waitUntilExit() }
+        let reapedStatus = reap(pid: pid)
         if !childInputClosed { stdin.fileHandleForWriting.closeFile() }
         if !childOutputClosed { stdout.fileHandleForReading.closeFile() }
         if !failed {
             failed = !writeAll(output, deadline: deadline)
         }
         inputBuffer.removeAll(keepingCapacity: false)
-        return timedOut || failed ? 1 : process.terminationStatus
+        return timedOut || failed ? 1 : (reapedStatus ?? process.terminationStatus)
+    }
+
+    // NSConcreteTask.waitUntilExit() can spin a runloop forever on macOS when
+    // the termination notification is delivered to a blocked thread; reap via
+    // waitpid with a hard bound instead. Returns the child's exit status when
+    // we reap it; nil when Foundation's own monitor already did (ECHILD).
+    private static func reap(pid: pid_t) -> Int32? {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            var status: Int32 = 0
+            let result = waitpid(pid, &status, WNOHANG)
+            if result == pid {
+                if status & 0x7f == 0 { return (status >> 8) & 0xff }
+                return 128 + (status & 0x7f)
+            }
+            if result == -1 { return nil }
+            usleep(10_000)
+        }
+        return nil
     }
 
     private static func setNonblocking(_ fd: Int32) {
