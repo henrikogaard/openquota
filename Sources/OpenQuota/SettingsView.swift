@@ -315,7 +315,7 @@ struct GeneralPane: View {
             Section("Menu Bar") {
                 Toggle("Show percentage next to the gauge", isOn: $menuBarShowsPercent)
             }
-            Section("Updates") {
+            Section {
                 Toggle("Check for updates automatically", isOn: $automaticallyChecks)
                     .onChange(of: automaticallyChecks) { _, value in
                         UpdateController.shared.automaticallyChecks = value
@@ -328,6 +328,8 @@ struct GeneralPane: View {
                             .disabled(!UpdateController.shared.canCheckForUpdates)
                     }
                 }
+            } header: {
+                Text("Updates")
             } footer: {
                 Link("OpenQuota on GitHub", destination: URL(string: "https://github.com/henrikogaard/openquota")!)
             }
