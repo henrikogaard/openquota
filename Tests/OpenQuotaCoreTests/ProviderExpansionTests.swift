@@ -333,6 +333,43 @@ final class AdapterTests: XCTestCase {
         XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer db-key")
     }
 
+    func test_opencodeDefaultDatabaseKeyWinsOverChannelDatabase() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/opencode/opencode.db", "")
+        try write(home, ".local/share/opencode/opencode-prod.db", "")
+        let http = RecordingHTTP()
+        http.defaultBody = #"{"usage":{"weekly":{"percent":8}}}"#
+        let provider = OpenCodeProvider(
+            http: http, files: LocalCredentialFiles(home: home),
+            sqlite: { path, sql in
+                if sql.contains("sqlite_master") { return "1" }
+                return URL(fileURLWithPath: path).lastPathComponent == "opencode.db"
+                    ? "default-db-key" : "channel-db-key"
+            })
+
+        _ = try await provider.refresh(account: try await provider.accounts()[0])
+        XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer default-db-key")
+    }
+
+    func test_opencodeLoggedOutDefaultDatabaseDoesNotFallBackToChannelOrAuthFile() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/opencode/auth.json", """
+            {"opencode-go":{"type":"api","key":"stale-key"}}
+            """)
+        try write(home, ".local/share/opencode/opencode.db", "")
+        try write(home, ".local/share/opencode/opencode-prod.db", "")
+        let provider = OpenCodeProvider(
+            http: RecordingHTTP(), files: LocalCredentialFiles(home: home),
+            sqlite: { path, sql in
+                if sql.contains("sqlite_master") { return "1" }
+                return URL(fileURLWithPath: path).lastPathComponent == "opencode.db"
+                    ? "" : "channel-db-key"
+            })
+
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
+    }
+
     func test_accountIDsAndCacheNeverContainSecrets() async throws {
         let home = tempHome()
         try write(home, ".local/share/opencode/opencode.db", "")

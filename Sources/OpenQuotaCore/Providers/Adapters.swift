@@ -305,6 +305,7 @@ public struct OpenCodeProvider: UsageProvider {
                 guard (try? await sqlite(db, Self.credentialTableSQL)) == "1" else { continue }
                 hasTable = true
                 if let key = try? await sqlite(db, Self.goKeySQL), !key.isEmpty { return key }
+                if URL(fileURLWithPath: db).lastPathComponent == "opencode.db" { return nil }
             }
             if hasTable { return nil }
         }
@@ -316,8 +317,11 @@ public struct OpenCodeProvider: UsageProvider {
     private func databaseFiles() -> [String] {
         let dir = files.home.appendingPathComponent(Self.dataDir)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        return names.filter { $0.hasPrefix("opencode") && $0.hasSuffix(".db") }
-            .sorted().map { dir.appendingPathComponent($0).path }
+        let defaultDatabase = names.contains("opencode.db") ? ["opencode.db"] : []
+        let channelDatabases = names.filter {
+            $0.hasPrefix("opencode") && $0.hasSuffix(".db") && $0 != "opencode.db"
+        }.sorted()
+        return (defaultDatabase + channelDatabases).map { dir.appendingPathComponent($0).path }
     }
 
     public func accounts() async throws -> [AccountDescriptor] {
