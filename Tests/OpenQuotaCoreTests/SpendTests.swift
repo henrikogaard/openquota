@@ -152,6 +152,22 @@ final class SpendTests: XCTestCase {
         XCTAssertEqual(result.filesRead, 0)
     }
 
+    func testUnchangedFileRetainsEventsWrittenAfterScanStart() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var request = claude(id: "in-flight", model: "known")
+        request["timestamp"] = now.addingTimeInterval(60).ISO8601Format()
+        try json(request).write(to: root.appendingPathComponent("active.jsonl"))
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let sources = [SpendLogSource(provider: .claude, directory: root)]
+        let first = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(first.total(period: .today, now: now, calendar: calendar).pricedEvents, 0)
+        let later = now.addingTimeInterval(120)
+        let second = await scanner.scan(sources: sources, now: later, calendar: calendar)
+        XCTAssertEqual(second.filesReused, 1)
+        XCTAssertEqual(second.total(period: .today, now: later, calendar: calendar).pricedEvents, 1)
+    }
+
     func testCalendarPeriodsAreDisjointAndUseLocalDays() {
         var summary = SpendSummary()
         let today = calendar.startOfDay(for: now)

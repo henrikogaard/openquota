@@ -77,16 +77,17 @@ public actor LocalSpendScanner {
                     continue
                 }
             }
-            let retained = Array(parsed.events.filter { $0.timestamp >= since && $0.timestamp <= now }
-                .prefix(remainingEvents))
-            if retained.count < parsed.events.filter({ $0.timestamp >= since && $0.timestamp <= now }).count {
+            let eligible = parsed.events.filter { $0.timestamp >= since }
+            let retained = Array(eligible.prefix(remainingEvents))
+            let truncated = retained.count < eligible.count
+            if truncated {
                 result.isPartial = true
             }
             remainingEvents -= retained.count
-            events.append(contentsOf: retained)
+            events.append(contentsOf: retained.filter { $0.timestamp <= now })
             result.isPartial = result.isPartial || parsed.incomplete
             // Interrupted files must be reparsed, not preserved as apparently complete.
-            if !parsed.incomplete {
+            if !parsed.incomplete && !truncated {
                 updatedCache[file.key] = CachedFile(
                     size: parsed.size, modified: parsed.modified, events: retained, incomplete: false)
             }
