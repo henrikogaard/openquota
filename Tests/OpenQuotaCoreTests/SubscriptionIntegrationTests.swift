@@ -373,16 +373,18 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
         let result = try await CodexAppServerClient.readAccount(executable: executable, codexHome: home)
         XCTAssertEqual(result.planType, "plus")
         XCTAssertTrue(String(decoding: result.rateLimits, as: UTF8.self).contains("rateLimits"))
-        let observed = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: Data(contentsOf: home.appendingPathComponent("observed.json"))) as? [String: Any])
-        XCTAssertEqual(observed["cwd"] as? String, home.path)
-        XCTAssertEqual(observed["args"] as? [String], [
+        let observed = try String(
+            contentsOf: home.appendingPathComponent("observed.txt"),
+            encoding: .utf8)
+        let observedLines = observed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        XCTAssertEqual(Array(observedLines[0..<4]), [
+            home.path,
             "app-server", "-c", #"cli_auth_credentials_store="file""#,
         ])
-        XCTAssertEqual(observed["clientInfo"] as? [String: String], [
-            "name": "openquota", "title": "OpenQuota", "version": "0.1.0",
-        ])
-        XCTAssertEqual(observed["hasAPIAuth"] as? Bool, false)
+        XCTAssertTrue(observedLines[4].contains(#""name":"openquota""#))
+        XCTAssertTrue(observedLines[4].contains(#""title":"OpenQuota""#))
+        XCTAssertTrue(observedLines[4].contains(#""version":"0.1.0""#))
+        XCTAssertEqual(Array(observedLines[5..<8]), ["", "", ""])
 
         let opened = LockedURL()
         let plan = try await CodexAppServerClient.login(
@@ -501,56 +503,39 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
         mode: String = "normal"
     ) -> String {
         """
-        #!/usr/bin/env python3
-        import json, os, sys, time
-        MODE = "\(mode)"
-        TYPE = "\(accountType)"
-        AUTH_URL = "\(authURL)"
-        def emit(message):
-            sys.stdout.write(json.dumps(message) + chr(10))
-            sys.stdout.flush()
-        for raw in sys.stdin:
-            message = json.loads(raw)
-            method = message.get("method")
-            if method == "initialize":
-                with open(os.path.join(os.environ["CODEX_HOME"], "observed.json"), "w") as f:
-                    f.write(json.dumps({
-                      "cwd":os.getcwd(),
-                      "args":sys.argv[1:],
-                      "clientInfo":message.get("params",{}).get("clientInfo"),
-                      "hasAPIAuth":any(k in os.environ for k in
-                        ("OPENAI_API_KEY","CODEX_API_KEY","OPENAI_BASE_URL"))
-                    }))
-                emit({"jsonrpc":"2.0","id":message["id"],"result":{}})
-            elif method == "initialized":
-                pass
-            elif method == "account/login/start":
-                emit({"jsonrpc":"2.0","method":"account/login/completed",
-                      "params":{"loginId":"login-1","success":True}})
-                emit({"jsonrpc":"2.0","id":message["id"],
-                      "result":{"loginId":"login-1","authUrl":AUTH_URL}})
-            elif method == "account/read":
-                if MODE == "malformed":
-                    sys.stdout.write("not-json" + chr(10)); sys.stdout.flush(); break
-                if MODE == "oversized":
-                    sys.stdout.write("x" * 1048577 + chr(10)); sys.stdout.flush(); break
-                if MODE == "eof":
-                    break
-                if MODE == "timeout":
-                    time.sleep(5)
-                    break
-                if MODE == "cancel":
-                    with open(os.path.join(os.environ["CODEX_HOME"], "server.pid"), "w") as f:
-                        f.write(str(os.getpid()))
-                    time.sleep(60)
-                    break
-                emit({"jsonrpc":"2.0","id":message["id"],
-                      "result":{"account":{"type":TYPE,"planType":"plus"},
-                                "requiresOpenaiAuth":True}})
-            elif method == "account/rateLimits/read":
-                emit({"jsonrpc":"2.0","id":message["id"],
-                      "result":{"rateLimits":{"limitId":"codex","primary":
-                        {"usedPercent":20,"windowDurationMins":300}}}})
+        #!/bin/sh
+        MODE='\(mode)'
+        TYPE='\(accountType)'
+        AUTH_URL='\(authURL)'
+        while IFS= read -r message; do
+            request_id=$(printf '%s\\n' "$message" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
+            message=$(printf '%s\\n' "$message" | sed 's#\\\\/#/#g')
+            case "$message" in
+                *'"method":"initialize"'*)
+                    printf '%s\\n' "$PWD" "$1" "$2" "$3" "$message" \\
+                        "${OPENAI_API_KEY+x}" "${CODEX_API_KEY+x}" "${OPENAI_BASE_URL+x}" \\
+                        > "$CODEX_HOME/observed.txt"
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{}}\\n' "$request_id"
+                    ;;
+                *'"method":"account/login/start"'*)
+                    printf '{"jsonrpc":"2.0","method":"account/login/completed","params":{"loginId":"login-1","success":true}}\\n'
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"loginId":"login-1","authUrl":"%s"}}\\n' "$request_id" "$AUTH_URL"
+                    ;;
+                *'"method":"account/read"'*)
+                    case "$MODE" in
+                        malformed) printf 'not-json\\n'; exit 0 ;;
+                        oversized) head -c 1048577 /dev/zero | tr '\\000' 'x'; printf '\\n'; exit 0 ;;
+                        eof) exit 0 ;;
+                        timeout) sleep 5; exit 0 ;;
+                        cancel) printf '%s' "$$" > "$CODEX_HOME/server.pid"; sleep 60; exit 0 ;;
+                    esac
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"account":{"type":"%s","planType":"plus"},"requiresOpenaiAuth":true}}\\n' "$request_id" "$TYPE"
+                    ;;
+                *'"method":"account/rateLimits/read"'*)
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":20,"windowDurationMins":300}}}}\\n' "$request_id"
+                    ;;
+            esac
+        done
         """
     }
 
