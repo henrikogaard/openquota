@@ -34,7 +34,7 @@ public struct LocalAccountProfileStore: Sendable {
     public static let maxProfiles = 100
     public static let maxCredentialFileBytes: UInt64 = 1_048_576
     public static let supportedProviderIDs: Set<String> = [
-        "claude", "codex", "grok", "opencode", "devin",
+        "grok", "opencode", "devin",
     ]
 
     private let url: URL

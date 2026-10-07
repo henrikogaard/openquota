@@ -18,14 +18,18 @@ swift build -c release
 
 # SPM may put products in a triple-scoped dir; resolve dynamically.
 BIN="$(find .build -path '*/release/openquota' -type f 2>/dev/null | head -1)"
+BRIDGE_BIN="$(find .build -path '*/release/openquota-bridge' -type f 2>/dev/null | head -1)"
 BUILD_DIR="$(dirname "$BIN")"
 [[ -n "$BIN" ]] || { echo "!! openquota binary not found under .build/*/release" >&2; exit 1; }
+[[ -n "$BRIDGE_BIN" ]] || { echo "!! openquota-bridge binary not found under .build/*/release" >&2; exit 1; }
 
 echo "==> assemble $APP (v$VERSION)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/OpenQuota"
+cp "$BRIDGE_BIN" "$APP/Contents/MacOS/openquota-bridge"
 APP_BINARY="$APP/Contents/MacOS/OpenQuota"
+BRIDGE_BINARY="$APP/Contents/MacOS/openquota-bridge"
 
 # Info.plist with version substituted
 sed -e "s/\$(MARKETING_VERSION)/$VERSION/g" \
@@ -65,6 +69,7 @@ if [[ -d "$FRAMEWORKS/Sparkle.framework" ]]; then
     codesign --force --deep ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --sign "$IDENTITY" \
         "$FRAMEWORKS/Sparkle.framework"
 fi
+codesign --force ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --sign "$IDENTITY" "$BRIDGE_BINARY"
 codesign --force ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --sign "$IDENTITY" "$APP"
 
 echo "==> done: $APP"

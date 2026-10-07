@@ -81,26 +81,6 @@ final class CompletionRegressionTests: XCTestCase {
         }
     }
 
-    func testClaudePrefersInjectedKeychainAndPersistsRefreshedToken() async throws {
-        let home = try directory()
-        let credentials = FileCredentialStore(directory: home)
-        try credentials.setSecret(
-            #"{"claudeAiOauth":{"accessToken":"old","refreshToken":"refresh-fixture","expiresAt":1}}"#,
-            for: NSUserName())
-        let http = RecordingHTTP()
-        http.stub("/oauth/token", body: #"{"access_token":"new","refresh_token":"rotated","expires_in":3600}"#)
-        http.stub("/oauth/usage", body: #"{"five_hour":{"utilization":0.5}}"#)
-        let p = ClaudeProvider(http: http, files: .init(home: home), nativeCredentials: credentials)
-        let accounts = try await p.accounts()
-        XCTAssertEqual(accounts.first?.source, .keychainItem)
-        let snapshot = try await p.refresh(account: accounts[0])
-        XCTAssertEqual(snapshot.windows.first?.percentRemaining, 99.5)
-        XCTAssertEqual(http.requests.last?.headers["Authorization"], "Bearer new")
-        let raw = try XCTUnwrap(credentials.secret(for: NSUserName()))
-        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
-        XCTAssertEqual((saved["claudeAiOauth"] as? [String: Any])?["refreshToken"] as? String, "rotated")
-    }
-
     func testUserSpecOverridesBuiltInWithoutDuplicateID() throws {
         let custom = ProviderSpec(id: "openrouter", displayName: "Custom", url: "https://example.test")
         let registry = ProviderRegistry(http: RecordingHTTP(), credentials: FileCredentialStore(directory: try directory()),

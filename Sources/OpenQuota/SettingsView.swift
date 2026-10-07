@@ -10,7 +10,7 @@ struct SettingsView: View {
     @State private var selectedProvider = "openrouter"
     @State private var sessionToken = ""
     @State private var sessionLabel = ""
-    @State private var profileProvider = "claude"
+    @State private var profileProvider = "grok"
     @State private var profileLabel = ""
     @State private var credentialPath = ""
     @State private var errorText: String?
@@ -33,6 +33,8 @@ struct SettingsView: View {
             TabView {
                 accountsTab.tabItem { Label("Accounts", systemImage: "person.crop.circle") }
                 addTab.tabItem { Label("Add Account", systemImage: "plus.circle") }
+                SubscriptionSettingsView(model: model)
+                    .tabItem { Label("Subscriptions", systemImage: "person.badge.key") }
             }
             .disabled(model.isDemo)
             if let errorText {
@@ -115,8 +117,13 @@ struct SettingsView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("\(model.providerName(profile.providerID)) · \(profile.label)")
-                            Text(profile.credentialPath).font(.caption).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle).help(profile.credentialPath)
+                            if profile.providerID == "claude" || profile.providerID == "codex" {
+                                Text("Reconnect required · reconnect in Subscriptions")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text(profile.credentialPath).font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle).help(profile.credentialPath)
+                            }
                         }
                         Spacer()
                         Button("Remove", role: .destructive) { removingProfile = profile }
@@ -132,7 +139,7 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Text("Default CLI credentials are detected automatically. Sign in with the provider's CLI; use Local Profiles for additional accounts. OpenQuota never imports browser cookies.")
+                Text("Other supported CLI credentials are detected locally. Claude and Codex subscriptions require an explicit connection in Subscriptions. OpenQuota never imports browser cookies.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Refresh Detection") { Task { await reload(); model.refreshNow() } }
             }
@@ -143,6 +150,8 @@ struct SettingsView: View {
     private var addTab: some View {
         Form {
             Section("API Key") {
+                Text("API keys use separate provider billing and do not expose subscription quotas.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Provider", selection: $selectedProvider) {
                     ForEach(model.specProviders(), id: \.id) { provider in
                         Text(provider.unverified ? "\(provider.displayName) (experimental)" : provider.displayName)

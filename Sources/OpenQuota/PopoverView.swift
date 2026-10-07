@@ -28,7 +28,8 @@ struct PopoverView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(model.snapshots, id: \.account.id) { snapshot in
                             AccountCard(snapshot: snapshot, providerName: model.providerName(snapshot.providerID),
-                                        dashboardURL: model.dashboardURL(snapshot.providerID))
+                                        dashboardURL: model.dashboardURL(snapshot.providerID),
+                                        sourceNote: model.sourceNote(snapshot.providerID))
                         }
                     }
                     .padding(12)
@@ -96,10 +97,16 @@ struct AccountCard: View {
     var snapshot: UsageSnapshot
     var providerName: String
     var dashboardURL: URL?
+    var sourceNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             header
+            if let sourceNote {
+                Text(sourceNote)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             ForEach(snapshot.windows) { window in
                 WindowRow(window: window)
             }
@@ -118,7 +125,7 @@ struct AccountCard: View {
                     .foregroundStyle(.orange)
             }
             HStack {
-                Text("Updated \(snapshot.fetchedAt, style: .relative) ago")
+                Text("\(snapshot.providerID == "claude" ? "Last reported" : "Updated") \(snapshot.fetchedAt, style: .relative) ago")
                     .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 if let dashboardURL {

@@ -24,12 +24,74 @@ this is not live authentication or paid-account verification.
 | OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 
+## Subscription integrations (explicit opt-in)
+
+Claude and Codex subscriptions are not read from their legacy token files or
+queried through private usage endpoints. Connections are stored separately
+from credential-file profiles. `connections.json` contains only a UUID, kind,
+label and config/home directory; the account ID is derived from the UUID.
+App-owned bridge data lives below
+`~/Library/Application Support/openquota/connections/<uuid>` with private
+directory and file permissions.
+
+### Claude Code status line
+
+Requires Claude Code and an existing config directory (normally `~/.claude`).
+In Settings → Subscriptions, choose **Connect & Install Status Line** and
+explicitly select the configuration. Use a distinct Claude config/login for
+each connection. The card follows the active login in that config and does not
+guarantee an immutable provider identity.
+
+The installer changes only `statusLine.command` in Claude's `settings.json`.
+It preserves unknown top-level keys, other status-line fields and the complete
+previous `statusLine` object in private app-owned metadata. The helper receives
+Claude Code's documented status-line JSON, retains only `recordedAt`,
+`five_hour.used_percentage`, `five_hour.resets_at`,
+`seven_day.used_percentage`, and `seven_day.resets_at`, and atomically writes
+that sanitized reading. It never saves raw stdin/session context, cwd,
+transcript or prompt, and it makes no network request. It invokes the previous
+status-line command with the same stdin and forwards its stdout.
+
+Claude Code must produce a response on a subscriber account before limits are
+available. This is a passive reading, not a refresh request; readings update
+while you use Claude Code and are marked outdated after ten minutes without a
+new status-line event. On disconnect, the original status-line object is
+restored only if the current command still exactly matches OpenQuota's
+installed command. Later user edits and unrelated settings are preserved.
+Settings are not removed if a user changed the command to refer to the helper.
+
+Official documentation: [Claude Code status line](https://code.claude.com/docs/en/statusline)
+and [Claude usage dashboard](https://claude.ai/settings/usage).
+
+### Codex / ChatGPT subscription
+
+Requires the Codex CLI (found on `PATH` or in common install locations, with
+an optional absolute executable picker for nonstandard installs). Choose
+**Add Codex Account** and **Sign in with ChatGPT**; OpenQuota opens only a validated HTTPS sign-in URL on
+`auth.openai.com` or `chatgpt.com`. Each connection runs `codex app-server`
+with its own app-managed `CODEX_HOME` under the OpenQuota support directory,
+using Codex's documented file credential store. OpenQuota does not use
+`~/.codex`, inspect or copy `auth.json`, pass API-key auth, create prompts, or
+start threads/turns. It confirms the account type is `chatgpt`, then maps the
+documented `account/rateLimits/read` response. API keys are usage-based API
+billing and do not expose ChatGPT subscription quotas.
+
+Refresh launches a short-lived app-server with a 30-second request/process
+limit. Failures retain the last good reading as outdated. Removing a
+connection disconnects it from OpenQuota but deliberately retains the
+Codex-managed files in its private home. For migration from an older
+Claude/Codex credential-file profile, remove the old profile and create a new
+connection in Settings → Subscriptions; the old credential file is left
+untouched and is no longer read.
+
+Official documentation: [Codex authentication](https://developers.openai.com/codex/auth),
+[Codex app-server](https://developers.openai.com/codex/app-server.md), and
+[Codex usage dashboard](https://chatgpt.com/codex/settings/usage).
+
 ## Local-credential adapters (auto-detected, no key entry)
 
 | Provider | Credential source | Endpoint(s) | Notes |
 |---|---|---|---|
-| Claude | macOS `Claude Code-credentials` Keychain (current user), then `~/.claude/.credentials.json` | `GET api.anthropic.com/api/oauth/usage`, `anthropic-beta: oauth-2025-04-20`; refresh via `platform.claude.com/v1/oauth/token` | 5h/7d/Sonnet/Opus %. Honor retry-after; do not rotate credentials to evade rate limits. File profiles bypass Keychain. |
-| Codex | `~/.codex/auth.json` | `GET chatgpt.com/backend-api/wham/usage` + `ChatGPT-Account-Id`; refresh via `auth.openai.com/oauth/token` | 5h/weekly %, plan, credits |
 | Gemini | `~/.gemini/oauth_creds.json` | `cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` → `retrieveUserQuota`; refresh via `oauth2.googleapis.com/token` | per-model buckets |
 | Grok | `~/.grok/auth.json` (multi-entry) | `cli-chat-proxy.grok.com/v1/billing?format=credits`; refresh via `auth.x.ai/oauth2/token` | weekly pool + PAYG balance |
 | OpenCode Go | `opencode-go` key in `~/.local/share/opencode/auth.json` | `GET opencode.ai/zen/go/v1/usage` | 5h/weekly/monthly |
@@ -65,20 +127,29 @@ profiles. Unsupported commands show an error card.
   Adding an identical key updates its existing label, without another account.
 - Cursor: paste and label each `userID::jwt` session separately. Sessions expire;
   remove/re-add a changed token when needed. No browser cookies are read.
-- Claude, Codex, OpenCode, Devin, Grok: Settings → Add Account → Local Credential
-  Profile references a separate credential file. Profile IDs namespace account
-  IDs, so identical internal CLI identifiers do not overwrite one another.
+- OpenCode, Devin, Grok: Settings → Add Account → Local Credential Profile
+  references a separate credential file. Profile IDs namespace account IDs,
+  so identical internal CLI identifiers do not overwrite one another.
+- Claude Code and Codex: use the explicit subscription flows above. Old
+  credential-file profiles remain visible as “Reconnect required” but are
+  disabled; they are not opened, removed, or modified automatically.
   Re-adding the same canonical provider/path updates the profile label.
 - A profile path must point to an existing regular file, at most 1 MiB. There
   are at most 100 profiles and 100 saved keys per generic provider.
 - Removing a profile removes its dashboard state, not its credential file.
-  Use separate files for separate logins. Default rows follow the default CLI
-  login rather than offering a second OAuth sign-in flow.
-- Token refresh writes rotated tokens back to their source. A write failure
+  Use separate files for separate logins. Other default rows follow the
+  default CLI login rather than offering a second OAuth sign-in flow.
+- Other local-credential adapters may write rotated tokens back to their
+  source. A write failure
   becomes an error rather than silently throwing away the new token.
 - First refresh failures still have named account cards. Subsequent failures
   retain last-good values as outdated. Successful discovery prunes removed
   accounts; discovery errors preserve cached accounts until recovery.
+
+Claude and Codex fixtures validate sanitization and response mapping only. No
+live paid-account sign-in or subscription quota result is represented by the
+fixture suite; both integrations still require Mac-session validation with
+user-controlled accounts.
 
 Mistral's [Vibe analytics documentation](https://docs.mistral.ai/api/endpoint/beta/admin/vibe-code-analytics)
 describes workspace activity; it does not expose personal subscription

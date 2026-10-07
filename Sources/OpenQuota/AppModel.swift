@@ -9,7 +9,10 @@ final class AppModel {
     private(set) var refreshing = false
     private(set) var providers: [any UsageProvider] = []
     private(set) var profiles: [LocalAccountProfile] = []
+    private(set) var subscriptionConnections: [SubscriptionConnection] = []
     private(set) var statusMessage: String?
+    private(set) var codexLoginStatus: String?
+    private(set) var codexLoginBusy = false
     let isDemo: Bool
 
     private let store = SnapshotStore()
@@ -23,6 +26,10 @@ final class AppModel {
     private let credentials = KeychainCredentialStore()
     private let profileStore = LocalAccountProfileStore(
         url: AppModel.appSupportDir.appendingPathComponent("profiles.json"))
+    private let subscriptionStore = SubscriptionConnectionStore(
+        url: AppModel.appSupportDir.appendingPathComponent("connections.json"))
+    private var codexLoginTask: Task<Void, Never>?
+    private var codexLoginGeneration: UInt64 = 0
 
     init() {
         isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
@@ -79,12 +86,24 @@ final class AppModel {
     private func rebuildProviders() {
         do { profiles = try profileStore.profiles() }
         catch { statusMessage = "Couldn't load account profiles: \(error.localizedDescription)" }
+        do { subscriptionConnections = try subscriptionStore.connections() }
+        catch { statusMessage = "Couldn't load subscription connections" }
         var customSpecs: [ProviderSpec] = []
         do { customSpecs = try settings.userSpecs() }
         catch { statusMessage = "Couldn't load custom providers: \(error.localizedDescription)" }
         let registry = ProviderRegistry(
             http: http, credentials: credentials, extraSpecs: customSpecs)
         providers = registry.providers
+        if subscriptionConnections.contains(where: { $0.kind == .claudeStatusLine }) {
+            providers.append(ClaudeStatusLineProvider(
+                connections: subscriptionConnections,
+                store: subscriptionStore))
+        }
+        if subscriptionConnections.contains(where: { $0.kind == .codexAppServer }) {
+            providers.append(CodexUsageProvider(
+                connections: subscriptionConnections,
+                store: subscriptionStore))
+        }
         for profile in profiles {
             guard let path = Self.credentialPaths[profile.providerID] else { continue }
             let files = LocalCredentialFiles(
@@ -97,7 +116,6 @@ final class AppModel {
     }
 
     static let credentialPaths: [String: String] = [
-        "claude": ".claude/.credentials.json", "codex": ".codex/auth.json",
         "grok": ".grok/auth.json", "opencode": ".local/share/opencode/auth.json",
         "devin": ".local/share/devin/credentials.toml",
     ]
@@ -129,6 +147,124 @@ final class AppModel {
     func removeProfile(id: String) throws {
         guard !isDemo else { return }
         try profileStore.remove(id: id)
+        configurationChanged()
+    }
+
+    func installClaudeStatusLine(label: String, configurationDirectory: String, helper: URL) throws {
+        guard !isDemo else { return }
+        let directory = (configurationDirectory as NSString).expandingTildeInPath
+        let installer = ClaudeStatusLineInstaller(store: subscriptionStore)
+        _ = try installer.install(
+            label: label,
+            configurationDirectory: directory,
+            helperExecutable: helper)
+        configurationChanged()
+    }
+
+    func startCodexLogin(
+        label: String,
+        executablePath: String?,
+        openAuthURL: @escaping @MainActor @Sendable (URL) -> Void
+    ) {
+        guard !isDemo, !codexLoginBusy else { return }
+        let normalizedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedLabel.isEmpty else {
+            codexLoginStatus = "Enter an account label."
+            return
+        }
+        let expandedPath = executablePath.map { ($0 as NSString).expandingTildeInPath }
+        if let expandedPath, !expandedPath.hasPrefix("/") {
+            codexLoginStatus = "Choose an absolute Codex executable path."
+            return
+        }
+        guard let executable = CodexExecutableResolver.resolve(
+            preferredPath: expandedPath) else {
+            codexLoginStatus = "Codex CLI was not found. Install it or choose its executable."
+            return
+        }
+        let id = UUID()
+        let home: URL
+        do {
+            let candidate = SubscriptionConnection(
+                id: id,
+                kind: .codexAppServer,
+                label: normalizedLabel,
+                directory: subscriptionStore.appOwnedConnectionsDirectory
+                    .appendingPathComponent(id.uuidString.lowercased(), isDirectory: true)
+                    .appendingPathComponent("codex-home", isDirectory: true).path)
+            home = try subscriptionStore.codexHome(for: candidate)
+        } catch {
+            codexLoginStatus = "Couldn't prepare a private Codex account home."
+            return
+        }
+
+        codexLoginGeneration &+= 1
+        let generation = codexLoginGeneration
+        codexLoginBusy = true
+        codexLoginStatus = "Starting Codex sign-in…"
+        codexLoginTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await CodexAppServerClient.login(
+                    executable: executable,
+                    codexHome: home,
+                    openAuthURL: { url in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.codexLoginGeneration == generation else { return }
+                            self.codexLoginStatus = "Complete sign-in in your browser…"
+                            openAuthURL(url)
+                        }
+                    })
+                try Task.checkCancellation()
+                guard self.codexLoginGeneration == generation else { return }
+                let pendingConnection = SubscriptionConnection(
+                    id: id,
+                    kind: .codexAppServer,
+                    label: normalizedLabel,
+                    directory: home.path)
+                if expandedPath != nil {
+                    try self.subscriptionStore.setCodexExecutable(
+                        executable, for: pendingConnection)
+                }
+                _ = try self.subscriptionStore.addCodex(id: id, label: normalizedLabel)
+                self.codexLoginBusy = false
+                self.codexLoginTask = nil
+                self.codexLoginStatus = "Codex account connected."
+                self.configurationChanged()
+            } catch is CancellationError {
+                guard self.codexLoginGeneration == generation else { return }
+                self.codexLoginBusy = false
+                self.codexLoginTask = nil
+                self.codexLoginStatus = "Codex sign-in cancelled."
+            } catch {
+                guard self.codexLoginGeneration == generation else { return }
+                self.codexLoginBusy = false
+                self.codexLoginTask = nil
+                self.codexLoginStatus = (error as? ProviderError)?.userMessage
+                    ?? "Codex sign-in failed. Try again."
+            }
+        }
+    }
+
+    func cancelCodexLogin() {
+        guard codexLoginBusy else { return }
+        codexLoginGeneration &+= 1
+        codexLoginTask?.cancel()
+        codexLoginTask = nil
+        codexLoginBusy = false
+        codexLoginStatus = "Codex sign-in cancelled."
+    }
+
+    func removeSubscriptionConnection(_ connection: SubscriptionConnection) throws {
+        guard !isDemo else { return }
+        if connection.kind == .claudeStatusLine {
+            let restored = try ClaudeStatusLineInstaller(store: subscriptionStore)
+                .disconnect(connection)
+            if !restored {
+                statusMessage = "Claude settings changed; their status-line command was kept."
+            }
+        }
+        try subscriptionStore.remove(id: connection.id)
         configurationChanged()
     }
 
@@ -185,7 +321,8 @@ final class AppModel {
     func detectedLocalProviders() async -> [(id: String, name: String, accounts: Int)] {
         var out: [(String, String, Int)] = []
         for provider in providers where !(provider is GenericProvider)
-            && !(provider is ProfiledProvider) && !(provider is CursorProvider) {
+            && !(provider is ProfiledProvider) && !(provider is CursorProvider)
+            && provider.id != "claude" && provider.id != "codex" {
             out.append((provider.id, provider.displayName, (try? await provider.accounts())?.count ?? 0))
         }
         return out
@@ -194,11 +331,20 @@ final class AppModel {
     func providerName(_ id: String) -> String {
         providers.first(where: { $0.id == id })?.displayName
             ?? ["opencode": "OpenCode Go", "openrouter": "OpenRouter",
-                "codex": "Codex / ChatGPT", "mistral": "Mistral Vibe"][id] ?? id.capitalized
+                "claude": "Claude Code", "codex": "Codex / ChatGPT",
+                "mistral": "Mistral Vibe"][id] ?? id.capitalized
     }
 
     func dashboardURL(_ id: String) -> URL? {
         providers.first(where: { $0.id == id })?.dashboardURL
+    }
+
+    func sourceNote(_ id: String) -> String? {
+        switch id {
+        case "claude": "Claude Code status line · updates while you use Claude Code"
+        case "codex": "Codex managed ChatGPT sign-in · subscription limits"
+        default: nil
+        }
     }
 }
 /// Sendable box for the store-observer task — lets a nonisolated `deinit`

@@ -20,6 +20,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "openquota", targets: ["OpenQuota"]),
+        .executable(name: "openquota-bridge", targets: ["OpenQuotaBridge"]),
         .library(name: "OpenQuotaCore", targets: ["OpenQuotaCore"])
     ],
     dependencies: packageDependencies,
@@ -36,6 +37,11 @@ let package = Package(
             name: "OpenQuota",
             dependencies: openQuotaDependencies,
             path: "Sources/OpenQuota"
+        ),
+        .executableTarget(
+            name: "OpenQuotaBridge",
+            dependencies: ["OpenQuotaCore"],
+            path: "Sources/OpenQuotaBridge"
         ),
         .testTarget(
             name: "OpenQuotaCoreTests",

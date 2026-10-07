@@ -193,10 +193,6 @@ final class AdapterTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(
-            at: url.appendingPathComponent(".claude"), withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(
-            at: url.appendingPathComponent(".codex"), withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(
             at: url.appendingPathComponent(".gemini"), withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(
             at: url.appendingPathComponent(".grok"), withIntermediateDirectories: true)
@@ -226,89 +222,6 @@ final class AdapterTests: XCTestCase {
             let found = try await adapter.accounts()
             XCTAssertTrue(found.isEmpty, adapter.id)
         }
-    }
-
-    func test_claudeReadsCredentialsAndMapsWindows() async throws {
-        let home = tempHome()
-        try write(home, ".claude/.credentials.json", """
-            {"claudeAiOauth":{"accessToken":"sk-ant-oat01-x",
-              "refreshToken":"rt","expiresAt":4102444800000}}
-            """)
-        let http = RecordingHTTP()
-        http.stub("api.anthropic.com", body: """
-            {"five_hour":{"utilization":25,"resets_at":"2027-01-01T00:00:00Z"},
-             "seven_day":{"utilization":10,"resets_at":"2027-01-08T00:00:00Z"},
-             "seven_day_sonnet":{"utilization":40}}
-            """)
-        let provider = ClaudeProvider(
-            http: http, files: LocalCredentialFiles(home: home))
-        let accounts = try await provider.accounts()
-        XCTAssertEqual(accounts.count, 1)
-        XCTAssertEqual(accounts[0].source, .configFile)
-        let snapshot = try await provider.refresh(account: accounts[0])
-        XCTAssertEqual(snapshot.windows.count, 3)
-        XCTAssertEqual(snapshot.windows[0].used, 25)
-        XCTAssertEqual(snapshot.windows[0].percentRemaining, 75)
-        let headers = http.requests[0].headers
-        XCTAssertEqual(headers["Authorization"], "Bearer sk-ant-oat01-x")
-        XCTAssertEqual(headers["anthropic-beta"], "oauth-2025-04-20")
-        // Token was fresh — no refresh call should have been issued.
-        XCTAssertEqual(http.requests.count, 1)
-    }
-
-    func test_claudeRefreshesExpiredToken() async throws {
-        let home = tempHome()
-        try write(home, ".claude/.credentials.json", """
-            {"claudeAiOauth":{"accessToken":"old",
-              "refreshToken":"rt","expiresAt":1000}}
-            """)
-        let http = RecordingHTTP()
-        http.stub("platform.claude.com", body: """
-            {"access_token":"new-token","refresh_token":"rt2","expires_in":3600}
-            """)
-        http.stub("api.anthropic.com", body: """
-            {"five_hour":{"utilization":5}}
-            """)
-        let provider = ClaudeProvider(
-            http: http, files: LocalCredentialFiles(home: home))
-        _ = try await provider.refresh(account: try provider.accounts()[0])
-        XCTAssertEqual(http.requests.count, 2)
-        XCTAssertTrue(http.requests[1].url.absoluteString.contains("anthropic"))
-        XCTAssertEqual(http.requests[1].headers["Authorization"], "Bearer new-token")
-        // The CLI's credential file was rewritten with the new token.
-        let rewritten = LocalCredentialFiles(home: home)
-            .readJSON(".claude/.credentials.json")?["claudeAiOauth"] as? [String: Any]
-        XCTAssertEqual(rewritten?["accessToken"] as? String, "new-token")
-    }
-
-    func test_codexMapsWindowsAndSendsAccountHeader() async throws {
-        let home = tempHome()
-        try write(home, ".codex/auth.json", """
-            {"tokens":{"access_token":"at","refresh_token":"rt","account_id":"acct-9"}}
-            """)
-        let http = RecordingHTTP()
-        http.stub("auth.openai.com", body: """
-            {"access_token":"at2","refresh_token":"rt2","expires_in":3600}
-            """)
-        http.stub("chatgpt.com", body: """
-            {"plan_type":"plus","rate_limit":{
-              "primary_window":{"used_percent":30,"reset_at":1800000000},
-              "secondary_window":{"used_percent":55,"reset_at":1800800000}},
-             "credits":{"balance":12.0}}
-            """)
-        let provider = CodexProvider(
-            http: http, files: LocalCredentialFiles(home: home))
-        let snapshot = try await provider.refresh(
-            account: try provider.accounts()[0])
-        XCTAssertEqual(snapshot.account.plan, "plus")
-        XCTAssertEqual(snapshot.windows.count, 2)
-        XCTAssertEqual(snapshot.windows[0].used, 30)
-        XCTAssertEqual(snapshot.windows[1].used, 55)
-        XCTAssertEqual(snapshot.creditsRemaining, 12)
-        let usage = http.requests.first {
-            $0.url.absoluteString.contains("wham")
-        }
-        XCTAssertEqual(usage?.headers["ChatGPT-Account-Id"], "acct-9")
     }
 
     func test_grokMultiEntry() async throws {
@@ -601,10 +514,12 @@ final class ProviderRegistryTests: XCTestCase {
             XCTAssertTrue(ids.contains(specID), specID)
         }
         // adapters
-        for adapterID in ["claude", "codex", "gemini", "grok", "opencode",
+        for adapterID in ["gemini", "grok", "opencode",
                           "devin", "cursor", "copilot"] {
             XCTAssertTrue(ids.contains(adapterID), adapterID)
         }
+        XCTAssertFalse(ids.contains("claude"))
+        XCTAssertFalse(ids.contains("codex"))
         // cli providers
         for cliID in ["amp", "kiro", "augment"] {
             XCTAssertTrue(ids.contains(cliID), cliID)

@@ -10,7 +10,7 @@ final class AccountProfilesTests: XCTestCase {
         let store = LocalAccountProfileStore(url: directory.appendingPathComponent("profiles.json"))
 
         let profile = try store.add(
-            providerID: "claude",
+            providerID: "grok",
             label: " Work ",
             credentialPath: credentialFile.path)
 
@@ -35,15 +35,19 @@ final class AccountProfilesTests: XCTestCase {
         let store = LocalAccountProfileStore(url: directory.appendingPathComponent("profiles.json"))
 
         XCTAssertThrowsError(try store.add(
-            providerID: "gemini", label: "Work", credentialPath: credentialFile.path)) {
+            providerID: "claude", label: "Work", credentialPath: credentialFile.path)) {
             XCTAssertEqual($0 as? LocalAccountProfileError, .invalidProvider)
         }
         XCTAssertThrowsError(try store.add(
-            providerID: "claude", label: "Work", credentialPath: "relative/path")) {
+            providerID: "codex", label: "Work", credentialPath: credentialFile.path)) {
+            XCTAssertEqual($0 as? LocalAccountProfileError, .invalidProvider)
+        }
+        XCTAssertThrowsError(try store.add(
+            providerID: "grok", label: "Work", credentialPath: "relative/path")) {
             XCTAssertEqual($0 as? LocalAccountProfileError, .invalidCredentialPath)
         }
         XCTAssertThrowsError(try store.add(
-            providerID: "claude", label: "Work", credentialPath: directory.path)) {
+            providerID: "grok", label: "Work", credentialPath: directory.path)) {
             XCTAssertEqual($0 as? LocalAccountProfileError, .credentialNotRegularFile)
         }
 
@@ -51,7 +55,7 @@ final class AccountProfilesTests: XCTestCase {
         try Data(repeating: 0, count: Int(LocalAccountProfileStore.maxCredentialFileBytes) + 1)
             .write(to: oversizedFile)
         XCTAssertThrowsError(try store.add(
-            providerID: "claude", label: "Work", credentialPath: oversizedFile.path)) {
+            providerID: "grok", label: "Work", credentialPath: oversizedFile.path)) {
             XCTAssertEqual($0 as? LocalAccountProfileError, .credentialFileTooLarge)
         }
     }
@@ -64,14 +68,14 @@ final class AccountProfilesTests: XCTestCase {
             let credentialFile = directory.appendingPathComponent("credentials-\(index).json")
             try Data("{}".utf8).write(to: credentialFile)
             try store.add(
-                providerID: "claude",
+                providerID: "grok",
                 label: "Profile \(index)",
                 credentialPath: credentialFile.path)
         }
         let first = try XCTUnwrap(try store.profiles().first)
         let duplicatePath = first.credentialPath
         let duplicate = try store.add(
-            providerID: "claude",
+            providerID: "grok",
             label: "Renamed",
             credentialPath: duplicatePath)
         XCTAssertEqual(duplicate.id, first.id)
@@ -81,29 +85,29 @@ final class AccountProfilesTests: XCTestCase {
         let overflowFile = directory.appendingPathComponent("overflow.json")
         try Data("{}".utf8).write(to: overflowFile)
         XCTAssertThrowsError(try store.add(
-            providerID: "claude", label: "Overflow", credentialPath: overflowFile.path)) {
+            providerID: "grok", label: "Overflow", credentialPath: overflowFile.path)) {
             XCTAssertEqual($0 as? LocalAccountProfileError, .profileLimitReached)
         }
     }
 
     func test_profiledProviderNamespacesAccountsAndRewritesRefreshIdentity() async throws {
         let first = AccountDescriptor(
-            account: AccountIdentity(providerID: "codex", id: "codex@1", label: "Personal"),
+            account: AccountIdentity(providerID: "grok", id: "grok@1", label: "Personal"),
             source: .configFile,
             isDefaultHome: true)
         let second = AccountDescriptor(
-            account: AccountIdentity(providerID: "codex", id: "codex@2", label: "Business"),
+            account: AccountIdentity(providerID: "grok", id: "grok@2", label: "Business"),
             source: .keychainItem,
             isDefaultHome: true)
         let base = StaticProfileTestProvider(accounts: [first, second])
         let profile = LocalAccountProfile(
-            id: "profile-1", providerID: "codex", label: "Work", credentialPath: "/unused")
+            id: "profile-1", providerID: "grok", label: "Work", credentialPath: "/unused")
         let provider = ProfiledProvider(profile: profile, base: base)
         let accounts = try await provider.accounts()
 
         XCTAssertEqual(accounts.map(\.account.id), [
-            AccountIdentity.makeID(providerID: "codex", identityKey: "profile-1/codex@1"),
-            AccountIdentity.makeID(providerID: "codex", identityKey: "profile-1/codex@2"),
+            AccountIdentity.makeID(providerID: "grok", identityKey: "profile-1/grok@1"),
+            AccountIdentity.makeID(providerID: "grok", identityKey: "profile-1/grok@2"),
         ])
         XCTAssertEqual(accounts[0].account.label, "Work · Personal")
         XCTAssertEqual(accounts[1].account.label, "Work · Business")
@@ -114,7 +118,7 @@ final class AccountProfilesTests: XCTestCase {
         XCTAssertEqual(snapshot.account.id, accounts[1].account.id)
         XCTAssertEqual(snapshot.account.label, "Work · Business")
         XCTAssertEqual(snapshot.account.plan, "Team")
-        XCTAssertEqual(snapshot.providerID, "codex")
+        XCTAssertEqual(snapshot.providerID, "grok")
     }
 
     func test_singleAccountProfileUsesOnlyProfileLabel() async throws {

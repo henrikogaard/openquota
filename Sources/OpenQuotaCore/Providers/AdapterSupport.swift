@@ -3,10 +3,8 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Reads provider credential files written by their own CLIs
-/// (~/.claude/.credentials.json, ~/.codex/auth.json, …). File access is the
-/// whole point of this tier: no browser cookies, no keychain scraping — only
-/// files the user already produced by logging in with the provider's CLI.
+/// Reads provider credential files written by their own CLIs. File access is
+/// limited to the supported adapters' documented local credential files.
 public struct LocalCredentialFiles: Sendable {
     public var home: URL
     public var overridePaths: [String: URL]

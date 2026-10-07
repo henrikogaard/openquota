@@ -8,19 +8,19 @@ One row per account in the popover; the menu bar shows the lowest remaining-% ac
 
 OpenQuota prioritizes a small native UI, independent account state and bounded background work:
 
-- **No WebKit, ever.** Usage comes from provider APIs, local credential files, or pasted API keys — never a live browser session.
+- **No session scraping.** Usage comes from provider APIs, local credential files, or documented CLI integrations — never browser cookies or session history.
 - **No session-log scanning.** Only provider-reported numbers; nothing grows with your history.
 - **Shared ephemeral URLSession.** Four concurrent account fetches; last-good snapshots replace old values rather than accumulating history.
 - **Hard timeouts.** 15s request / 30s resource / 60s per-fetch ceiling. A blocked network fails fast instead of hanging.
 
 ## Providers
 
-Each saved key/session has its own row. Local providers discover their default CLI login; additional Claude, Codex, OpenCode, Devin and Grok logins can be added as labeled **credential-file profiles** in Settings. Profiles reference existing files, not browser sessions or interactive sign-in flows. Grok can also enumerate named entries in its credential file.
+Each saved key/session has its own row. Other local providers discover their default CLI login; OpenCode, Devin and Grok also support labeled **credential-file profiles**. Claude and Codex subscriptions use separate, explicit connections in Settings → Subscriptions.
 
 | Provider | Status | Source |
 |---|---|---|
-| Claude | Local OAuth | Claude Code Keychain on macOS, then credential file; usage windows and resets |
-| Codex / ChatGPT | Local OAuth | Codex credential file; primary/secondary limits and credits |
+| Claude Code | Passive status line | Sanitized documented status-line readings; updates while you use Claude Code |
+| Codex / ChatGPT | Managed CLI sign-in | Codex app-server subscription limits and credits; isolated Codex home per connection |
 | OpenCode Go | Local API key | Rolling, weekly and monthly usage |
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
 | Grok | Local OAuth | Billing-period usage; named local accounts |
@@ -30,7 +30,7 @@ Each saved key/session has its own row. Local providers discover their default C
 | Requesty | Management API key | Organization balance |
 | Additional / custom providers | Specs and CLI adapters | See [provider details](docs/providers.md) |
 
-These implementations are fixture-tested, **not a claim that every provider has been verified with a live paid account**. Private endpoints may change; errors retain the last good reading and mark it outdated. Additional generic integrations are labeled unverified. CLI integrations are experimental and depend on the installed CLI supporting the specified JSON command.
+Provider mappings are fixture-tested, **not a claim that every provider has been verified with a live paid account**. Other providers' endpoints may change; errors retain the last good reading and mark it outdated. Claude and Codex use the documented integration surfaces linked in [provider details](docs/providers.md); their fixture tests do not replace live paid-account validation.
 
 Custom providers are added by dropping a `ProviderSpec` JSON array into `~/Library/Application Support/openquota/provider-specs.json` — no code needed for bearer-key + JSON-usage-endpoint services. Quit and relaunch OpenQuota after editing the file to load the new definitions.
 
@@ -44,6 +44,7 @@ swift test               # core suite — also runs on Linux
 ```
 
 For development: `swift run` shows the menu-bar item without an app bundle (icon may render in the Dock until bundled as a `.app` with `LSUIElement`).
+Run `swift build` before installing the Claude status-line integration during development so the sibling `openquota-bridge` executable is available.
 
 To review populated cards without credentials:
 
@@ -55,11 +56,15 @@ Quit an existing instance first. Demo mode uses synthetic data, performs no acco
 
 ## Accounts and privacy
 
-Settings → Add Account accepts API keys, manually pasted Cursor sessions, or an absolute local credential-file path. Saved secrets use macOS Keychain; profile files store only labels and paths. Saved API-key/session accounts can be renamed or removed. Removing a local profile never deletes its provider-owned credential file.
+Settings → Add Account accepts API keys, manually pasted Cursor sessions, or an absolute local credential-file path for supported providers. Saved secrets use macOS Keychain; profile files store only labels and paths. Saved API-key/session accounts can be renamed or removed. Removing a local profile never deletes its provider-owned credential file.
 
-OAuth refresh may update the original credential file (or Claude Code Keychain item) with rotated tokens. Use a separate, stable credential file per extra login; duplicating a file does not create a new provider account. If the CLI changes its default login, that default row follows it. OpenQuota does not provide a browser-based OAuth account-switching flow.
+Claude Code connection requires Claude Code and an existing config directory. OpenQuota installs a reversible status-line wrapper that keeps the existing command and unrelated settings. It stores only sanitized quota percentages and reset times from Claude's documented status-line input; it makes no quota requests. Readings follow whichever login is active in that configuration, and become outdated after ten minutes without a new Claude Code response. Disconnect restores the prior status-line object only if the installed command is still unchanged. Separate Claude configs/logins are needed for separate connections.
 
-Requests time out, HTTP response bodies are capped at 2 MiB on macOS, local credential files at 1 MiB, and the on-disk snapshot cache at 256 KiB. Saved keys and local profiles have count limits. Rate limits honor `Retry-After`, including during manual refresh. A five-minute refresh cadence and exponential backoff avoid aggressive polling. These bounds reduce risk; they are not a substitute for a long-running memory soak test.
+Codex connection requires the Codex CLI. “Sign in with ChatGPT” runs Codex's documented app-server flow in a dedicated app-managed `CODEX_HOME`, independent for each connection. OpenQuota does not read or copy `auth.json`; Codex manages its own sign-in files. API keys are for separate API billing and do not provide ChatGPT subscription quotas. Removing a Codex connection removes it from OpenQuota but retains Codex-managed files in that dedicated home.
+
+Older Claude/Codex credential-file profiles remain listed as **Reconnect required** but are no longer read. Remove those profiles and add the account from Settings → Subscriptions. Other supported providers may update their own credential file with refreshed tokens; use a separate, stable file per extra login. Duplicating a file does not create a new provider account.
+
+Requests time out, HTTP response bodies are capped at 2 MiB on macOS, local credential files at 1 MiB, and the on-disk snapshot cache at 256 KiB. Subscription connection metadata is secret-free and capped at 100 entries. Saved keys and local profiles have count limits. Rate limits honor `Retry-After`, including during manual refresh. A five-minute refresh cadence and exponential backoff avoid aggressive polling. These bounds reduce risk; they are not a substitute for a long-running memory soak test.
 
 ## Auto-update & releases
 

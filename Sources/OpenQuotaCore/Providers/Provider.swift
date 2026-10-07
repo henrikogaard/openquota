@@ -5,7 +5,7 @@ import Foundation
 public enum CredentialSource: String, Codable, Sendable {
     /// User pasted an API key in Settings; stored in Keychain on macOS.
     case userSuppliedKey
-    /// Read from the provider CLI's config dir (`~/.codex/auth.json` etc).
+    /// Read from a provider CLI configuration file.
     case configFile
     /// macOS Keychain item written by the provider's own app/CLI.
     case keychainItem
@@ -17,8 +17,8 @@ public enum CredentialSource: String, Codable, Sendable {
 public struct AccountDescriptor: Sendable, Identifiable {
     public var account: AccountIdentity
     public var source: CredentialSource
-    /// True when this account occupies the provider's "default home" (e.g. the
-    /// login currently in `~/.claude`). Badge only — never drives ordering.
+    /// True when this account occupies the provider's default home. Badge only —
+    /// never drives ordering.
     public var isDefaultHome: Bool
     public var id: String { account.id }
 
