@@ -201,7 +201,14 @@ public actor LocalSpendScanner {
                 else if old.tokens.totalTokens != event.tokens.totalTokens {
                     replace = event.tokens.totalTokens > old.tokens.totalTokens
                 } else { replace = (event.hasSpeed && !old.hasSpeed) || (event.recordedUSD != nil && old.recordedUSD == nil) }
-                if replace { output[index] = event }
+                if replace {
+                    var kept = event
+                    if kept.recordedUSD == nil, old.sidechain == event.sidechain,
+                       old.tokens.totalTokens == event.tokens.totalTokens {
+                        kept.recordedUSD = old.recordedUSD
+                    }
+                    output[index] = kept
+                }
                 exact[key] = index
             } else {
                 exact[key] = output.count

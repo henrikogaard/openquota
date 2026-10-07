@@ -86,6 +86,22 @@ final class SpendTests: XCTestCase {
         XCTAssertEqual(day.total.pricedEvents, 3)
     }
 
+    func testDuplicateWithRicherSpeedKeepsRecordedCost() throws {
+        var parser = SpendLogParser(provider: .claude, fileIdentity: "source")
+        var costed = claude(id: "message", model: "known")
+        costed["costUSD"] = 1.25
+        var fast = claude(id: "message", model: "known")
+        fast["message"] = ["id": "message", "model": "known",
+                           "usage": ["input_tokens": 100, "output_tokens": 20, "speed": "standard"]]
+        let events = try [costed, fast].flatMap { try parse($0, with: &parser) }
+        let deduped = LocalSpendScanner.deduplicate(events)
+        XCTAssertEqual(deduped.count, 1)
+        XCTAssertTrue(deduped[0].hasSpeed)
+        let day = LocalSpendScanner.aggregate(deduped, pricing: pricing, calendar: calendar)[0]
+        XCTAssertEqual(day.total.recordedUSD, 1.25)
+        XCTAssertEqual(day.total.estimatedUSD, 0)
+    }
+
     func testCodexCumulativeDeltasCachingAndRepeatedSnapshots() throws {
         var parser = SpendLogParser(provider: .codex, fileIdentity: "file")
         _ = try parse(["type": "session_meta", "timestamp": stamp,
