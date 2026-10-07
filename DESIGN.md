@@ -2,31 +2,43 @@
 
 Goal: looks like Apple made it. Quiet, monochrome, one glance.
 
-## Popover
+## Platform
 
-- No cards. Providers are small secondary section titles; accounts sit beneath them.
-- Each quota window is one line (label · reset · value) over a 4pt hairline meter.
-- The meter shows what's **left**, in neutral `primary @ 55%`. Orange at 80% used, red at 90%.
-- Stale readings: tertiary "Updated 5m ago" on the account line. Errors: one orange caption line.
-- Header holds the only actions: refresh and `⋯` (Settings, Check for Updates, Quit).
-- Menu bar: gauge + tightest "% left"; stale dims the number to 50%.
+macOS 26 Tahoe and later. Real Liquid Glass (`glassEffect`, `.glass` buttons) — no hand-made blur or opaque fills.
 
-## Settings
+## Popover (Control Center style)
 
-- Two tabs: Accounts and General.
-- Accounts is Mail-style: sidebar list grouped by source, detail form on the right, +/− under the list.
-- Add Account is a sheet with a searchable provider list and a short form per provider. One line of help text, max.
+- No title bar. Top: a **headline module** for the single window closest to running out — ring, big "16% left", provider · account · window, "Resets in 1h 5m".
+- One **glass module per provider** (all in one `GlassEffectContainer`), monochrome glyph + name. Collapsed: one line per account (label · tightest meter · value). Click to expand: every window, balance, freshness, errors, usage-page link.
+- Stale/error collapse to a small glyph in the module header (clock / orange triangle); the text lives in the expanded view.
+- Bottom: a row of circular glass buttons — Refresh, Add Account (opens Settings straight into the sheet), Settings, ⋯ (Check for Updates, Quit).
+- Height follows content, scrolling past 520pt.
+- Meters/rings show what's **left**, neutral `primary @ 60%`; orange at 80% used, red at 90%.
+- Menu bar: gauge glyph whose needle follows the tightest quota, plus optional "% left" (General → Menu Bar). Stale dims the number.
+
+## Settings (System Settings style)
+
+- `NavigationSplitView`: glass sidebar with General, then accounts grouped by source (glyph + provider + label). `+` in the toolbar.
+- Detail is a grouped `Form`: provider, label (editable for keys), source, plan, live meters, notes, usage page, Remove Account….
+- Add Account is a sheet: searchable grid of provider tiles → pushes a short form. One line of help text, max.
+
+## Glyphs
+
+Monochrome SF Symbols per provider, monogram fallback. Never provider logos.
 
 ## Tokens
 
 ```css
 :root {
-  --oq-popover-width: 320px;
-  --oq-inset: 16px;
-  --oq-section-spacing: 18px;
-  --oq-meter-height: 4px;
-  --oq-meter-fill: color-mix(in srgb, currentColor 55%, transparent);
-  --oq-meter-track: color-mix(in srgb, currentColor 8%, transparent);
+  --oq-popover-width: 340px;
+  --oq-popover-max-content-height: 520px;
+  --oq-inset: 12px;
+  --oq-module-spacing: 8px;
+  --oq-module-radius: 16px;
+  --oq-module-padding: 12px;
+  --oq-meter-height: 5px;
+  --oq-meter-fill: color-mix(in srgb, currentColor 60%, transparent);
+  --oq-meter-track: color-mix(in srgb, currentColor 10%, transparent);
   --oq-meter-warn: #ff9500;      /* >= 80% used */
   --oq-meter-critical: #ff3b30;  /* >= 90% used */
   --oq-font-title: 600 13px -apple-system, system-ui, sans-serif;
@@ -37,26 +49,30 @@ Goal: looks like Apple made it. Quiet, monochrome, one glance.
 
 ```ts
 export const tokens = {
-  popoverWidth: 320,
-  inset: 16,
-  sectionSpacing: 18,
-  meterHeight: 4,
-  meterFillOpacity: 0.55,
-  meterTrackOpacity: 0.08,
+  popoverWidth: 340,
+  popoverMaxContentHeight: 520,
+  inset: 12,
+  moduleSpacing: 8,
+  moduleRadius: 16,
+  modulePadding: 12,
+  meterHeight: 5,
+  meterFillOpacity: 0.6,
+  meterTrackOpacity: 0.1,
   warnThreshold: 0.8,
   criticalThreshold: 0.9,
 } as const;
 ```
 
 ```json
-{"popoverWidth": 320, "inset": 16, "sectionSpacing": 18, "meterHeight": 4,
- "meterFillOpacity": 0.55, "meterTrackOpacity": 0.08, "warnThreshold": 0.8, "criticalThreshold": 0.9}
+{"popoverWidth": 340, "popoverMaxContentHeight": 520, "inset": 12, "moduleSpacing": 8,
+ "moduleRadius": 16, "modulePadding": 12, "meterHeight": 5,
+ "meterFillOpacity": 0.6, "meterTrackOpacity": 0.1, "warnThreshold": 0.8, "criticalThreshold": 0.9}
 ```
 
-Swift source of truth: `Tokens` in `Sources/OpenQuota/PopoverView.swift`.
+Swift source of truth: `Tokens` in `Sources/OpenQuota/Components.swift`.
 
 ## Rules
 
 - Numbers are monospaced and short ("62% left", "$18.75 left", "2h 14m").
-- Color only carries meaning. No focus rings, no fills, no badges. SF Symbols only.
+- Color only carries meaning. No focus rings, no custom fills behind system glass. SF Symbols only.
 - Never invent a percentage: balances and activity show as amounts.

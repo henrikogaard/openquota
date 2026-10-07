@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 import OpenQuotaCore
 
-/// Pick a provider on the left, connect it on the right.
+/// A searchable grid of providers; choosing one pushes its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
         case claude, codex, cursor
@@ -11,80 +11,122 @@ struct AddAccountSheet: View {
         case profile(String)
     }
 
-    var model: AppModel
-    var onDone: () -> Void
-    @State private var target: Target? = .claude
-    @State private var search = ""
-
-    private var keyProviders: [GenericProvider] {
-        model.specProviders()
-            .filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search) }
-            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    struct Tile: Identifiable {
+        var target: Target
+        var providerID: String
+        var name: String
+        var id: Target { target }
     }
 
-    private func matches(_ name: String) -> Bool {
-        search.isEmpty || name.localizedCaseInsensitiveContains(search)
+    var model: AppModel
+    var onDone: () -> Void
+    @State private var path: [Target] = []
+    @State private var search = ""
+
+    private var sections: [(title: String, tiles: [Tile])] {
+        let subscriptions = [
+            Tile(target: .claude, providerID: "claude", name: "Claude Code"),
+            Tile(target: .codex, providerID: "codex", name: "Codex / ChatGPT"),
+        ]
+        let signIns = [Tile(target: .cursor, providerID: "cursor", name: "Cursor")]
+            + AppModel.credentialPaths.keys.sorted().map {
+                Tile(target: .profile($0), providerID: $0, name: model.providerName($0))
+            }
+        let keys = model.specProviders()
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+            .map { Tile(target: .apiKey($0.id), providerID: $0.id, name: $0.displayName) }
+        return [("Subscriptions", subscriptions), ("Sign-ins", signIns), ("API Keys", keys)]
+            .map { ($0.0, $0.1.filter(matches)) }
+            .filter { !$0.1.isEmpty }
+    }
+
+    private func matches(_ tile: Tile) -> Bool {
+        search.isEmpty || tile.name.localizedCaseInsensitiveContains(search)
+            || (tile.target == .codex && "chatgpt".localizedCaseInsensitiveContains(search))
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                List(selection: $target) {
-                    if matches("Claude") || matches("Codex") || matches("ChatGPT") {
-                        Section("Subscriptions") {
-                            if matches("Claude") { Text("Claude Code").tag(Target.claude) }
-                            if matches("Codex") || matches("ChatGPT") { Text("Codex / ChatGPT").tag(Target.codex) }
-                        }
-                    }
-                    if matches("Cursor") || !AppModel.credentialPaths.keys.filter({ matches(model.providerName($0)) }).isEmpty {
-                        Section("Sign-ins") {
-                            if matches("Cursor") { Text("Cursor").tag(Target.cursor) }
-                            ForEach(AppModel.credentialPaths.keys.sorted().filter { matches(model.providerName($0)) },
-                                    id: \.self) { id in
-                                Text(model.providerName(id)).tag(Target.profile(id))
+        NavigationStack(path: $path) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(sections, id: \.title) { section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(section.title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                                ForEach(section.tiles) { tile in
+                                    Button { path.append(tile.target) } label: {
+                                        VStack(spacing: 8) {
+                                            ProviderGlyph(providerID: tile.providerID, name: tile.name, size: 32)
+                                            Text(tile.name)
+                                                .font(.callout)
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.85)
+                                        }
+                                        .frame(maxWidth: .infinity, minHeight: 76)
+                                        .contentShape(.rect(cornerRadius: 12))
+                                    }
+                                    .buttonStyle(ProviderTileStyle())
+                                }
                             }
                         }
                     }
-                    if !keyProviders.isEmpty {
-                        Section("API Keys") {
-                            ForEach(keyProviders, id: \.id) { provider in
-                                Text(provider.displayName).tag(Target.apiKey(provider.id))
-                            }
-                        }
+                    if sections.isEmpty {
+                        ContentUnavailableView.search(text: search)
                     }
                 }
-                .listStyle(.sidebar)
-                .searchable(text: $search, placement: .sidebar, prompt: "Search")
-                .frame(width: 210)
-                Divider()
-                Group {
-                    switch target {
-                    case .claude:
-                        SubscriptionConnectForm(model: model, kind: .claudeStatusLine, onConnected: onDone)
-                    case .codex:
-                        SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone)
-                    case .cursor:
-                        CursorSessionForm(model: model, onDone: onDone)
-                    case .apiKey(let id):
-                        if let provider = model.specProviders().first(where: { $0.id == id }) {
-                            APIKeyForm(model: model, provider: provider, onDone: onDone).id(id)
-                        }
-                    case .profile(let id):
-                        CredentialProfileForm(model: model, providerID: id, onDone: onDone).id(id)
-                    case nil:
-                        ContentUnavailableView("Choose a Provider", systemImage: "square.stack.3d.up")
-                    }
+                .padding(20)
+            }
+            .navigationTitle("Add Account")
+            .searchable(text: $search, placement: .toolbar, prompt: "Search Providers")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onDone)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Divider()
-            HStack {
-                Spacer()
-                Button("Done", action: onDone).keyboardShortcut(.cancelAction)
+            .navigationDestination(for: Target.self) { target in
+                form(for: target)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel", action: onDone)
+                        }
+                    }
             }
-            .padding(12)
         }
-        .frame(width: 640, height: 440)
+        .frame(width: 600, height: 480)
+    }
+
+    @ViewBuilder
+    private func form(for target: Target) -> some View {
+        switch target {
+        case .claude:
+            SubscriptionConnectForm(model: model, kind: .claudeStatusLine, onConnected: onDone)
+        case .codex:
+            SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone)
+        case .cursor:
+            CursorSessionForm(model: model, onDone: onDone)
+        case .apiKey(let id):
+            if let provider = model.specProviders().first(where: { $0.id == id }) {
+                APIKeyForm(model: model, provider: provider, onDone: onDone)
+            }
+        case .profile(let id):
+            CredentialProfileForm(model: model, providerID: id, onDone: onDone)
+        }
+    }
+}
+
+/// Quiet tile: a faint fill that brightens on hover and press.
+private struct ProviderTileStyle: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                .primary.opacity(configuration.isPressed ? 0.14 : hovering ? 0.09 : 0.05),
+                in: .rect(cornerRadius: 12))
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 

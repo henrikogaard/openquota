@@ -3,14 +3,18 @@ import SwiftUI
 import AppKit
 import OpenQuotaCore
 
-/// The popover: providers as quiet sections, one compact block per account,
-/// one thin meter per quota window. Color appears only when it means something.
+/// The popover, laid out like a Control Center panel: a headline reading for
+/// whatever runs out first, one Liquid Glass module per provider, and a row
+/// of glass controls. Modules collapse to one line per account.
 struct PopoverView: View {
     var model: AppModel
     @Environment(\.openSettings) private var openSettings
+    @State private var expanded: Set<String> = []
+    @State private var contentHeight: CGFloat = 240
+    @Namespace private var glass
 
     /// Grouped by display name so one product (e.g. OpenCode Go from a local
-    /// file and from pasted keys) reads as a single section.
+    /// file and from pasted keys) reads as a single module.
     private var groups: [(providerID: String, snapshots: [UsageSnapshot])] {
         var order: [String] = []
         var firstID: [String: String] = [:]
@@ -23,150 +27,271 @@ struct PopoverView: View {
         return order.map { (firstID[$0] ?? $0, byName[$0] ?? []) }
     }
 
+    /// The single window closest to running out, across every account.
+    private var headline: (snapshot: UsageSnapshot, window: UsageWindow)? {
+        model.snapshots
+            .flatMap { snapshot in snapshot.windows.map { (snapshot, $0) } }
+            .filter { $0.1.fractionUsed != nil }
+            .min { ($0.1.percentRemaining ?? 100) < ($1.1.percentRemaining ?? 100) }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().opacity(0.5)
-            if model.snapshots.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Tokens.sectionSpacing) {
-                        ForEach(groups, id: \.providerID) { group in
-                            ProviderSection(
-                                name: model.providerName(group.providerID),
-                                dashboardURL: model.dashboardURL(group.providerID),
-                                snapshots: group.snapshots)
-                        }
+        GlassEffectContainer(spacing: Tokens.moduleSpacing) {
+            VStack(spacing: Tokens.moduleSpacing) {
+                if model.snapshots.isEmpty {
+                    emptyState
+                } else {
+                    if let headline {
+                        HeadlineModule(
+                            name: model.providerName(headline.snapshot.providerID),
+                            snapshot: headline.snapshot, window: headline.window)
                     }
-                    .padding(.horizontal, Tokens.inset)
-                    .padding(.vertical, 12)
+                    ScrollView {
+                        VStack(spacing: Tokens.moduleSpacing) {
+                            ForEach(groups, id: \.providerID) { group in
+                                let name = model.providerName(group.providerID)
+                                ProviderModule(
+                                    providerID: group.providerID, name: name,
+                                    dashboardURL: model.dashboardURL(group.providerID),
+                                    snapshots: group.snapshots,
+                                    isExpanded: expanded.contains(name),
+                                    toggle: { toggle(name) })
+                                .glassEffectID(name, in: glass)
+                            }
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                    }
+                    .scrollIndicators(.never)
+                    .scrollBounceBehavior(.basedOnSize)
+                    // A window-style MenuBarExtra can't size a scroll view itself;
+                    // follow the measured content up to a cap.
+                    .frame(height: min(contentHeight, Tokens.popoverMaxContentHeight))
                 }
-                .scrollIndicators(.never)
-                // A window-style MenuBarExtra can't infer a scroll view's height.
-                .frame(height: contentHeight)
+                if let status = model.statusMessage {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                }
+                controls
             }
-            if let status = model.statusMessage {
-                Divider().opacity(0.5)
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Tokens.inset)
-                    .padding(.vertical, 8)
-            }
+            .padding(Tokens.inset)
         }
         .frame(width: Tokens.popoverWidth)
     }
 
-    private var contentHeight: CGFloat {
-        var height: CGFloat = 24
-        for group in groups {
-            height += 22 + Tokens.sectionSpacing
-            for snapshot in group.snapshots {
-                height += 22
-                height += CGFloat(snapshot.windows.count) * 30
-                if snapshot.creditsRemaining != nil && !snapshot.windows.contains(where: { $0.kind == .credits }) {
-                    height += 20
-                }
-                if snapshot.errorMessage != nil { height += 18 }
-                height += 10
-            }
+    private func toggle(_ name: String) {
+        withAnimation(.smooth(duration: 0.25)) {
+            if expanded.contains(name) { expanded.remove(name) } else { expanded.insert(name) }
         }
-        return min(max(height, 120), 520)
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Text("OpenQuota")
-                .font(.system(size: 13, weight: .semibold))
-            if model.isDemo {
-                Text("Demo")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if model.refreshing {
-                ProgressView().controlSize(.small).scaleEffect(0.7)
-            }
+    private func showSettings(addingAccount: Bool = false) {
+        model.requestsAddAccount = addingAccount
+        openSettings()
+        NSApp.activate()
+    }
+
+    private var controls: some View {
+        HStack(spacing: 8) {
             Button { model.refreshNow() } label: {
-                Image(systemName: "arrow.clockwise")
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .symbolEffect(.rotate, isActive: model.refreshing)
             }
             .keyboardShortcut("r")
-            .help("Refresh")
             .disabled(model.refreshing || model.isDemo)
+            Button { showSettings(addingAccount: true) } label: {
+                Label("Add Account", systemImage: "plus")
+            }
+            .disabled(model.isDemo)
+            Spacer()
+            if model.isDemo {
+                Text("Demo").font(.caption).foregroundStyle(.secondary)
+            }
+            Button { showSettings() } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .keyboardShortcut(",")
             Menu {
-                Button("Settings…") { openSettings(); NSApp.activate() }
-                    .keyboardShortcut(",")
                 Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
                     .disabled(!UpdateController.shared.canCheckForUpdates)
                 Divider()
                 Button("Quit OpenQuota") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
             } label: {
-                Image(systemName: "ellipsis")
+                Label("More", systemImage: "ellipsis")
             }
             .menuIndicator(.hidden)
             .fixedSize()
         }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, Tokens.inset)
-        .padding(.vertical, 10)
+        .labelStyle(.iconOnly)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "gauge.with.dots.needle.33percent")
-                .font(.system(size: 26, weight: .light))
+                .font(.system(size: 28, weight: .light))
                 .foregroundStyle(.secondary)
             Text("No Accounts")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.headline)
             Text("Connect a subscription or add an API key to see what you have left.")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 240)
-            Button("Add Account…") { openSettings(); NSApp.activate() }
-                .controlSize(.small)
-                .padding(.top, 2)
+            Button("Add Account…") { showSettings(addingAccount: true) }
+                .buttonStyle(.glassProminent)
+                .padding(.top, 4)
         }
-        .padding(.vertical, 28)
+        .padding(.vertical, 24)
         .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: Tokens.moduleRadius))
     }
 }
 
-/// One provider: a small title, then each account beneath it.
-struct ProviderSection: View {
+/// Headline reading: the window that will run out first, as a ring.
+struct HeadlineModule: View {
+    var name: String
+    var snapshot: UsageSnapshot
+    var window: UsageWindow
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let fraction = window.fractionUsed {
+                ZStack {
+                    Ring(fractionUsed: fraction, lineWidth: 6)
+                    ProviderGlyph(providerID: snapshot.providerID, name: name, size: 26)
+                }
+                .frame(width: 52, height: 52)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(Int((window.percentRemaining ?? 0).rounded()))%")
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text("left").font(.callout).foregroundStyle(.secondary)
+                }
+                Text([name, snapshot.account.label, window.label].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let reset = Format.reset(window) {
+                    Text(reset == "resetting" ? "Resetting now" : "Resets in \(reset)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Tokens.modulePadding)
+        .glassEffect(.regular, in: .rect(cornerRadius: Tokens.moduleRadius))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// One provider as a glass module. Collapsed: one line per account.
+/// Expanded: every window, credits, freshness and errors.
+struct ProviderModule: View {
+    var providerID: String
     var name: String
     var dashboardURL: URL?
     var snapshots: [UsageSnapshot]
+    var isExpanded: Bool
+    var toggle: () -> Void
+
+    private var hasError: Bool { snapshots.contains { $0.errorMessage != nil } }
+    private var isStale: Bool { snapshots.contains { $0.isStale } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(name)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let dashboardURL {
-                    Link(destination: dashboardURL) {
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9, weight: .semibold))
+            Button(action: toggle) {
+                HStack(spacing: 8) {
+                    ProviderGlyph(providerID: providerID, name: name)
+                    Text(name).font(.system(size: 13, weight: .semibold))
+                    if hasError {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10)).foregroundStyle(.orange)
+                            .help("Couldn't refresh")
+                    } else if isStale {
+                        Image(systemName: "clock")
+                            .font(.system(size: 10)).foregroundStyle(.tertiary)
+                            .help("Showing the last good reading")
                     }
-                    .foregroundStyle(.tertiary)
-                    .help("Open \(name) usage page")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isExpanded ? "Collapse" : "Expand")
+
+            ForEach(snapshots, id: \.account.id) { snapshot in
+                if isExpanded {
+                    ExpandedAccount(snapshot: snapshot, showsLabel: snapshots.count > 1 || snapshot.account.label != nil)
+                } else {
+                    CollapsedAccount(snapshot: snapshot)
                 }
             }
-            ForEach(snapshots, id: \.account.id) { snapshot in
-                AccountBlock(snapshot: snapshot, showsLabel: snapshots.count > 1 || snapshot.account.label != nil)
+
+            if isExpanded, let dashboardURL {
+                Link(destination: dashboardURL) {
+                    Label("Usage Page", systemImage: "arrow.up.right")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(.secondary)
             }
         }
+        .padding(Tokens.modulePadding)
+        .glassEffect(.regular, in: .rect(cornerRadius: Tokens.moduleRadius))
     }
 }
 
-/// One account: label line, then its windows.
-struct AccountBlock: View {
+/// One line: account label, its tightest meter, and that value.
+struct CollapsedAccount: View {
+    var snapshot: UsageSnapshot
+
+    private var tightest: UsageWindow? {
+        snapshot.windows.filter { $0.fractionUsed != nil }
+            .min { ($0.percentRemaining ?? 100) < ($1.percentRemaining ?? 100) }
+    }
+
+    private var value: String {
+        if let tightest { return Format.value(tightest) }
+        if let credits = snapshot.creditsRemaining { return Format.amount(credits, unit: snapshot.creditsUnit) }
+        if let first = snapshot.windows.first { return Format.value(first) }
+        return snapshot.errorMessage == nil ? "—" : "Error"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(snapshot.account.label ?? snapshot.account.plan?.capitalized ?? "Default")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 96, alignment: .leading)
+            if let fraction = tightest?.fractionUsed {
+                Meter(fractionUsed: fraction)
+            } else {
+                Spacer()
+            }
+            Text(value)
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .opacity(snapshot.isStale ? 0.6 : 1)
+    }
+}
+
+struct ExpandedAccount: View {
     var snapshot: UsageSnapshot
     var showsLabel: Bool
 
@@ -180,158 +305,27 @@ struct AccountBlock: View {
         VStack(alignment: .leading, spacing: 7) {
             if showsLabel || snapshot.account.plan != nil || snapshot.isStale {
                 HStack(spacing: 6) {
-                    Text(snapshot.account.label ?? "Default")
-                        .font(.system(size: 13))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    Text(snapshot.account.label ?? "Default").font(.system(size: 12, weight: .medium))
                     if let plan = snapshot.account.plan {
-                        Text(plan.capitalized)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                        Text(plan.capitalized).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
                     if snapshot.isStale {
                         Text("Updated \(snapshot.fetchedAt, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))")
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
-                            .help(snapshot.providerID == "claude"
-                                ? "Claude reports usage while you use Claude Code."
-                                : "Showing the last good reading.")
                     }
                 }
             }
-            ForEach(snapshot.windows) { window in
-                WindowRow(window: window)
-            }
-            if let creditsLine {
-                MetricLine(label: "Balance", value: creditsLine, detail: nil)
-            }
+            ForEach(snapshot.windows) { window in WindowRow(window: window) }
+            if let creditsLine { MetricLine(label: "Balance", value: creditsLine, detail: nil) }
             if let error = snapshot.errorMessage {
-                Text(error)
+                Label(error, systemImage: "exclamationmark.triangle")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
                     .lineLimit(2)
             }
         }
-    }
-}
-
-/// Label and value on one line; optional trailing detail in tertiary.
-struct MetricLine: View {
-    var label: String
-    var value: String
-    var detail: String?
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            if let detail {
-                Text(detail).foregroundStyle(.tertiary)
-            }
-            Text(value)
-                .monospacedDigit()
-        }
-        .font(.system(size: 11))
-        .lineLimit(1)
-    }
-}
-
-/// One quota window: metric line + hairline meter.
-struct WindowRow: View {
-    var window: UsageWindow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            MetricLine(label: window.label, value: value, detail: resetText)
-            if let fraction = window.fractionUsed {
-                Meter(fractionUsed: fraction)
-            }
-        }
-    }
-
-    private var value: String {
-        if window.unit == "%" || (window.unit == nil && window.limit == 100),
-           let remaining = window.percentRemaining {
-            return "\(Int(remaining.rounded()))% left"
-        }
-        if let remaining = window.remaining {
-            if let limit = window.limit { return "\(Format.amount(remaining, unit: window.unit)) of \(Format.amount(limit, unit: window.unit))" }
-            return "\(Format.amount(remaining, unit: window.unit)) left"
-        }
-        if let used = window.used {
-            if window.limit != nil, let remaining = window.percentRemaining {
-                return "\(Int(remaining.rounded()))% left"
-            }
-            return "\(Format.amount(used, unit: window.unit)) used"
-        }
-        return "—"
-    }
-
-    private var resetText: String? {
-        guard let resetsAt = window.resetsAt else { return nil }
-        guard resetsAt > Date() else { return "resetting" }
-        return Format.countdown(to: resetsAt)
-    }
-}
-
-/// Hairline capsule meter. Neutral fill until usage gets tight.
-struct Meter: View {
-    var fractionUsed: Double
-
-    private var tint: Color {
-        if fractionUsed >= Tokens.criticalThreshold { return .red }
-        if fractionUsed >= Tokens.warnThreshold { return .orange }
-        return .primary.opacity(0.55)
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.primary.opacity(0.08))
-                Capsule().fill(tint)
-                    .frame(width: max(proxy.size.width * (1 - fractionUsed), fractionUsed < 1 ? Tokens.meterHeight : 0))
-            }
-        }
-        .frame(height: Tokens.meterHeight)
-        .accessibilityElement()
-        .accessibilityValue("\(Int(((1 - fractionUsed) * 100).rounded())) percent left")
-    }
-}
-
-enum Tokens {
-    static let popoverWidth: CGFloat = 320
-    static let inset: CGFloat = 16
-    static let sectionSpacing: CGFloat = 18
-    static let meterHeight: CGFloat = 4
-    static let warnThreshold = 0.8
-    static let criticalThreshold = 0.9
-}
-
-enum Format {
-    static func amount(_ value: Double, unit: String?) -> String {
-        switch unit {
-        case "$", "USD", "usd":
-            return value.formatted(.currency(code: "USD").precision(.fractionLength(value >= 100 ? 0 : 2)))
-        case nil, "":
-            return compact(value)
-        default:
-            return "\(compact(value)) \(unit!)"
-        }
-    }
-
-    static func compact(_ value: Double) -> String {
-        value.formatted(.number.notation(.compactName).precision(.significantDigits(1...3)))
-    }
-
-    static func countdown(to date: Date, now: Date = Date()) -> String {
-        let seconds = Int(date.timeIntervalSince(now))
-        let days = seconds / 86_400, hours = (seconds % 86_400) / 3_600, minutes = (seconds % 3_600) / 60
-        if days >= 2 { return date.formatted(.dateTime.weekday(.abbreviated)) }
-        if days >= 1 { return "\(days)d \(hours)h" }
-        if hours >= 1 { return "\(hours)h \(minutes)m" }
-        return "\(max(minutes, 1))m"
     }
 }
 #endif

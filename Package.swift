@@ -16,7 +16,7 @@ openQuotaDependencies.append(.product(name: "Sparkle", package: "Sparkle"))
 let package = Package(
     name: "openquota",
     platforms: [
-        .macOS(.v15)
+        .macOS("26.0")
     ],
     products: [
         .executable(name: "openquota", targets: ["OpenQuota"]),

@@ -3,54 +3,17 @@ import SwiftUI
 import AppKit
 import OpenQuotaCore
 
-/// Settings, laid out like Mail's Accounts pane: a list of accounts on the
-/// left, the selected account on the right, and +/− beneath the list.
+/// Settings, laid out like System Settings: a Liquid Glass sidebar with
+/// General and every tracked account, the selection's form on the right.
 struct SettingsView: View {
-    var model: AppModel
-
-    var body: some View {
-        TabView {
-            AccountsPane(model: model)
-                .tabItem { Label("Accounts", systemImage: "at") }
-            GeneralPane()
-                .tabItem { Label("General", systemImage: "gearshape") }
-        }
-        .frame(width: 640, height: 440)
-    }
-}
-
-/// Everything OpenQuota tracks, flattened for the list.
-struct AccountItem: Identifiable {
-    enum Kind {
-        case subscription(SubscriptionConnection)
-        case saved(AccountDescriptor)
-        case profile(LocalAccountProfile)
-        case detected(accounts: Int)
-    }
-
-    var id: String
-    var providerID: String
-    var title: String
-    var kind: Kind
-
-    var section: String {
-        switch kind {
-        case .subscription: "Subscriptions"
-        case .saved: "API Keys & Sessions"
-        case .profile: "Local Profiles"
-        case .detected: "Detected on This Mac"
-        }
-    }
-}
-
-struct AccountsPane: View {
     var model: AppModel
     @State private var saved: [AccountDescriptor] = []
     @State private var detected: [(id: String, name: String, accounts: Int)] = []
-    @State private var selection: String?
+    @State private var selection: String? = "general"
     @State private var adding = false
-    @State private var confirmingRemoval = false
     @State private var errorText: String?
+
+    private static let sections = ["Subscriptions", "API Keys & Sessions", "Local Profiles", "Detected on This Mac"]
 
     private var items: [AccountItem] {
         var out: [AccountItem] = []
@@ -75,132 +38,126 @@ struct AccountsPane: View {
     private var selected: AccountItem? { items.first { $0.id == selection } }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                List(selection: $selection) {
-                    ForEach(["Subscriptions", "API Keys & Sessions", "Local Profiles", "Detected on This Mac"],
-                            id: \.self) { section in
-                        let rows = items.filter { $0.section == section }
-                        if !rows.isEmpty {
-                            Section(section) {
-                                ForEach(rows) { item in
-                                    AccountListRow(name: model.providerName(item.providerID), title: item.title)
-                                        .tag(item.id)
-                                }
+        NavigationSplitView {
+            List(selection: $selection) {
+                Label("General", systemImage: "gearshape").tag("general")
+                if model.isDemo {
+                    Section("Accounts") {
+                        Text("Unavailable with demo data").foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(Self.sections, id: \.self) { section in
+                    let rows = items.filter { $0.section == section }
+                    if !rows.isEmpty {
+                        Section(section) {
+                            ForEach(rows) { item in
+                                AccountListRow(providerID: item.providerID,
+                                               name: model.providerName(item.providerID), title: item.title)
+                                    .tag(item.id)
                             }
                         }
                     }
                 }
-                .listStyle(.sidebar)
-                .overlay {
-                    if items.isEmpty {
-                        Text("No Accounts").foregroundStyle(.secondary)
-                    }
-                }
-                Divider()
-                HStack(spacing: 0) {
-                    Button { adding = true } label: {
-                        Image(systemName: "plus").frame(width: 24, height: 20)
-                    }
-                    .help("Add Account")
-                    Divider().frame(height: 14)
-                    Button { confirmingRemoval = true } label: {
-                        Image(systemName: "minus").frame(width: 24, height: 20)
-                    }
-                    .disabled(!canRemove)
-                    .help("Remove Account")
-                    Spacer()
-                }
-                .buttonStyle(.borderless)
-                .padding(4)
             }
-            .frame(width: 220)
-            Divider()
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+            .toolbar {
+                ToolbarItem {
+                    Button { adding = true } label: { Label("Add Account", systemImage: "plus") }
+                        .disabled(model.isDemo)
+                        .help("Add Account")
+                }
+            }
+        } detail: {
             Group {
-                if let selected {
-                    AccountDetail(model: model, item: selected, onChange: reloadSoon)
+                if selection == "general" {
+                    GeneralPane()
+                } else if let selected {
+                    AccountDetail(model: model, item: selected, onChange: reloadSoon,
+                                  onRemoved: { selection = "general" })
                         .id(selected.id)
                 } else {
                     ContentUnavailableView {
                         Label("No Account Selected", systemImage: "person.crop.circle")
                     } actions: {
                         Button("Add Account…") { adding = true }
+                            .buttonStyle(.glassProminent)
+                            .disabled(model.isDemo)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(selection == "general" ? "General" : model.providerName(selected?.providerID ?? ""))
         }
-        .disabled(model.isDemo)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 460, idealHeight: 500)
         .overlay(alignment: .bottom) {
             if let errorText {
                 Text(errorText).font(.caption).foregroundStyle(.red).padding(8)
             }
         }
         .task { await reload() }
+        .onAppear(perform: consumeAddRequest)
+        .onChange(of: model.requestsAddAccount) { _, _ in consumeAddRequest() }
         .sheet(isPresented: $adding, onDismiss: reloadSoon) {
             AddAccountSheet(model: model) { adding = false }
         }
-        .alert("Remove “\(selected?.title ?? "")”?", isPresented: $confirmingRemoval) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove", role: .destructive, action: removeSelected)
-        } message: {
-            Text(removalMessage)
-        }
     }
 
-    private var canRemove: Bool {
-        guard let selected else { return false }
-        if case .detected = selected.kind { return false }
-        return true
-    }
-
-    private var removalMessage: String {
-        switch selected?.kind {
-        case .subscription(let connection) where connection.kind == .codexAppServer:
-            "Codex keeps its sign-in files in the account's private home."
-        case .subscription:
-            "Your Claude status line is restored if it hasn't changed since connecting."
-        case .profile:
-            "The credential file stays where it is."
-        default:
-            "The key is deleted from OpenQuota. Your provider account is unaffected."
-        }
-    }
-
-    private func removeSelected() {
-        guard let selected else { return }
-        do {
-            switch selected.kind {
-            case .subscription(let connection): try model.removeSubscriptionConnection(connection)
-            case .saved(let account): try model.removeAccount(account)
-            case .profile(let profile): try model.removeProfile(id: profile.id)
-            case .detected: return
-            }
-            selection = nil
-            errorText = nil
-            reloadSoon()
-        } catch {
-            errorText = (error as? ProviderError)?.userMessage ?? "The account could not be removed."
-        }
+    private func consumeAddRequest() {
+        guard model.requestsAddAccount else { return }
+        model.requestsAddAccount = false
+        if !model.isDemo { adding = true }
     }
 
     private func reloadSoon() { Task { await reload() } }
 
     private func reload() async {
+        guard !model.isDemo else { return }
         do { saved = try await model.savedAccounts() }
         catch { errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription }
         detected = await model.detectedLocalProviders()
     }
 }
 
+/// Everything OpenQuota tracks, flattened for the sidebar.
+struct AccountItem: Identifiable {
+    enum Kind {
+        case subscription(SubscriptionConnection)
+        case saved(AccountDescriptor)
+        case profile(LocalAccountProfile)
+        case detected(accounts: Int)
+    }
+
+    var id: String
+    var providerID: String
+    var title: String
+    var kind: Kind
+
+    var section: String {
+        switch kind {
+        case .subscription: "Subscriptions"
+        case .saved: "API Keys & Sessions"
+        case .profile: "Local Profiles"
+        case .detected: "Detected on This Mac"
+        }
+    }
+
+    var isRemovable: Bool {
+        if case .detected = kind { return false }
+        return true
+    }
+}
+
 struct AccountListRow: View {
+    var providerID: String
     var name: String
     var title: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(name)
-            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        HStack(spacing: 8) {
+            ProviderGlyph(providerID: providerID, name: name, size: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -210,8 +167,10 @@ struct AccountDetail: View {
     var model: AppModel
     var item: AccountItem
     var onChange: () -> Void
+    var onRemoved: () -> Void
     @State private var label = ""
     @State private var errorText: String?
+    @State private var confirmingRemoval = false
 
     private var snapshot: UsageSnapshot? {
         switch item.kind {
@@ -223,7 +182,12 @@ struct AccountDetail: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Provider", value: model.providerName(item.providerID))
+                LabeledContent("Provider") {
+                    HStack(spacing: 6) {
+                        ProviderGlyph(providerID: item.providerID, name: model.providerName(item.providerID), size: 20)
+                        Text(model.providerName(item.providerID))
+                    }
+                }
                 if case .saved(let account) = item.kind {
                     TextField("Label", text: $label)
                         .onSubmit { rename(account) }
@@ -253,12 +217,51 @@ struct AccountDetail: View {
                     Link("Open Usage Page", destination: url)
                 }
             }
+            if item.isRemovable {
+                Section {
+                    Button("Remove Account…", role: .destructive) { confirmingRemoval = true }
+                }
+            }
             if let errorText {
                 Text(errorText).foregroundStyle(.red)
             }
         }
         .formStyle(.grouped)
         .onAppear { label = item.title }
+        .alert("Remove “\(item.title)”?", isPresented: $confirmingRemoval) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive, action: remove)
+        } message: {
+            Text(removalMessage)
+        }
+    }
+
+    private var removalMessage: String {
+        switch item.kind {
+        case .subscription(let connection) where connection.kind == .codexAppServer:
+            "Codex keeps its sign-in files in the account's private home."
+        case .subscription:
+            "Your Claude status line is restored if it hasn't changed since connecting."
+        case .profile:
+            "The credential file stays where it is."
+        default:
+            "The key is deleted from OpenQuota. Your provider account is unaffected."
+        }
+    }
+
+    private func remove() {
+        do {
+            switch item.kind {
+            case .subscription(let connection): try model.removeSubscriptionConnection(connection)
+            case .saved(let account): try model.removeAccount(account)
+            case .profile(let profile): try model.removeProfile(id: profile.id)
+            case .detected: return
+            }
+            onChange()
+            onRemoved()
+        } catch {
+            errorText = (error as? ProviderError)?.userMessage ?? "The account could not be removed."
+        }
     }
 
     private var source: String {
@@ -302,9 +305,13 @@ struct AccountDetail: View {
 
 struct GeneralPane: View {
     @State private var automaticallyChecks = UpdateController.shared.automaticallyChecks
+    @AppStorage("menuBarShowsPercent") private var menuBarShowsPercent = true
 
     var body: some View {
         Form {
+            Section("Menu Bar") {
+                Toggle("Show percentage next to the gauge", isOn: $menuBarShowsPercent)
+            }
             Section("Updates") {
                 Toggle("Check for updates automatically", isOn: $automaticallyChecks)
                     .onChange(of: automaticallyChecks) { _, value in

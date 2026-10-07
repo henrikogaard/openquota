@@ -36,7 +36,7 @@ Custom providers are added by dropping a `ProviderSpec` JSON array into `~/Libra
 
 ## Build & run
 
-macOS 15+, Swift 6:
+macOS 26 Tahoe+, Xcode 26 / Swift 6.2 toolchain for the app (core builds with Swift 6.1 on Linux):
 
 ```bash
 scripts/bundle.sh        # builds + assembles dist/OpenQuota.app (ad-hoc signed for dev)

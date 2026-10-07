@@ -14,6 +14,8 @@ final class AppModel {
     private(set) var codexLoginStatus: String?
     private(set) var codexLoginBusy = false
     let isDemo: Bool
+    /// Set by the popover so Settings opens straight into the Add Account sheet.
+    var requestsAddAccount = false
 
     private let store = SnapshotStore()
     private var scheduler: RefreshScheduler?
