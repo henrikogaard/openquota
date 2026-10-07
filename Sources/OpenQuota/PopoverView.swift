@@ -28,10 +28,12 @@ struct PopoverView: View {
         GlassEffectContainer(spacing: Tokens.moduleSpacing) {
             VStack(spacing: Tokens.moduleSpacing) {
                 if model.snapshots.isEmpty {
+                    SpendPanel(model: model)
                     emptyState
                 } else {
                     ScrollView {
                         VStack(spacing: Tokens.moduleSpacing) {
+                            SpendPanel(model: model)
                             ForEach(groups, id: \.providerID) { group in
                                 ProviderSection(
                                     providerID: group.providerID,

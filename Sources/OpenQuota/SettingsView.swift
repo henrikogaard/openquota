@@ -63,7 +63,7 @@ struct SettingsView: View {
         } detail: {
             Group {
                 if selection == "general" {
-                    GeneralPane()
+                    GeneralPane(model: model)
                 } else if let selected {
                     AccountDetail(model: model, item: selected, onChange: reloadSoon,
                                   onRemoved: { selection = "general" })
@@ -307,6 +307,7 @@ struct AccountDetail: View {
 }
 
 struct GeneralPane: View {
+    var model: AppModel
     @State private var automaticallyChecks = UpdateController.shared.automaticallyChecks
     @AppStorage("menuBarShowsPercent") private var menuBarShowsPercent = true
 
@@ -314,6 +315,15 @@ struct GeneralPane: View {
         Form {
             Section("Menu Bar") {
                 Toggle("Show percentage next to the gauge", isOn: $menuBarShowsPercent)
+            }
+            Section(SpendCopy.title) {
+                Toggle(SpendCopy.enable, isOn: Binding(
+                    get: { model.spendEnabled }, set: { model.setSpendEnabled($0) }))
+                    .disabled(model.isDemo)
+                Text(SpendCopy.privacy)
+                    .font(.callout).foregroundStyle(.secondary)
+                Text(SpendCopy.scope)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Check for updates automatically", isOn: $automaticallyChecks)

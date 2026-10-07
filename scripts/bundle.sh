@@ -37,6 +37,9 @@ sed -e "s/\$(MARKETING_VERSION)/$VERSION/g" \
     Resources/Info.plist > "$APP/Contents/Info.plist"
 
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+RESOURCE_BUNDLE="$BUILD_DIR/openquota_OpenQuotaCore.bundle"
+[[ -d "$RESOURCE_BUNDLE" ]] || { echo "!! pricing resources missing" >&2; exit 1; }
+ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/openquota_OpenQuotaCore.bundle"
 
 # --- Embed Sparkle.framework (SwiftPM fetches it as an xcframework under .build/artifacts) ---
 FRAMEWORKS="$APP/Contents/Frameworks"

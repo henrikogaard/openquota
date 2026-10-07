@@ -29,7 +29,8 @@ let package = Package(
         // can type-check and test everything except the AppKit/SwiftUI shell.
         .target(
             name: "OpenQuotaCore",
-            path: "Sources/OpenQuotaCore"
+            path: "Sources/OpenQuotaCore",
+            resources: [.process("Resources")]
         ),
         // Menu-bar app shell. Every file is #if os(macOS) — builds to an empty
         // binary on Linux.

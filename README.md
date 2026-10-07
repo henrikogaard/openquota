@@ -8,8 +8,8 @@ One row per account in the popover; the menu bar shows the lowest remaining-% ac
 
 OpenQuota prioritizes a small native UI, independent account state and bounded background work:
 
-- **No session scraping.** Usage comes from provider APIs, local credential files, or documented CLI integrations — never browser cookies or session history.
-- **No session-log scanning.** Only provider-reported numbers; nothing grows with your history.
+- **No browser scraping.** Quota comes from provider APIs, local credential files, or documented CLI integrations — never automatic browser-cookie import.
+- **Optional local spend estimates.** Opt in to a bounded Claude/Codex log scan for Today, Yesterday and 30 Days. This estimates API-rate value, not subscription charges; prompts are not retained and nothing is uploaded. [Pricing and privacy](docs/estimated-spend.md).
 - **Shared ephemeral URLSession.** Four concurrent account fetches; last-good snapshots replace old values rather than accumulating history.
 - **Hard timeouts.** 15s request / 30s resource / 60s per-fetch ceiling. A blocked network fails fast instead of hanging.
 

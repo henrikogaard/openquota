@@ -6,6 +6,10 @@ public docs/reference implementations, not yet exercised on a live account.
 Handwritten adapters and OpenRouter/Requesty have response-fixture coverage;
 this is not live authentication or paid-account verification.
 
+Claude and Codex also have opt-in **Estimated Spend · This Mac**, calculated
+from local token logs rather than remaining quota. [Sources, pricing, privacy
+and limits](estimated-spend.md).
+
 ## API-key specs (Settings → Add API key)
 
 | Provider | Auth | Endpoint | Notes |

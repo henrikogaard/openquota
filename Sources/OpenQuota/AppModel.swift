@@ -16,6 +16,12 @@ final class AppModel {
     let isDemo: Bool
     /// Set by the popover so Settings opens straight into the Add Account sheet.
     var requestsAddAccount = false
+    private(set) var spendEnabled = UserDefaults.standard.bool(forKey: "localSpendEnabled")
+    private(set) var spend = SpendSummary()
+    private(set) var spendScanning = false
+    private let spendScanner = LocalSpendScanner()
+    private nonisolated let spendTask = TaskBox()
+    private var spendGeneration: UInt64 = 0
 
     private let store = SnapshotStore()
     private var scheduler: RefreshScheduler?
@@ -37,6 +43,8 @@ final class AppModel {
         isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
         if isDemo {
             snapshots = DemoSnapshots.all
+            spendEnabled = true
+            spend = Self.demoSpend()
             return
         }
         let cached = cache.load().mapValues { snapshot in
@@ -60,7 +68,10 @@ final class AppModel {
         }
     }
 
-    deinit { observeTask.task?.cancel() }
+    deinit {
+        observeTask.task?.cancel()
+        spendTask.task?.cancel()
+    }
 
     nonisolated static var appSupportDir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -75,6 +86,7 @@ final class AppModel {
     }
 
     private func pullFromStore() async {
+        refreshSpend()
         await store.markStale(olderThan: 300)
         let state = await store.state()
         let updated = sorted(state.snapshots)
@@ -124,6 +136,7 @@ final class AppModel {
 
     func refreshNow() {
         guard !isDemo else { return }
+        refreshSpend(force: true)
         Task {
             await scheduler?.refreshAll(force: true)
             await pullFromStore()
@@ -132,12 +145,65 @@ final class AppModel {
 
     private func configurationChanged() {
         rebuildProviders()
+        spendGeneration &+= 1
+        spendTask.task?.cancel()
+        spendScanning = false
+        refreshSpend(force: true)
         let updated = providers
         Task {
             await scheduler?.setProviders(updated)
             await scheduler?.refreshAll(force: true)
             await pullFromStore()
         }
+    }
+
+    func setSpendEnabled(_ enabled: Bool) {
+        guard !isDemo else { return }
+        spendGeneration &+= 1
+        spendTask.task?.cancel()
+        spendEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "localSpendEnabled")
+        spend = SpendSummary()
+        spendScanning = false
+        let scanner = spendScanner
+        // Queue cache erasure before a subsequent scan on the same actor.
+        spendTask.task = Task { [weak self] in
+            await scanner.clear()
+            guard !Task.isCancelled else { return }
+            self?.refreshSpend(force: true)
+        }
+    }
+
+    private func refreshSpend(force: Bool = false) {
+        guard spendEnabled, !isDemo, !spendScanning else { return }
+        if !force, let updated = spend.scannedAt, Date().timeIntervalSince(updated) < 300 { return }
+        spendScanning = true
+        let generation = spendGeneration
+        let sources = SpendLogSource.localSources(connections: subscriptionConnections)
+        let scanner = spendScanner
+        spendTask.task = Task { [weak self] in
+            let summary = await scanner.scan(sources: sources)
+            guard !Task.isCancelled, let self, self.spendEnabled, self.spendGeneration == generation else { return }
+            self.spend = summary
+            self.spendScanning = false
+        }
+    }
+
+    private static func demoSpend() -> SpendSummary {
+        var summary = SpendSummary()
+        summary.scannedAt = Date()
+        summary.hasLogs = true
+        let today = Calendar.current.startOfDay(for: Date())
+        for (offset, claude, codex) in [(0, 3.84, 1.26), (-1, 2.19, 0.78), (-2, 4.38, 2.06)] {
+            let date = Calendar.current.date(byAdding: .day, value: offset, to: today)!
+            for (provider, dollars) in [(SpendProvider.claude, claude), (.codex, codex)] {
+                var total = SpendTotal()
+                total.estimatedUSD = dollars
+                total.pricedEvents = 12
+                summary.days.append(SpendDay(date: date, provider: provider, total: total))
+            }
+        }
+        return summary
     }
 
     func addProfile(providerID: String, label: String, path: String) throws {
