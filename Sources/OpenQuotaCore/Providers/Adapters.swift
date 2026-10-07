@@ -267,20 +267,61 @@ public struct OpenCodeProvider: UsageProvider {
     private let http: any HTTPClient
     private let files: LocalCredentialFiles
 
-    public init(http: any HTTPClient, files: LocalCredentialFiles) {
+    public init(http: any HTTPClient, files: LocalCredentialFiles,
+                sqlite: @escaping SQLiteQuery = OpenCodeProvider.sqlite3CLI) {
         self.http = http
         self.files = files
+        self.sqlite = sqlite
     }
 
-    /// The auth file maps provider name → {"type": "api"|"oauth", "key"|"access": ...}.
-    private func apiKey() -> String? {
+    /// Runs one read-only query against a SQLite file and returns trimmed stdout.
+    public typealias SQLiteQuery = @Sendable (_ path: String, _ sql: String) async throws -> String
+
+    public static let sqlite3CLI: SQLiteQuery = { path, sql in
+        let data = try await CLIProvider.run(
+            binary: URL(fileURLWithPath: "/usr/bin/sqlite3"),
+            args: ["-readonly", "-batch", "-noheader", path, sql])
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static let dataDir = ".local/share/opencode"
+    static let credentialTableSQL =
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credential';"
+    static let goKeySQL = """
+        SELECT json_extract(value,'$.key') FROM credential \
+        WHERE integration_id = 'opencode-go' AND (active IS NULL OR active = 1) \
+        ORDER BY active DESC, time_updated DESC, id DESC LIMIT 1;
+        """
+
+    private let sqlite: SQLiteQuery
+
+    /// OpenCode 2 keeps logins in each channel database's `credential` table and
+    /// leaves the imported `auth.json` behind, so the file is stale once a table
+    /// exists. Credential profiles point at a specific file and skip the databases.
+    private func apiKey() async -> String? {
+        if files.overridePaths[Self.authPath] == nil {
+            var hasTable = false
+            for db in databaseFiles() {
+                guard (try? await sqlite(db, Self.credentialTableSQL)) == "1" else { continue }
+                hasTable = true
+                if let key = try? await sqlite(db, Self.goKeySQL), !key.isEmpty { return key }
+            }
+            if hasTable { return nil }
+        }
         guard let root = files.readJSON(Self.authPath),
               let entry = root["opencode-go"] as? [String: Any] else { return nil }
         return (entry["key"] ?? entry["access"] ?? entry["token"]) as? String
     }
 
+    private func databaseFiles() -> [String] {
+        let dir = files.home.appendingPathComponent(Self.dataDir)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter { $0.hasPrefix("opencode") && $0.hasSuffix(".db") }
+            .sorted().map { dir.appendingPathComponent($0).path }
+    }
+
     public func accounts() async throws -> [AccountDescriptor] {
-        guard let key = apiKey() else { return [] }
+        guard let key = await apiKey() else { return [] }
         let identity = AccountIdentity(
             providerID: id,
             id: AccountIdentity.makeID(providerID: id, identityKey: key),
@@ -289,10 +330,10 @@ public struct OpenCodeProvider: UsageProvider {
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
-        guard let key = apiKey() else { throw ProviderError.notLoggedIn }
+        guard let key = await apiKey() else { throw ProviderError.notLoggedIn }
         let body = try await AdapterHTTP.getJSON(
             "https://opencode.ai/zen/go/v1/usage",
-            headers: ["Authorization": "Bearer \(key)"], http: http)
+            headers: ["Authorization": "Bearer \(key)", "Accept": "application/json"], http: http)
         guard let root = body as? [String: Any],
               let dict = root["usage"] as? [String: Any] else {
             throw ProviderError.badResponse("usage payload")
@@ -324,7 +365,7 @@ public struct OpenCodeProvider: UsageProvider {
 
 // MARK: - Devin (credentials.toml → Connect GetUserStatus)
 
-/// `~/.local/share/devin/credentials.toml` (`api_key`, `api_server_url`) →
+/// `~/.local/share/devin/credentials.toml` (`windsurf_api_key`, `api_server_url`) →
 /// Connect-protocol SeatManagementService/GetUserStatus.
 public struct DevinProvider: UsageProvider {
     public let id = "devin"
@@ -353,8 +394,8 @@ public struct DevinProvider: UsageProvider {
             let key = parts[0].trimmingCharacters(in: .whitespaces)
             let value = parts[1].trimmingCharacters(in: .whitespaces)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            if key == "api_key" { apiKey = value }
-            if key == "api_server_url" { server = value }
+            if key == "windsurf_api_key" || (key == "api_key" && apiKey == nil) { apiKey = value }
+            if key == "api_server_url", value.hasPrefix("https://") { server = value }
         }
         guard let apiKey else { return nil }
         return (apiKey, server ?? "https://server.codeium.com")
@@ -378,10 +419,7 @@ public struct DevinProvider: UsageProvider {
                 "apiKey": c.apiKey, "ideName": "devin", "ideVersion": "1.108.2",
                 "extensionName": "devin", "extensionVersion": "1.108.2", "locale": "en",
             ]],
-            headers: [
-                "Authorization": "Bearer \(c.apiKey)",
-                "Connect-Protocol-Version": "1",
-            ],
+            headers: ["Connect-Protocol-Version": "1"],
             http: http)
         guard let root = body as? [String: Any],
               let status = root["userStatus"] as? [String: Any],

@@ -285,9 +285,7 @@ private struct CredentialProfileForm: View {
     private var defaultExists: Bool {
         defaultPath.map { FileManager.default.fileExists(atPath: ($0 as NSString).expandingTildeInPath) } ?? false
     }
-    private var canAdd: Bool {
-        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !path.isEmpty
-    }
+    private var canAdd: Bool { !path.isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -332,7 +330,9 @@ private struct CredentialProfileForm: View {
 
     private func add() {
         do {
-            try model.addProfile(providerID: providerID, label: label, path: path)
+            let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            try model.addProfile(providerID: providerID,
+                                 label: name.isEmpty ? model.providerName(providerID) : name, path: path)
             onDone()
         } catch {
             errorText = L("Choose an existing credential file under 1 MB.", "Velg en eksisterende påloggingsfil under 1 MB.")

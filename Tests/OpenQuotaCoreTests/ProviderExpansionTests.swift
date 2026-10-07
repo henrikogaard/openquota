@@ -292,7 +292,7 @@ final class AdapterTests: XCTestCase {
     func test_devinParsesTomlAndPostsConnect() async throws {
         let home = tempHome()
         try write(home, ".local/share/devin/credentials.toml", """
-            api_key = "dv-key-42"
+            windsurf_api_key = "dv-key-42"
             api_server_url = "https://server.codeium.com"
             """)
         let http = RecordingHTTP()
@@ -315,6 +315,35 @@ final class AdapterTests: XCTestCase {
         XCTAssertEqual((payload?["metadata"] as? [String: Any])?["apiKey"] as? String, "dv-key-42")
         XCTAssertEqual(
             request.headers["Connect-Protocol-Version"], "1")
+        XCTAssertNil(request.headers["Authorization"])
+    }
+
+    func test_opencodePrefersDatabaseKeyOverStaleAuthFile() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/opencode/auth.json", """
+            {"opencode-go":{"type":"api","key":"stale-key"}}
+            """)
+        try write(home, ".local/share/opencode/opencode.db", "")
+        let http = RecordingHTTP()
+        http.defaultBody = #"{"usage":{"weekly":{"percent":8}}}"#
+        let provider = OpenCodeProvider(
+            http: http, files: LocalCredentialFiles(home: home),
+            sqlite: { _, sql in sql.contains("sqlite_master") ? "1" : "db-key" })
+        _ = try await provider.refresh(account: try await provider.accounts()[0])
+        XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer db-key")
+    }
+
+    func test_opencodeLogoutInDatabaseIgnoresStaleAuthFile() async throws {
+        let home = tempHome()
+        try write(home, ".local/share/opencode/auth.json", """
+            {"opencode-go":{"type":"api","key":"stale-key"}}
+            """)
+        try write(home, ".local/share/opencode/opencode.db", "")
+        let provider = OpenCodeProvider(
+            http: RecordingHTTP(), files: LocalCredentialFiles(home: home),
+            sqlite: { _, sql in sql.contains("sqlite_master") ? "1" : "" })
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
     }
 
     func test_cursorParsesSessionCookie() async throws {

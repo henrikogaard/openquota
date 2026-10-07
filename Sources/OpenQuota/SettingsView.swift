@@ -52,7 +52,7 @@ struct AccountsPane: View {
         }
         out += saved.map {
             AccountItem(id: "key:\($0.id)", providerID: $0.account.providerID,
-                        title: $0.account.label ?? L("Unlabelled", "Uten navn"), kind: .saved($0))
+                        title: $0.account.label ?? model.providerName($0.account.providerID), kind: .saved($0))
         }
         out += model.profiles.map {
             AccountItem(id: "profile:\($0.id)", providerID: $0.providerID, title: $0.label, kind: .profile($0))
@@ -277,7 +277,7 @@ struct AccountDetail: View {
                         WindowRow(window: window).font(.callout)
                     }
                     if let error = snapshot.errorMessage {
-                        Text(error).foregroundStyle(.orange)
+                        Text(providerError(error, providerID: snapshot.providerID)).foregroundStyle(.orange)
                     }
                 }
             }

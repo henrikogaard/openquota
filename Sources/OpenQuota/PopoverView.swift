@@ -233,7 +233,7 @@ struct AccountUsage: View {
                     .foregroundStyle(.tertiary)
             }
             if let error = snapshot.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+                Label(providerError(error, providerID: snapshot.providerID), systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
                     .lineLimit(3)
