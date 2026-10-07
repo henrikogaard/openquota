@@ -13,6 +13,11 @@ public actor SnapshotStore {
 
     public init() {}
 
+    private func hasReading(_ accountID: String) -> Bool {
+        guard let s = snapshots[accountID] else { return false }
+        return !s.windows.isEmpty || s.creditsRemaining != nil
+    }
+
     public func restore(_ restored: [String: UsageSnapshot]) {
         snapshots = restored.mapValues { snapshot in
             var snapshot = snapshot
@@ -66,8 +71,8 @@ public actor SnapshotStore {
         case .success(let snapshot):
             snapshots[accountID] = snapshot
             registeredAccounts[accountID] = snapshot.account
-        case .failure(.awaitingReading) where snapshots[accountID] == nil:
-            if let account = registeredAccounts[accountID] {
+        case .failure(.awaitingReading) where !hasReading(accountID):
+            if let account = registeredAccounts[accountID] ?? snapshots[accountID]?.account {
                 snapshots[accountID] = UsageSnapshot(account: account, providerID: account.providerID)
             }
         case .failure(let error):

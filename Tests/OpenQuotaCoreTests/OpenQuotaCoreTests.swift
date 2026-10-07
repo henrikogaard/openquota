@@ -145,6 +145,17 @@ final class AwaitingReadingTests: XCTestCase {
         XCTAssertEqual(snapshot?.isStale, false)
     }
 
+    func test_awaitingReadingClearsCachedErrorOnlySnapshot() async {
+        let store = SnapshotStore()
+        let account = AccountIdentity(providerID: "claude", id: "claude@1", label: "Claude")
+        await store.register(account: account)
+        await store.finishRefresh(accountID: "claude@1", result: .failure(.badResponse("old")))
+        await store.finishRefresh(accountID: "claude@1", result: .failure(.awaitingReading))
+        let snapshot = await store.snapshot(for: "claude@1")
+        XCTAssertNil(snapshot?.errorMessage)
+        XCTAssertEqual(snapshot?.isStale, false)
+    }
+
     func test_diagnosticBadResponsesAreWrappedButSentencesShowAsIs() {
         XCTAssertEqual(ProviderError.badResponse("Codex CLI was not found").userMessage, "Codex CLI was not found")
         XCTAssertTrue(ProviderError.badResponse("billing payload").userMessage.contains("billing payload"))
