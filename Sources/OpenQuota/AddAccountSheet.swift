@@ -74,7 +74,7 @@ struct AddAccountSheet: View {
             }
             .padding(12)
         }
-        .frame(width: 560, height: 470)
+        .frame(width: 560, height: target == nil ? 470 : 340)
         .onAppear { searchFocused = true }
     }
 

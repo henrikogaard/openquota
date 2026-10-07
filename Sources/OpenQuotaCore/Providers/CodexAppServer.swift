@@ -22,8 +22,18 @@ public enum CodexExecutableResolver {
             return FileManager.default.isExecutableFile(atPath: preferredPath)
                 ? URL(fileURLWithPath: preferredPath).standardizedFileURL : nil
         }
+        for directory in searchDirectories(environment: environment, homeDirectory: homeDirectory) {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("codex")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate.standardizedFileURL
+            }
+        }
+        return nil
+    }
+
+    static func searchDirectories(environment: [String: String], homeDirectory: URL) -> [String] {
         let pathDirectories = (environment["PATH"] ?? "")
-            .split(separator: ":").map(String.init)
+            .split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
         // GUI apps inherit launchd's minimal PATH, so also try the usual
         // install locations for npm, bun, pnpm, Volta, nvm and Homebrew.
         let home = homeDirectory.path
@@ -42,15 +52,30 @@ public enum CodexExecutableResolver {
             "\(home)/Library/pnpm",
             "\(home)/.local/share/pnpm",
             "\(home)/.cargo/bin",
-        ] + nvmBins + ["/usr/bin"]
+        ] + nvmBins + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
         var seen = Set<String>()
-        for directory in directories where seen.insert(directory).inserted {
-            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("codex")
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate.standardizedFileURL
-            }
-        }
-        return nil
+        return directories.filter { seen.insert($0).inserted }
+    }
+
+    static func launchEnvironment(
+        executable: URL,
+        codexHome: URL,
+        environment: [String: String]
+    ) -> [String: String] {
+        var result = environment
+        // npm's Codex entrypoint uses /usr/bin/env node. Resolving codex alone
+        // is not enough when launchd omitted its runtime's bin directory.
+        let directories = [
+            executable.deletingLastPathComponent().path,
+            executable.resolvingSymlinksInPath().deletingLastPathComponent().path,
+        ] + searchDirectories(environment: environment, homeDirectory: FileManager.default.homeDirectoryForCurrentUser)
+        var seen = Set<String>()
+        result["PATH"] = directories.filter { seen.insert($0).inserted }.joined(separator: ":")
+        result.removeValue(forKey: "OPENAI_API_KEY")
+        result.removeValue(forKey: "CODEX_API_KEY")
+        result.removeValue(forKey: "OPENAI_BASE_URL")
+        result["CODEX_HOME"] = codexHome.path
+        return result
     }
 }
 
@@ -102,7 +127,8 @@ public struct CodexUsageProvider: UsageProvider {
         let home = try store.codexHome(for: connection)
         let accountRead = try await CodexAppServerClient.readAccount(
             executable: executable,
-            codexHome: home)
+            codexHome: home,
+            environment: environment)
         var identity = account.account
         identity.plan = accountRead.planType
         return try CodexUsageMapping.snapshot(
@@ -116,13 +142,15 @@ public enum CodexAppServerClient {
         executable: URL,
         codexHome: URL,
         timeout: TimeInterval = 30,
-        requestTimeout: TimeInterval = 30
+        requestTimeout: TimeInterval = 30,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) async throws -> CodexAccountRead {
         try await run(
             executable: executable,
             codexHome: codexHome,
             timeout: min(timeout, 30),
-            requestTimeout: min(requestTimeout, 30)) { session in
+            requestTimeout: min(requestTimeout, 30),
+            environment: environment) { session in
             try session.initialize()
             let account = try session.request(
                 method: "account/read",
@@ -141,13 +169,15 @@ public enum CodexAppServerClient {
         codexHome: URL,
         timeout: TimeInterval = 180,
         requestTimeout: TimeInterval = 30,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         openAuthURL: @escaping @Sendable (URL) -> Void
     ) async throws -> String? {
         try await run(
             executable: executable,
             codexHome: codexHome,
             timeout: min(timeout, 180),
-            requestTimeout: min(requestTimeout, 30)) { session in
+            requestTimeout: min(requestTimeout, 30),
+            environment: environment) { session in
             try session.initialize()
             let response = try session.request(
                 method: "account/login/start",
@@ -200,13 +230,15 @@ public enum CodexAppServerClient {
         codexHome: URL,
         timeout: TimeInterval,
         requestTimeout: TimeInterval,
+        environment: [String: String],
         operation: @escaping @Sendable (CodexAppServerSession) throws -> T
     ) async throws -> T {
         let session = CodexAppServerSession(
             executable: executable,
             codexHome: codexHome,
             timeout: timeout,
-            requestTimeout: requestTimeout)
+            requestTimeout: requestTimeout,
+            environment: environment)
         let cancellation = CodexSessionCancellation()
         return try await withTaskCancellationHandler {
             do {
@@ -269,11 +301,15 @@ private final class CodexAppServerSession: @unchecked Sendable {
     private let codexHome: URL
     private let deadline: Date
     private let requestTimeout: TimeInterval
+    private let environment: [String: String]
     private let process = Process()
     private let inputPipe = Pipe()
     private let outputPipe = Pipe()
+    private let errorPipe = Pipe()
     private var inputFD: Int32 = -1
     private var outputFD: Int32 = -1
+    private var errorFD: Int32 = -1
+    private var errorBuffer = Data()
     private var processStarted = false
     private var closed = false
     private var cancelled = false
@@ -288,42 +324,45 @@ private final class CodexAppServerSession: @unchecked Sendable {
         executable: URL,
         codexHome: URL,
         timeout: TimeInterval,
-        requestTimeout: TimeInterval
+        requestTimeout: TimeInterval,
+        environment: [String: String]
     ) {
         self.executable = executable
         self.codexHome = codexHome
         self.deadline = Date().addingTimeInterval(timeout)
         self.requestTimeout = requestTimeout
+        self.environment = environment
     }
 
     func start() throws {
         if isCancelled { throw CancellationError() }
         signal(SIGPIPE, SIG_IGN)
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "OPENAI_API_KEY")
-        environment.removeValue(forKey: "CODEX_API_KEY")
-        environment.removeValue(forKey: "OPENAI_BASE_URL")
-        environment["CODEX_HOME"] = codexHome.path
         process.executableURL = executable
         process.arguments = ["app-server", "-c", "cli_auth_credentials_store=\"file\""]
         process.currentDirectoryURL = codexHome
-        process.environment = environment
+        process.environment = CodexExecutableResolver.launchEnvironment(
+            executable: executable, codexHome: codexHome, environment: environment)
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errorPipe
         do {
             try process.run()
         } catch {
             closePipes()
-            throw ProviderError.badResponse("Could not start Codex app-server")
+            throw ProviderError.badResponse(
+                "Could not launch Codex. Choose an executable Codex CLI and check that its installation and account directory are accessible.")
         }
         _ = setpgid(process.processIdentifier, process.processIdentifier)
         closeHandle(inputPipe.fileHandleForReading)
         closeHandle(outputPipe.fileHandleForWriting)
+        closeHandle(errorPipe.fileHandleForWriting)
         inputFD = inputPipe.fileHandleForWriting.fileDescriptor
         outputFD = outputPipe.fileHandleForReading.fileDescriptor
+        errorFD = errorPipe.fileHandleForReading.fileDescriptor
         let flags = fcntl(outputFD, F_GETFL)
         if flags >= 0 { _ = fcntl(outputFD, F_SETFL, flags | O_NONBLOCK) }
+        let errorFlags = fcntl(errorFD, F_GETFL)
+        if errorFlags >= 0 { _ = fcntl(errorFD, F_SETFL, errorFlags | O_NONBLOCK) }
         lock.lock()
         processStarted = true
         lock.unlock()
@@ -374,7 +413,8 @@ private final class CodexAppServerSession: @unchecked Sendable {
             }
             guard numericID(message["id"]) == requestID else { continue }
             guard message["error"] == nil else {
-                throw ProviderError.badResponse("Codex app-server request failed")
+                throw ProviderError.badResponse(
+                    "Codex rejected \(method). Update the selected Codex CLI and try again.")
             }
             guard let result = message["result"] else {
                 throw ProviderError.badResponse("Codex app-server response is incomplete")
@@ -496,6 +536,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
     private func readMessage(until messageDeadline: Date) throws -> [String: Any] {
         while true {
             if isCancelled { throw CancellationError() }
+            drainErrors()
             if let newline = lineBuffer.firstIndex(of: 0x0A) {
                 var line = Data(lineBuffer[..<newline])
                 lineBuffer.removeSubrange(...newline)
@@ -521,7 +562,10 @@ private final class CodexAppServerSession: @unchecked Sendable {
             let count = buffer.withUnsafeMutableBytes {
                 read(outputFD, $0.baseAddress, $0.count)
             }
-            if count == 0 { throw ProviderError.badResponse("Codex app-server closed early") }
+            if count == 0 {
+                drainErrors()
+                throw earlyExitError()
+            }
             if count < 0 {
                 if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK { continue }
                 throw ProviderError.badResponse("Codex app-server read failed")
@@ -533,6 +577,37 @@ private final class CodexAppServerSession: @unchecked Sendable {
             totalOutput += count
             lineBuffer.append(contentsOf: buffer.prefix(count))
         }
+    }
+
+    private func drainErrors() {
+        var buffer = [UInt8](repeating: 0, count: 8_192)
+        // Drain beyond the retained tail, but yield regularly to cancellation
+        // and the request deadline even when a CLI writes stderr endlessly.
+        for _ in 0..<8 {
+            let count = buffer.withUnsafeMutableBytes { read(errorFD, $0.baseAddress, $0.count) }
+            guard count > 0 else { return }
+            errorBuffer.append(contentsOf: buffer.prefix(count))
+            if errorBuffer.count > 8_192 {
+                errorBuffer.removeFirst(errorBuffer.count - 8_192)
+            }
+        }
+    }
+
+    private func earlyExitError() -> ProviderError {
+        let diagnostic = String(decoding: errorBuffer, as: UTF8.self).lowercased()
+        // Never display raw CLI output: it may contain authentication URLs,
+        // tokens or account data. Only emit fixed, actionable categories.
+        if diagnostic.contains("node") &&
+            (diagnostic.contains("no such file") || diagnostic.contains("not found")) {
+            return .badResponse("Codex could not find Node.js. Reinstall Codex with Homebrew, or choose the Codex executable from your active Node.js installation.")
+        }
+        if diagnostic.contains("app-server") &&
+            (diagnostic.contains("unrecognized") || diagnostic.contains("unexpected argument")) {
+            return .badResponse("This Codex CLI does not support app-server. Update Codex, then choose the updated executable.")
+        }
+        let status = process.isRunning ? "" : " (exit \(process.terminationStatus))"
+        return .badResponse(
+            "Codex app-server stopped\(status). Check that the selected CLI runs “codex app-server” in Terminal, update Codex, then try again.")
     }
 
     private func bufferNotification(_ message: [String: Any]) throws {
@@ -616,6 +691,8 @@ private final class CodexAppServerSession: @unchecked Sendable {
         closeHandle(inputPipe.fileHandleForWriting)
         closeHandle(outputPipe.fileHandleForReading)
         closeHandle(outputPipe.fileHandleForWriting)
+        closeHandle(errorPipe.fileHandleForReading)
+        closeHandle(errorPipe.fileHandleForWriting)
     }
 
     private func closeHandle(_ handle: FileHandle) {

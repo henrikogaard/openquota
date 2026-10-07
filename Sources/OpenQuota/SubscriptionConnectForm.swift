@@ -14,16 +14,19 @@ struct SubscriptionConnectForm: View {
     @State private var errorText: String?
 
     var body: some View {
-        Form {
-            switch kind {
-            case .claudeStatusLine: claudeSection
-            case .codexAppServer: codexSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                switch kind {
+                case .claudeStatusLine: claudeSection
+                case .codexAppServer: codexSection
+                }
+                if let errorText {
+                    Text(errorText).font(.callout).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            if let errorText {
-                Text(errorText).font(.callout).foregroundStyle(.red)
-            }
+            .padding(20)
         }
-        .formStyle(.grouped)
         .onDisappear { model.cancelCodexLogin() }
         .onChange(of: model.codexLoginStatus) { _, status in
             if status == "Codex account connected." { onConnected() }
@@ -31,61 +34,89 @@ struct SubscriptionConnectForm: View {
     }
 
     private var claudeSection: some View {
-        Section {
-            TextField("Label", text: $claudeLabel, prompt: Text(Self.claudeDefaultLabel))
-            LabeledContent("Configuration") {
-                HStack {
-                    Text(claudeDirectory).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    Button("Choose…", action: chooseClaudeDirectory)
+        VStack(alignment: .leading, spacing: 16) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                GridRow {
+                    fieldLabel("Label")
+                    TextField("Label", text: $claudeLabel, prompt: Text(Self.claudeDefaultLabel))
+                        .labelsHidden().textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    fieldLabel("Configuration")
+                    HStack {
+                        Text(claudeDirectory).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Choose…", action: chooseClaudeDirectory)
+                    }
                 }
             }
+            Text("Adds a status-line bridge to this configuration. Usage appears after your next Claude Code reply. Your existing status line keeps working.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Connect", action: installClaude)
+                    .buttonStyle(.glassProminent)
                     .keyboardShortcut(.defaultAction)
             }
-        } header: {
-            Text("Claude Code")
-        } footer: {
-            Text("Adds a status-line bridge to this configuration. Usage appears after your next Claude Code reply. Your existing status line keeps working.")
-                .foregroundStyle(.secondary)
         }
     }
 
     private var codexSection: some View {
-        Section {
-            TextField("Label", text: $codexLabel, prompt: Text(Self.codexDefaultLabel))
-            LabeledContent("Codex CLI") {
-                HStack {
-                    Text(codexExecutable.isEmpty ? "Automatic" : codexExecutable)
-                        .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Button("Choose…", action: chooseCodexExecutable)
+        VStack(alignment: .leading, spacing: 16) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                GridRow {
+                    fieldLabel("Label")
+                    TextField("Label", text: $codexLabel, prompt: Text(Self.codexDefaultLabel))
+                        .labelsHidden().textFieldStyle(.roundedBorder)
                 }
+                GridRow {
+                    fieldLabel("Codex CLI")
+                    HStack {
+                        Text(codexPath)
+                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .help(codexPath)
+                        Button("Choose…", action: chooseCodexExecutable)
+                            .disabled(model.codexLoginBusy)
+                    }
+                }
+            }
+            Text("Sign in through Codex in your browser. Each account gets its own private Codex home.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let status = model.codexLoginStatus {
+                Text(status)
+                    .font(.callout)
+                    .foregroundStyle(model.codexLoginBusy ? Color.secondary : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
             if model.codexLoginBusy {
                 HStack {
                     ProgressView().controlSize(.small)
-                    Text(model.codexLoginStatus ?? "Waiting for sign-in…").foregroundStyle(.secondary)
                     Spacer()
                     Button("Cancel") { model.cancelCodexLogin() }
                 }
             } else {
                 HStack {
-                    if let status = model.codexLoginStatus {
-                        Text(status).foregroundStyle(.secondary)
-                    }
                     Spacer()
                     Button("Sign In with ChatGPT…", action: startCodexLogin)
+                        .buttonStyle(.glassProminent)
                         .keyboardShortcut(.defaultAction)
                 }
             }
-        } header: {
-            Text("Codex / ChatGPT")
-        } footer: {
-            Text("Sign in through Codex in your browser. Each account gets its own private Codex home.")
-                .foregroundStyle(.secondary)
         }
+    }
+
+    private var codexPath: String {
+        if !codexExecutable.isEmpty { return codexExecutable }
+        return CodexExecutableResolver.resolve()?.path ?? "Not found — choose Codex CLI"
+    }
+
+    private func fieldLabel(_ title: String) -> some View {
+        Text(title).frame(width: 96, alignment: .leading)
     }
 
     static let claudeDefaultLabel = "Claude"

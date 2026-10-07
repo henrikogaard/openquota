@@ -100,6 +100,15 @@ start threads/turns. It confirms the account type is `chatgpt`, then maps the
 documented `account/rateLimits/read` response. API keys are usage-based API
 billing and do not expose ChatGPT subscription quotas.
 
+The connection form shows the selected executable path. GUI launches also
+include that executable's bin directory and common runtime locations in `PATH`,
+so npm-installed Codex can find Node.js without opening OpenQuota from Terminal.
+If the CLI stops early, OpenQuota recognizes missing-Node and unsupported
+app-server errors and offers next steps. It retains only a bounded stderr tail
+in memory; raw CLI output is never displayed or logged because it may contain
+authentication details. For other startup failures, check the selected CLI with
+`codex app-server` in Terminal and update the installation before retrying.
+
 Refresh launches a short-lived app-server with a 30-second request/process
 limit. Failures retain the last good reading as outdated. Removing a
 connection disconnects it from OpenQuota but deliberately retains the

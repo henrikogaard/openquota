@@ -394,6 +394,65 @@ private func canonicalPath(_ url: URL) -> String {
 }
 
 final class SubscriptionCodexAppServerTests: XCTestCase {
+    func test_appServerLaunchesEnvEntrypointFromMinimalGUIPath() async throws {
+        let directory = try makeDirectory()
+        let bin = try makeDirectory(inside: directory, name: "node bin")
+        let lib = try makeDirectory(inside: directory, name: "lib")
+        let home = try makeDirectory(inside: directory, name: "account")
+        _ = try makeExecutable(in: bin, name: "openquota-test-runtime", script: """
+        #!/bin/sh
+        exec /bin/sh "$@"
+        """)
+        let entrypoint = try makeExecutable(in: lib, name: "codex.js", script:
+            serverScript().replacingOccurrences(of: "#!/bin/sh", with: "#!/usr/bin/env openquota-test-runtime"))
+        let executable = bin.appendingPathComponent("codex")
+        try FileManager.default.createSymbolicLink(at: executable, withDestinationURL: entrypoint)
+        let environment = [
+            "PATH": "/usr/bin:/bin",
+            "OPENAI_API_KEY": "synthetic-api-key",
+            "CODEX_API_KEY": "synthetic-codex-key",
+            "OPENAI_BASE_URL": "https://example.invalid",
+        ]
+        let result = try await CodexAppServerClient.readAccount(
+            executable: executable, codexHome: home, environment: environment)
+        XCTAssertEqual(result.planType, "plus")
+        let observed = try String(contentsOf: home.appendingPathComponent("observed.txt"), encoding: .utf8)
+        XCTAssertEqual(Array(observed.split(separator: "\n", omittingEmptySubsequences: false)[5..<8]), ["", "", ""])
+        let opened = LockedURL()
+        let plan = try await CodexAppServerClient.login(
+            executable: executable, codexHome: home, environment: environment,
+            openAuthURL: { opened.set($0) })
+        XCTAssertEqual(plan, "plus")
+        XCTAssertEqual(opened.value?.host, "auth.openai.com")
+    }
+
+    func test_appServerDrainsStderrAndShowsSafeStartupAdvice() async throws {
+        let directory = try makeDirectory()
+        let home = try makeDirectory(inside: directory, name: "account")
+        for (diagnostic, advice) in [
+            ("env: node: No such file or directory", "Codex could not find Node.js."),
+            ("error: unrecognized subcommand 'app-server'", "This Codex CLI does not support app-server."),
+            ("unexpected internal failure", "Codex app-server stopped"),
+        ] {
+            let executable = try makeExecutable(in: directory, name: "codex", script: """
+            #!/bin/sh
+            IFS= read -r message
+            printf '%131072s\\n' x >&2
+            printf '%s\\n' "\(diagnostic)" 'sensitive-fixture-auth-token' >&2
+            exit 17
+            """)
+            do {
+                _ = try await CodexAppServerClient.readAccount(
+                    executable: executable, codexHome: home, timeout: 5)
+                XCTFail("The failed CLI must report an actionable error")
+            } catch let error as ProviderError {
+                XCTAssertTrue(error.userMessage.contains(advice), error.userMessage)
+                XCTAssertFalse(error.userMessage.contains("sensitive-fixture-auth-token"))
+                XCTAssertFalse(error.userMessage.contains(diagnostic))
+            }
+        }
+    }
+
     func test_appServerHandshakeAccountReadAndGuidedLoginWithEarlyNotification() async throws {
         let directory = try makeDirectory()
         let home = try makeDirectory(inside: directory, name: "codex-home")
@@ -479,7 +538,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
         for (name, mode, expected, requestTimeout) in [
             ("codex-malformed", "malformed", "Malformed Codex app-server response", 2.0),
             ("codex-oversized", "oversized", "Codex app-server output too large", 2.0),
-            ("codex-eof", "eof", "Codex app-server closed early", 2.0),
+            ("codex-eof", "eof", "Codex app-server stopped", 2.0),
             ("codex-timeout", "timeout", "timeout", 0.15),
         ] {
             let executable = try makeExecutable(in: directory, name: name, script: serverScript(mode: mode))
@@ -493,6 +552,8 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
             } catch let error as ProviderError {
                 if expected == "timeout" {
                     XCTAssertEqual(error, .timedOut)
+                } else if mode == "eof" {
+                    XCTAssertTrue(error.userMessage.contains(expected))
                 } else {
                     XCTAssertEqual(error, .badResponse(expected))
                 }

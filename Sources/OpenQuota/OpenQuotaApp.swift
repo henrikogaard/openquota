@@ -17,6 +17,7 @@ struct OpenQuotaApp: App {
         Settings {
             SettingsView(model: model)
         }
+        .windowToolbarStyle(.unified)
     }
 }
 #else

@@ -60,13 +60,6 @@ struct SettingsView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
-            .toolbar {
-                ToolbarItem {
-                    Button { adding = true } label: { Label("Add Account", systemImage: "plus") }
-                        .disabled(model.isDemo)
-                        .help("Add Account")
-                }
-            }
         } detail: {
             Group {
                 if selection == "general" {
@@ -86,6 +79,16 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle(selection == "general" ? "General" : model.providerName(selected?.providerID ?? ""))
+        }
+        .toolbar(removing: .sidebarToggle)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { adding = true } label: {
+                    Label("Add Account", systemImage: "plus")
+                }
+                .disabled(model.isDemo)
+                .help("Add Account")
+            }
         }
         .frame(minWidth: 680, idealWidth: 720, minHeight: 460, idealHeight: 500)
         .overlay(alignment: .bottom) {
@@ -317,15 +320,15 @@ struct GeneralPane: View {
                     .onChange(of: automaticallyChecks) { _, value in
                         UpdateController.shared.automaticallyChecks = value
                     }
-                LabeledContent("Version", value: Bundle.main.object(
-                    forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
-                HStack {
-                    Spacer()
-                    Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
-                        .disabled(!UpdateController.shared.canCheckForUpdates)
+                LabeledContent("Version") {
+                    HStack(spacing: 12) {
+                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
+                            .foregroundStyle(.secondary)
+                        Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
+                            .disabled(!UpdateController.shared.canCheckForUpdates)
+                    }
                 }
-            }
-            Section {
+            } footer: {
                 Link("OpenQuota on GitHub", destination: URL(string: "https://github.com/henrikogaard/openquota")!)
             }
         }
