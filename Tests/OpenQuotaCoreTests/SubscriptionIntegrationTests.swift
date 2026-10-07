@@ -108,6 +108,29 @@ final class SubscriptionUsageTests: XCTestCase {
         }
     }
 
+    func test_codexHomeCanBePreparedBeforeConnectionIsSaved() throws {
+        let directory = try makeDirectory()
+        let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
+        let id = UUID()
+        let expected = store.appOwnedConnectionsDirectory
+            .appendingPathComponent(id.uuidString.lowercased(), isDirectory: true)
+            .appendingPathComponent("codex-home", isDirectory: true)
+        let candidate = SubscriptionConnection(
+            id: id, kind: .codexAppServer, label: "Work", directory: expected.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expected.path))
+        XCTAssertEqual(try store.codexHome(for: candidate).path, expected.path)
+        XCTAssertTrue(try store.connections().isEmpty)
+        let saved = try store.addCodex(id: id, label: "Work")
+        XCTAssertEqual(try store.connections(), [saved])
+        XCTAssertEqual(try store.codexHome(for: saved).path, expected.path)
+
+        let other = SubscriptionConnection(
+            kind: .codexAppServer, label: "Other", directory: expected.path)
+        XCTAssertThrowsError(try store.codexHome(for: other)) {
+            XCTAssertEqual($0 as? SubscriptionConnectionStoreError, .invalidStoredConnection)
+        }
+    }
+
     func test_subscriptionStoreUsesPrivateDirectoriesAndRetainsCodexHomeOnRemoval() throws {
         let directory = try makeDirectory()
         let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))

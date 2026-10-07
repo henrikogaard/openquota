@@ -181,7 +181,7 @@ public struct SubscriptionConnectionStore: Sendable {
         }
         let expected = try appOwnedDirectory(for: connection.id)
             .appendingPathComponent("codex-home", isDirectory: true)
-        guard URL(fileURLWithPath: connection.directory).standardizedFileURL == expected else {
+        guard URL(fileURLWithPath: connection.directory).standardizedFileURL.path == expected.path else {
             throw SubscriptionConnectionStoreError.invalidStoredConnection
         }
         try Self.createPrivateDirectory(at: expected)
@@ -260,7 +260,7 @@ public struct SubscriptionConnectionStore: Sendable {
                 .appendingPathComponent("connections", isDirectory: true)
                 .appendingPathComponent(connection.id.uuidString.lowercased(), isDirectory: true)
                 .appendingPathComponent("codex-home", isDirectory: true)
-            return URL(fileURLWithPath: connection.directory).standardizedFileURL == expected
+            return normalized == expected.path
         }
     }
 
