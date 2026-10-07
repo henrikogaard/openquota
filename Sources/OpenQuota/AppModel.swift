@@ -332,7 +332,7 @@ final class AppModel {
 
     func providerName(_ id: String) -> String {
         providers.first(where: { $0.id == id })?.displayName
-            ?? ["opencode": "OpenCode Go", "openrouter": "OpenRouter",
+            ?? ["opencode": "OpenCode Go", "opencode-go": "OpenCode Go", "openrouter": "OpenRouter",
                 "claude": "Claude Code", "codex": "Codex / ChatGPT",
                 "mistral": "Mistral Vibe"][id] ?? id.capitalized
     }
