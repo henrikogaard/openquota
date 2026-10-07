@@ -24,7 +24,7 @@ and limits](estimated-spend.md).
 | Synthetic | bearer | `api.synthetic.new/v2/quotas` | unverified |
 | Kilo | bearer | `kilocode.ai/api/users/me/balance` | unverified |
 | Venice | bearer | `api.venice.ai/api/v1/apikeys` | unverified |
-| Mistral Vibe | bearer | `api.mistral.ai/v1/admin/analytics/vibe/code/usage/by_workspace` | admin access, 30-day sessions and tokens; **activity, not remaining quota**; unverified live |
+| Mistral Vibe | Disabled | — | Temporarily hidden from setup and usage; no background requests. Saved accounts and keys are retained. No supported personal-allowance source confirmed. |
 | OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 | ClinePass | bearer | `api.cline.bot/api/v1/users/me/plan/usage-limits` | 5h/weekly/monthly % used + resets, unverified |

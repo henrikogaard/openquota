@@ -25,12 +25,13 @@ Each saved key/session has its own row. Other local providers discover their def
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
 | Grok | Local OAuth | Billing-period usage; named local accounts |
 | Cursor | Manual session token | Plan usage and credit grants; no browser-cookie import |
-| Mistral Vibe | Admin API key | **30-day activity**, not personal remaining allowance |
 | OpenRouter | API key | Remaining account credits and independent key usage/limit |
 | Requesty | Management API key | Organization balance |
 | Additional / custom providers | Specs and CLI adapters | See [provider details](docs/providers.md) |
 
 Provider mappings are fixture-tested, **not a claim that every provider has been verified with a live paid account**. Other providers' endpoints may change; errors retain the last good reading and mark it outdated. Claude and Codex use the documented integration surfaces linked in [provider details](docs/providers.md); their fixture tests do not replace live paid-account validation.
+
+Mistral is temporarily hidden: no supported personal-allowance source has been confirmed. Existing Mistral accounts and Keychain entries are retained, but are not displayed or refreshed.
 
 Custom providers are added by dropping a `ProviderSpec` JSON array into `~/Library/Application Support/openquota/provider-specs.json` — no code needed for bearer-key + JSON-usage-endpoint services. Quit and relaunch OpenQuota after editing the file to load the new definitions.
 

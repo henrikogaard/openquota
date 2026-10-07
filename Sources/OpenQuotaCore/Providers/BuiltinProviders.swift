@@ -61,6 +61,11 @@ public enum BuiltinProviders {
 public struct ProviderRegistry: Sendable {
     public var providers: [any UsageProvider]
 
+    /// Temporarily hidden until a supported personal-allowance source is available.
+    public static func isEnabled(_ providerID: String) -> Bool {
+        providerID != "mistral"
+    }
+
     public init(
         http: any HTTPClient,
         credentials: any CredentialStore,
@@ -76,6 +81,6 @@ public struct ProviderRegistry: Sendable {
         list.append(contentsOf: (adapters
             ?? Adapters.all(http: http, credentials: credentials)).filter { seen.insert($0.id).inserted })
         list.append(contentsOf: CLIProviders.all(environment: environment).filter { seen.insert($0.id).inserted })
-        self.providers = list
+        self.providers = list.filter { Self.isEnabled($0.id) }
     }
 }

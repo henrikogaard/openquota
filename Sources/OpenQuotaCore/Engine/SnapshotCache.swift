@@ -20,7 +20,7 @@ public struct SnapshotCache: Sendable {
               let data = try? Data(contentsOf: url),
               let dict = try? JSONDecoder.openQuota.decode([String: UsageSnapshot].self, from: data)
         else { return [:] }
-        return dict
+        return dict.filter { ProviderRegistry.isEnabled($0.value.providerID) }
     }
 
     public func save(_ snapshots: [String: UsageSnapshot]) throws {

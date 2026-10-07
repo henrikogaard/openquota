@@ -444,7 +444,7 @@ public enum SpecLibrary {
         BuiltinProviders.requesty,
         opencodeGo,
         deepseek, moonshot, zai, elevenLabs, minimax, synthetic,
-        kilo, venice, mistral, openAIAdmin, warp, perplexity,
+        kilo, venice, openAIAdmin, warp, perplexity,
         clinePass, vercelGateway, atlasCloud, poe, zenMux, devPass, v0, codebuff
     ]
 }
