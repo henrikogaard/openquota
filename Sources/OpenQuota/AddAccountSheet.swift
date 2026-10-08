@@ -202,12 +202,12 @@ struct AddAccountSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button(L("Add workspace subscription", "Legg til arbeidsområdeabonnement")) {
                     backTarget = .openCodeMethods
-                    target = .apiKey("opencode-go")
+                    self.target = .apiKey("opencode-go")
                 }
                 .buttonStyle(.glass)
                 Button(L("Use another sign-in file", "Bruk en annen påloggingsfil")) {
                     backTarget = .openCodeMethods
-                    target = .profile("opencode")
+                    self.target = .profile("opencode")
                 }
                 .buttonStyle(.glass)
                 Spacer()

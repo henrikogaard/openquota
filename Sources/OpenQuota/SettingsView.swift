@@ -444,7 +444,7 @@ struct AccountDetail: View {
         if let credentialSource = snapshot?.credentialSource {
             return model.credentialSourceName(credentialSource)
         }
-        switch item.kind {
+        return switch item.kind {
         case .subscription(let connection):
             connection.kind == .claudeStatusLine ? L("Claude Code status line", "Claude Code-statuslinje") : L("Codex sign-in", "Codex-pålogging")
         case .saved(let account):
@@ -455,7 +455,7 @@ struct AccountDetail: View {
     }
 
     private var note: String? {
-        switch item.kind {
+        return switch item.kind {
         case .saved(let account) where account.account.providerID == "cursor":
             L("Experimental: unofficial endpoints and a sensitive session token. Replacement must be for the same Cursor account. No automatic renewal or browser import.",
               "Eksperimentell: uoffisielle endepunkter og en sensitiv øktnøkkel. Erstatningen må tilhøre samme Cursor-konto. Ingen automatisk fornyelse eller nettleserimport.")
