@@ -233,11 +233,10 @@ struct AccountListRow: View {
         HStack(spacing: 8) {
             ProviderGlyph(providerID: providerID, name: name, size: 24)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(name)
-                    if isExperimental { ExperimentalBadge() }
-                }
+                Text(name).lineLimit(1).help(name)
                 Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .truncationMode(.middle).help(title)
+                if isExperimental { ExperimentalBadge() }
             }
         }
         .padding(.vertical, 2)
@@ -248,6 +247,7 @@ struct ExperimentalBadge: View {
     var body: some View {
         Text(L("Experimental", "Eksperimentell"))
             .font(.system(size: 9, weight: .medium))
+            .fixedSize()
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)

@@ -7,6 +7,7 @@ struct SubscriptionConnectForm: View {
     var model: AppModel
     var kind: SubscriptionConnectionKind
     var onConnected: () -> Void = {}
+    var onCancel: () -> Void = {}
     @State private var claudeLabel = ""
     @State private var claudeDirectory = "~/.claude"
     @State private var codexLabel = ""
@@ -14,18 +15,33 @@ struct SubscriptionConnectForm: View {
     @State private var errorText: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                switch kind {
-                case .claudeStatusLine: claudeSection
-                case .codexAppServer: codexSection
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switch kind {
+                    case .claudeStatusLine: claudeSection
+                    case .codexAppServer: codexSection
+                    }
+                    if let errorText {
+                        Text(errorText).font(.callout).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                if let errorText {
-                    Text(errorText).font(.callout).foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .padding(20)
             }
-            .padding(20)
+            FormActions(
+                primary: kind == .claudeStatusLine
+                    ? L("Connect", "Koble til")
+                    : L("Sign In with ChatGPT…", "Logg inn med ChatGPT…"),
+                disabled: kind == .codexAppServer && model.codexLoginBusy,
+                action: {
+                    if kind == .claudeStatusLine { installClaude() }
+                    else { startCodexLogin() }
+                },
+                cancel: {
+                    model.cancelCodexLogin()
+                    onCancel()
+                })
         }
         .onDisappear { model.cancelCodexLogin() }
         .onChange(of: model.codexLoginStatus) { _, status in
@@ -47,6 +63,7 @@ struct SubscriptionConnectForm: View {
                         Text(claudeDirectory).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .help(claudeDirectory)
                         Button(L("Choose…", "Velg…"), action: chooseClaudeDirectory)
                     }
                 }
@@ -55,11 +72,22 @@ struct SubscriptionConnectForm: View {
                     "Legger til en statuslinjebro i denne konfigurasjonen. Bruken vises etter neste svar i Claude Code. Den eksisterende statuslinjen fortsetter å virke."))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                Button(L("Connect", "Koble til"), action: installClaude)
-                    .buttonStyle(.glassProminent)
-                    .keyboardShortcut(.defaultAction)
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("Another subscription?", "Et annet abonnement?"))
+                    .font(.callout.weight(.medium))
+                Text(L("Sign in to a separate Claude profile in Terminal, then choose its folder above. Your normal CLI login stays unchanged.",
+                       "Logg inn med en egen Claude-profil i Terminal, og velg mappen ovenfor. Den vanlige CLI-påloggingen endres ikke."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("CLAUDE_CONFIG_DIR=\"$HOME/.claude-work\" claude")
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(L("Readings update only while that profile is used and become outdated after 10 minutes.",
+                       "Målinger oppdateres bare mens profilen brukes, og blir utdaterte etter 10 minutter."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -99,15 +127,8 @@ struct SubscriptionConnectForm: View {
             if model.codexLoginBusy {
                 HStack {
                     ProgressView().controlSize(.small)
-                    Spacer()
-                    Button(L("Cancel", "Avbryt")) { model.cancelCodexLogin() }
-                }
-            } else {
-                HStack {
-                    Spacer()
-                    Button(L("Sign In with ChatGPT…", "Logg inn med ChatGPT…"), action: startCodexLogin)
-                        .buttonStyle(.glassProminent)
-                        .keyboardShortcut(.defaultAction)
+                    Text(L("Waiting for sign-in…", "Venter på pålogging…"))
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
         }

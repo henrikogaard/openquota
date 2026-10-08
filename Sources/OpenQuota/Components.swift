@@ -77,14 +77,24 @@ struct QuotaRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(Localized.windowLabel(window.label)).font(.system(size: 12, weight: .medium))
-                Spacer(minLength: 8)
-                if let resetText {
-                    Text(resetText).font(.system(size: 11)).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(Localized.windowLabel(window.label)).font(.system(size: 12, weight: .medium))
+                        .fixedSize()
+                    Spacer(minLength: 8)
+                    if let resetText {
+                        Text(resetText).font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize()
+                    }
                 }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Localized.windowLabel(window.label)).font(.system(size: 12, weight: .medium))
+                    if let resetText {
+                        Text(resetText).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .lineLimit(1)
             if let fraction = window.fractionUsed {
                 HStack(spacing: 8) {
                     Meter(fractionUsed: fraction)
@@ -94,7 +104,7 @@ struct QuotaRow: View {
                         .foregroundStyle(fraction >= Tokens.warnThreshold
                                          ? AnyShapeStyle(Tokens.tint(fractionUsed: fraction))
                                          : AnyShapeStyle(.secondary))
-                        .frame(minWidth: 52, alignment: .trailing)
+                        .frame(width: Tokens.quotaValueWidth, alignment: .trailing)
                         .lineLimit(1)
                 }
             } else {
@@ -123,7 +133,8 @@ struct Meter: View {
         }
         .frame(height: height)
         .accessibilityElement()
-        .accessibilityValue("\(Int(((1 - fractionUsed) * 100).rounded())) percent left")
+        .accessibilityValue(L("\(Int(((1 - fractionUsed) * 100).rounded())) percent left",
+                              "\(Int(((1 - fractionUsed) * 100).rounded())) prosent igjen"))
     }
 }
 
@@ -153,6 +164,7 @@ enum Tokens {
     static let moduleRadius: CGFloat = 16
     static let modulePadding: CGFloat = 12
     static let meterHeight: CGFloat = 6
+    static let quotaValueWidth: CGFloat = 72
     static let warnThreshold = 0.8
     static let criticalThreshold = 0.9
 

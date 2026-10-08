@@ -10,7 +10,7 @@ Claude and Codex also have opt-in **Estimated Spend · This Mac**, calculated
 from local token logs rather than remaining quota. [Sources, pricing, privacy
 and limits](estimated-spend.md).
 
-## API-key specs (Settings → Add API key)
+## API-key specs (Settings → Accounts → +)
 
 | Provider | Auth | Endpoint | Notes |
 |---|---|---|---|
@@ -24,7 +24,6 @@ and limits](estimated-spend.md).
 | Synthetic | bearer | `api.synthetic.new/v2/quotas` | unverified |
 | Kilo | bearer | `kilocode.ai/api/users/me/balance` | unverified |
 | Venice | bearer | `api.venice.ai/api/v1/apikeys` | unverified |
-| Mistral Vibe | bearer | `api.mistral.ai/v1/admin/analytics/vibe/code/usage/by_workspace` | admin access, 30-day sessions and tokens; **activity, not remaining quota**; unverified live |
 | OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 | ClinePass | bearer | `api.cline.bot/api/v1/users/me/plan/usage-limits` | 5h/weekly/monthly % used + resets, unverified |
@@ -35,6 +34,14 @@ and limits](estimated-spend.md).
 | DevPass | bearer | `api.llmgateway.io/v1/key` | plan credits, premium weekly, key spend; unverified |
 | v0 | bearer | `api.v0.dev/v1/user/billing` + `/v1/rate-limits` | token or legacy billing branch + request limit; unverified |
 | Codebuff | bearer | `POST www.codebuff.com/api/v1/usage` | credits used/quota/remaining + reset; subscription metadata not fetched; unverified |
+
+Mistral's legacy mapping is not recommended for setup. It does not expose
+personal Vibe allowance; Studio keys cannot authenticate Admin analytics.
+The documented Admin API requires `x-api-key` and Enterprise Backoffice access,
+not the legacy connector's bearer authentication. Hiding that connector while
+preserving saved metadata is tracked in
+[PR #8](https://github.com/henrikogaard/openquota/pull/8). Do not use this table
+as a reason to create more Mistral keys.
 
 ## Next candidates (from the OpenUsage / CodexBar audit)
 
@@ -100,10 +107,14 @@ directory and file permissions.
 ### Claude Code status line
 
 Requires Claude Code and an existing config directory (normally `~/.claude`).
-In Settings → Subscriptions, choose **Connect & Install Status Line** and
+In Settings → Accounts → + → Claude Code, choose **Connect** and
 explicitly select the configuration. Use a distinct Claude config/login for
 each connection. The card follows the active login in that config and does not
 guarantee an immutable provider identity.
+
+For another subscription without replacing the default CLI login, use
+`CLAUDE_CONFIG_DIR` with a separate directory and complete Claude's login there.
+See the [step-by-step account guide](accounts.md#claude-another-subscription-without-replacing-your-cli-login).
 
 The installer changes only `statusLine.command` in Claude's `settings.json`.
 It preserves unknown top-level keys, other status-line fields and the complete
@@ -153,7 +164,7 @@ limit. Failures retain the last good reading as outdated. Removing a
 connection disconnects it from OpenQuota but deliberately retains the
 Codex-managed files in its private home. For migration from an older
 Claude/Codex credential-file profile, remove the old profile and create a new
-connection in Settings → Subscriptions; the old credential file is left
+connection in Settings → Accounts → +; the old credential file is left
 untouched and is no longer read.
 
 Official documentation: [Codex authentication](https://developers.openai.com/codex/auth),

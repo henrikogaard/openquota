@@ -25,13 +25,13 @@ struct PopoverView: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: Tokens.moduleSpacing) {
-            VStack(spacing: Tokens.moduleSpacing) {
-                if model.snapshots.isEmpty {
-                    SpendPanel(model: model)
-                    emptyState
-                } else {
-                    ScrollView {
+        VStack(spacing: Tokens.moduleSpacing) {
+            if model.snapshots.isEmpty {
+                SpendPanel(model: model)
+                emptyState
+            } else {
+                ScrollView {
+                    GlassEffectContainer(spacing: Tokens.moduleSpacing) {
                         VStack(spacing: Tokens.moduleSpacing) {
                             SpendPanel(model: model)
                             ForEach(groups, id: \.providerID) { group in
@@ -48,24 +48,25 @@ struct PopoverView: View {
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                     }
-                    .contentMargins(.trailing, 16, for: .scrollContent)
-                    .scrollIndicators(.automatic)
-                    .scrollBounceBehavior(.basedOnSize)
-                    // A window-style MenuBarExtra can't size a scroll view itself;
-                    // follow the measured content up to a cap.
-                    .frame(height: min(contentHeight, Tokens.popoverMaxContentHeight))
                 }
-                if let status = model.statusMessage {
-                    Text(status)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                }
-                footer
+                .contentMargins(.trailing, 16, for: .scrollContent)
+                .scrollIndicators(.automatic)
+                .scrollBounceBehavior(.basedOnSize)
+                // A window-style MenuBarExtra can't size a scroll view itself;
+                // follow the measured content up to a cap.
+                .frame(height: min(contentHeight, Tokens.popoverMaxContentHeight))
+                .clipped()
             }
-            .padding(Tokens.inset)
+            if let status = model.statusMessage {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+            footer
         }
+        .padding(Tokens.inset)
         .frame(width: Tokens.popoverWidth)
     }
 
@@ -158,7 +159,7 @@ struct ProviderSection: View {
 
     private var single: UsageSnapshot? { snapshots.count == 1 ? snapshots[0] : nil }
 
-    /// For a single account, its label and plan sit beside the provider name.
+    /// For a single account, show its label and plan beneath the provider name.
     private var subtitle: String? {
         guard let single else { return nil }
         let label = single.account.label.flatMap { $0 == name ? nil : $0 }
@@ -168,16 +169,20 @@ struct ProviderSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 ProviderGlyph(providerID: providerID, name: name, size: 22)
-                Text(name).font(.system(size: 13, weight: .semibold))
-                if isExperimental { ExperimentalBadge() }
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name).font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .help(subtitle)
+                    }
+                    if isExperimental { ExperimentalBadge() }
                 }
                 Spacer(minLength: 4)
                 if let dashboardURL {
@@ -251,7 +256,6 @@ struct AccountUsage: View {
                 Label(providerError(error, providerID: snapshot.providerID), systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
-                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }

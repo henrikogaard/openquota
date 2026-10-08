@@ -13,8 +13,8 @@ struct AddAccountSheet: View {
         /// Forms with a primary button draw their own Cancel/Add bar.
         var ownsActions: Bool {
             switch self {
-            case .claude, .codex, .openCodeMethods: false
-            case .cursor, .apiKey, .profile: true
+            case .openCodeMethods: false
+            case .claude, .codex, .cursor, .apiKey, .profile: true
             }
         }
     }
@@ -93,6 +93,7 @@ struct AddAccountSheet: View {
         case .some(.cursor): 480
         case .some(.openCodeMethods): 300
         case .some(.profile(_)): 420
+        case .some(.claude): 460
         default: 340
         }
     }
@@ -166,10 +167,11 @@ struct AddAccountSheet: View {
                                 ProviderGlyph(providerID: tile.providerID, name: tile.name, size: 32)
                                 Text(tile.name)
                                     .font(.callout)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
+                                    .lineLimit(2, reservesSpace: true)
+                                    .multilineTextAlignment(.center)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 76)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, minHeight: 96)
                             .contentShape(.rect(cornerRadius: 12))
                         }
                         .buttonStyle(ProviderTileStyle())
@@ -187,9 +189,9 @@ struct AddAccountSheet: View {
     private func form(for target: Target) -> some View {
         switch target {
         case .claude:
-            SubscriptionConnectForm(model: model, kind: .claudeStatusLine, onConnected: onDone)
+            SubscriptionConnectForm(model: model, kind: .claudeStatusLine, onConnected: onDone, onCancel: onDone)
         case .codex:
-            SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone)
+            SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone, onCancel: onDone)
         case .cursor:
             CursorSessionForm(model: model, onDone: onDone)
         case .openCodeMethods:
@@ -428,7 +430,7 @@ private struct CredentialProfileForm: View {
 }
 
 /// Cancel + primary button along the sheet's bottom edge.
-private struct FormActions: View {
+struct FormActions: View {
     var primary: String
     var disabled: Bool
     var action: () -> Void
