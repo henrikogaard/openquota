@@ -48,6 +48,7 @@ struct PopoverView: View {
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                     }
+                    .contentMargins(.trailing, 16, for: .scrollContent)
                     .scrollIndicators(.automatic)
                     .scrollBounceBehavior(.basedOnSize)
                     // A window-style MenuBarExtra can't size a scroll view itself;

@@ -14,7 +14,8 @@ macOS 26 Tahoe and later. Real Liquid Glass (`glassEffect`, `.glass` buttons) �
 - Bottom: a row of circular glass buttons — Refresh, Add Account (opens Settings straight into the sheet), Settings, ⋯ (Check for Updates, Quit).
 - Height follows content, scrolling past 520pt.
 - Meters/rings show what's **left**, neutral `primary @ 60%`; orange at 80% used, red at 90%.
-- Menu bar: gauge glyph whose needle follows the tightest quota, plus optional "% left" (General → Menu Bar). Stale dims the number.
+- Scroll content reserves a 16pt trailing gutter so the native scrollbar never overlaps provider cards.
+- Menu bar (General → Menu Bar): icon only, percentage only, icon + percentage, or provider + percentage. Default is the lowest remaining percentage across all accounts; an account and optionally a specific window can be pinned. Never switch away from an unavailable pinned source. Hover/accessibility text identifies provider, account, window, timestamp, and cached state. Cached readings are dimmed; unavailable percentages show an em dash. Existing icon-only preferences are preserved.
 
 ## Settings (System Settings style)
 

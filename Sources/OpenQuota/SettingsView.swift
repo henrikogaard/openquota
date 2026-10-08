@@ -614,11 +614,56 @@ struct GeneralPane: View {
     var model: AppModel
     @State private var automaticallyChecks = UpdateController.shared.automaticallyChecks
     @AppStorage("menuBarShowsPercent") private var menuBarShowsPercent = true
+    @AppStorage("menuBarDisplayStyle") private var storedStyle = ""
+    @AppStorage("menuBarAccountID") private var accountID = ""
+    @AppStorage("menuBarWindowID") private var windowID = ""
+
+    private var selectedSnapshot: UsageSnapshot? {
+        model.snapshots.first { $0.account.id == accountID }
+    }
+
+    private var displayStyle: Binding<String> {
+        Binding(
+            get: { MenuBarDisplayStyle.resolve(storedStyle, legacyShowsPercent: menuBarShowsPercent).rawValue },
+            set: { storedStyle = $0 })
+    }
 
     var body: some View {
         Form {
-            Section(L("Menu Bar", "Menylinje")) {
-                Toggle(L("Show percentage next to the gauge", "Vis prosent ved siden av måleren"), isOn: $menuBarShowsPercent)
+            Section {
+                Picker(L("Display", "Visning"), selection: displayStyle) {
+                    ForEach(MenuBarDisplayStyle.allCases, id: \.rawValue) { style in
+                        Text(style.title).tag(style.rawValue)
+                    }
+                }
+                Picker(L("Reading", "Avlesning"), selection: $accountID) {
+                    Text(L("Lowest across all accounts", "Lavest blant alle kontoer")).tag("")
+                    ForEach(model.snapshots, id: \.account.id) { snapshot in
+                        Text(accountTitle(snapshot)).tag(snapshot.account.id)
+                    }
+                    if !accountID.isEmpty && selectedSnapshot == nil {
+                        Text(L("Selected account unavailable", "Valgt konto er utilgjengelig")).tag(accountID)
+                    }
+                }
+                .onChange(of: accountID) { _, _ in windowID = "" }
+                if !accountID.isEmpty {
+                    Picker(L("Window", "Periode"), selection: $windowID) {
+                        Text(L("Lowest for this account", "Lavest for denne kontoen")).tag("")
+                        ForEach(selectedSnapshot?.windows ?? []) { window in
+                            Text(Localized.windowLabel(window.label)).tag(window.id)
+                        }
+                        if !windowID.isEmpty && selectedSnapshot?.windows.contains(where: { $0.id == windowID }) != true {
+                            Text(L("Selected window unavailable", "Valgt periode er utilgjengelig")).tag(windowID)
+                        }
+                    }
+                }
+            } header: {
+                Text(L("Menu Bar", "Menylinje"))
+            } footer: {
+                Text(L("Percentages show remaining allowance, not a combined balance. Hover over the menu-bar item for its source. Cached readings are dimmed; missing percentages show —.",
+                       "Prosent viser gjenværende kvote, ikke en samlet saldo. Hold pekeren over menylinjeikonet for å se kilden. Bufrede avlesninger dempes; manglende prosent vises som —."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Section {
                 Toggle(SpendCopy.settingsToggle, isOn: Binding(
@@ -646,6 +691,15 @@ struct GeneralPane: View {
         .scrollDisabled(true)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func accountTitle(_ snapshot: UsageSnapshot) -> String {
+        let provider = model.providerName(snapshot.providerID)
+        let label = snapshot.account.label ?? L("Default", "Standard")
+        let duplicates = model.snapshots.filter {
+            $0.providerID == snapshot.providerID && $0.account.label == snapshot.account.label
+        }.count > 1
+        return "\(provider) · \(label)" + (duplicates ? " · \(snapshot.account.id.suffix(8))" : "")
     }
 }
 #endif
