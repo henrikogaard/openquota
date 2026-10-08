@@ -48,6 +48,14 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public var isStale: Bool
     /// Short, user-readable error when the last refresh failed.
     public var errorMessage: String?
+    public var lastAttemptedAt: Date?
+    public var credentialSource: CredentialSource?
+
+    /// Empty first-failure/waiting snapshots are not successful readings.
+    public var lastSuccessfulAt: Date? {
+        windows.contains { $0.used != nil || $0.remaining != nil } || creditsRemaining != nil
+            ? fetchedAt : nil
+    }
 
     public init(
         account: AccountIdentity,
@@ -57,7 +65,9 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         creditsUnit: String? = nil,
         fetchedAt: Date = Date(),
         isStale: Bool = false,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        lastAttemptedAt: Date? = nil,
+        credentialSource: CredentialSource? = nil
     ) {
         self.account = account
         self.providerID = providerID
@@ -67,6 +77,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         self.fetchedAt = fetchedAt
         self.isStale = isStale
         self.errorMessage = errorMessage
+        self.lastAttemptedAt = lastAttemptedAt
+        self.credentialSource = credentialSource
     }
 
     /// Worst remaining percent across consumption windows — drives the menu-bar number.

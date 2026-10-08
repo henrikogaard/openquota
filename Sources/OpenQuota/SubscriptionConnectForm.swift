@@ -71,6 +71,7 @@ struct SubscriptionConnectForm: View {
                     fieldLabel(L("Label", "Navn"))
                     TextField(L("Label", "Navn"), text: $codexLabel, prompt: Text(Self.codexDefaultLabel))
                         .labelsHidden().textFieldStyle(.roundedBorder)
+                        .disabled(model.codexLoginBusy)
                 }
                 GridRow {
                     fieldLabel("Codex CLI")

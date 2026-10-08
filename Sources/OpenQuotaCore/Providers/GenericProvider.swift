@@ -150,9 +150,21 @@ public struct GenericProvider: UsageProvider {
         try saveConfiguredKeys(entries)
     }
 
-    func replaceKey(_ secret: String, accountID: String, label: String?) throws -> AccountIdentity {
-        guard let entry = try configuredKeys().first(where: { $0.id == accountID }) else {
+    public func replaceKey(_ secret: String, accountID: String, label: String? = nil) throws -> AccountIdentity {
+        let secret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !secret.isEmpty else {
+            throw ProviderError.badResponse(Localized.text("Enter a credential.", "Skriv inn en nøkkel."))
+        }
+        let entries = try configuredKeys()
+        guard let entry = entries.first(where: { $0.id == accountID }) else {
             throw ProviderError.notLoggedIn
+        }
+        for other in entries where other.id != accountID {
+            if try credentials.secret(for: credentialKey(other.id)) == secret {
+                throw ProviderError.badResponse(Localized.text(
+                    "This credential is already saved for another account.",
+                    "Denne nøkkelen er allerede lagret for en annen konto."))
+            }
         }
         try credentials.setSecret(secret, for: credentialKey(accountID))
         let resolvedLabel = label ?? entry.label

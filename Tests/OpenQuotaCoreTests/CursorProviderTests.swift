@@ -65,6 +65,32 @@ final class CursorProviderTests: XCTestCase {
         XCTAssertTrue(http.requests.isEmpty)
     }
 
+    func testReplaceSessionTokenPreservesSameUserAccountAndLabel() async throws {
+        let account = try await add()
+
+        try provider.replaceSessionToken("alice::replacement-token", accountID: account.id)
+
+        let accounts = try await provider.accounts()
+        let replaced = try XCTUnwrap(accounts.first { $0.id == account.id })
+        XCTAssertEqual(replaced.id, account.id)
+        XCTAssertEqual(replaced.account.label, "Personal")
+        XCTAssertEqual(
+            try credentials.secret(for: "cursor/\(account.id)"), "alice::replacement-token")
+    }
+
+    func testReplaceSessionTokenRejectsDifferentOrMissingOldUserWithoutMutation() async throws {
+        let account = try await add()
+
+        XCTAssertThrowsError(try provider.replaceSessionToken("bob::replacement-token", accountID: account.id))
+        XCTAssertEqual(try credentials.secret(for: "cursor/\(account.id)"), "alice::dummy-token")
+
+        try credentials.removeSecret(for: "cursor/\(account.id)")
+        XCTAssertThrowsError(try provider.replaceSessionToken("alice::replacement-token", accountID: account.id))
+        XCTAssertNil(try credentials.secret(for: "cursor/\(account.id)"))
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.map(\.id), [account.id])
+    }
+
     func testLegacyAccountIsUsedOnlyForMatchingIdentity() async throws {
         try credentials.setSecret("alice::legacy-token", for: "cursor/session")
         let accounts = try await provider.accounts()

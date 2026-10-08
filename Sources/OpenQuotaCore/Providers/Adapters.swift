@@ -553,6 +553,37 @@ public struct CursorProvider: UsageProvider {
         try storage.renameKey(accountID: accountID, label: label)
     }
 
+    public func replaceSessionToken(_ raw: String, accountID: String) throws {
+        guard let parsed = parseToken(raw) else {
+            throw ProviderError.badResponse(Localized.text(
+                "Paste the session value in userID::token format.",
+                "Lim inn øktverdien i formatet userID::token."))
+        }
+        try checkExpiry(parsed.jwt)
+        let canonical = "\(parsed.userID)::\(parsed.jwt)"
+        if try storage.configuredKeys().contains(where: { $0.id == accountID }) {
+            guard let old = try credentials.secret(for: storage.credentialKey(accountID)),
+                  let previous = parseToken(old) else {
+                throw ProviderError.badResponse(Localized.text(
+                    "The old session is missing or unreadable, so its account cannot be verified. Remove this entry and add the account again.",
+                    "Den gamle økten mangler eller kan ikke leses, så kontoen kan ikke bekreftes. Fjern oppføringen og legg til kontoen på nytt."))
+            }
+            guard previous.userID == parsed.userID else {
+                throw ProviderError.badResponse(Localized.text(
+                    "This session belongs to a different Cursor account. Use Add Account instead.",
+                    "Denne økten tilhører en annen Cursor-konto. Bruk Legg til konto i stedet."))
+            }
+            _ = try storage.replaceKey(canonical, accountID: accountID)
+        } else {
+            guard let old = try credentials.secret(for: "cursor/session"),
+                  let previous = parseToken(old), previous.userID == parsed.userID,
+                  accountID == AccountIdentity.makeID(providerID: id, identityKey: previous.userID) else {
+                throw ProviderError.notLoggedIn
+            }
+            try credentials.setSecret(canonical, for: "cursor/session")
+        }
+    }
+
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
         let raw: String?
         if try storage.configuredKeys().contains(where: { $0.id == account.id }) {

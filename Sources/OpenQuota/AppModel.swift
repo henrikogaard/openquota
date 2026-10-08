@@ -234,10 +234,16 @@ final class AppModel {
     func startCodexLogin(
         label: String,
         executablePath: String?,
+        existingConnection: SubscriptionConnection? = nil,
         openAuthURL: @escaping @MainActor @Sendable (URL) -> Void
     ) {
         guard !isDemo, !codexLoginBusy else { return }
-        let normalizedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existingConnection, existingConnection.kind != .codexAppServer {
+            codexLoginStatus = L("This connection can't sign in with Codex.", "Denne tilkoblingen kan ikke logge inn med Codex.")
+            return
+        }
+        let normalizedLabel = existingConnection?.label
+            ?? label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedLabel.isEmpty else {
             codexLoginStatus = L("Enter an account label.", "Skriv inn et kontonavn.")
             return
@@ -247,24 +253,33 @@ final class AppModel {
             codexLoginStatus = L("Choose an absolute Codex executable path.", "Velg en absolutt sti til Codex.")
             return
         }
-        guard let executable = CodexExecutableResolver.resolve(
-            preferredPath: expandedPath) else {
-            codexLoginStatus = L("Codex CLI was not found. Install it or choose its executable.", "Fant ikke Codex CLI. Installer den eller velg filen.")
-            return
-        }
-        let id = UUID()
-        let home: URL
-        do {
-            let candidate = SubscriptionConnection(
+        let connection: SubscriptionConnection
+        if let existingConnection {
+            connection = existingConnection
+        } else {
+            let id = UUID()
+            connection = SubscriptionConnection(
                 id: id,
                 kind: .codexAppServer,
                 label: normalizedLabel,
                 directory: subscriptionStore.appOwnedConnectionsDirectory
                     .appendingPathComponent(id.uuidString.lowercased(), isDirectory: true)
                     .appendingPathComponent("codex-home", isDirectory: true).path)
-            home = try subscriptionStore.codexHome(for: candidate)
+        }
+        let home: URL
+        do {
+            home = try subscriptionStore.codexHome(for: connection)
         } catch {
             codexLoginStatus = L("Couldn't prepare a private Codex account home.", "Kunne ikke klargjøre en privat Codex-kontomappe.")
+            return
+        }
+        let savedExecutablePath = existingConnection.flatMap {
+            try? subscriptionStore.codexExecutable(for: $0)?.path
+        }
+        let preferredPath = expandedPath ?? savedExecutablePath
+        guard let executable = CodexExecutableResolver.resolve(
+            preferredPath: preferredPath) else {
+            codexLoginStatus = L("Codex CLI was not found. Install it or choose its executable.", "Fant ikke Codex CLI. Installer den eller velg filen.")
             return
         }
 
@@ -287,16 +302,14 @@ final class AppModel {
                     })
                 try Task.checkCancellation()
                 guard self.codexLoginGeneration == generation else { return }
-                let pendingConnection = SubscriptionConnection(
-                    id: id,
-                    kind: .codexAppServer,
-                    label: normalizedLabel,
-                    directory: home.path)
                 if expandedPath != nil {
                     try self.subscriptionStore.setCodexExecutable(
-                        executable, for: pendingConnection)
+                        executable, for: connection)
                 }
-                _ = try self.subscriptionStore.addCodex(id: id, label: normalizedLabel)
+                if existingConnection == nil {
+                    _ = try self.subscriptionStore.addCodex(
+                        id: connection.id, label: normalizedLabel)
+                }
                 self.codexLoginBusy = false
                 self.codexLoginTask = nil
                 self.codexLoginStatus = Self.codexConnectedStatus
@@ -348,6 +361,21 @@ final class AppModel {
         guard !isDemo, let cursor = providers.compactMap({ $0 as? CursorProvider }).first else { return }
         _ = try cursor.addSessionToken(raw, label: label)
         refreshNow()
+    }
+
+    func replaceCredential(_ secret: String, for account: AccountDescriptor) async throws {
+        guard !isDemo else { return }
+        if let generic = specProviders().first(where: { $0.id == account.account.providerID }) {
+            _ = try generic.replaceKey(secret, accountID: account.id)
+        } else if account.account.providerID == "cursor",
+                  let cursor = providers.compactMap({ $0 as? CursorProvider }).first {
+            try cursor.replaceSessionToken(secret, accountID: account.id)
+        } else {
+            throw ProviderError.notLoggedIn
+        }
+        await store.remove(accountID: account.id)
+        await pullFromStore()
+        configurationChanged()
     }
 
     func removeAccount(_ account: AccountDescriptor) throws {
@@ -411,9 +439,36 @@ final class AppModel {
 
     func sourceNote(_ id: String) -> String? {
         switch id {
-        case "claude": L("Claude Code status line · updates while you use Claude Code", "Claude Code-statuslinje · oppdateres mens du bruker Claude Code")
-        case "codex": L("Codex managed ChatGPT sign-in · subscription limits", "ChatGPT-pålogging via Codex · abonnementsgrenser")
-        default: nil
+        case "claude":
+            L("Claude Code status line · updates while you use Claude Code",
+              "Claude Code-statuslinje · oppdateres mens du bruker Claude Code")
+        case "codex":
+            L("Codex app-server · subscription data returned by ChatGPT",
+              "Codex-appserver · abonnementsdata fra ChatGPT")
+        case "cursor":
+            L("Cursor's unofficial dashboard endpoint; not an official subscription API",
+              "Uoffisielt Cursor-kontrollpanelendepunkt; ikke et offisielt abonnements-API")
+        case "opencode", "opencode-go":
+            L("OpenCode Go workspace usage endpoint · one key per workspace subscription",
+              "Bruksendepunkt for OpenCode Go-arbeidsområde · én nøkkel per arbeidsområdeabonnement")
+        default:
+            L("Usage as reported by \(providerName(id)); OpenQuota does not independently verify provider figures.",
+              "Bruk rapportert av \(providerName(id)); OpenQuota bekrefter ikke leverandørtall uavhengig.")
+        }
+    }
+
+    func isExperimentalProvider(_ providerID: String) -> Bool {
+        if providerID == "cursor" { return true }
+        let canonicalID = providerID == "opencode" ? "opencode-go" : providerID
+        return specProviders().contains { $0.id == canonicalID && $0.unverified }
+    }
+
+    func credentialSourceName(_ source: CredentialSource) -> String {
+        switch source {
+        case .userSuppliedKey: L("Keychain · added in OpenQuota", "Nøkkelring · lagt til i OpenQuota")
+        case .configFile: L("Local provider file", "Lokal leverandørfil")
+        case .keychainItem: L("Provider Keychain item", "Nøkkelringoppføring fra leverandøren")
+        case .environment: L("Environment variable", "Miljøvariabel")
         }
     }
 }

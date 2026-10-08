@@ -75,8 +75,11 @@ struct AccountsPane: View {
                         if !rows.isEmpty {
                             Section(section) {
                                 ForEach(rows) { item in
-                                    AccountListRow(providerID: item.providerID,
-                                                   name: model.providerName(item.providerID), title: item.title)
+                                    AccountListRow(
+                                        providerID: item.providerID,
+                                        name: model.providerName(item.providerID),
+                                        title: item.title,
+                                        isExperimental: model.isExperimentalProvider(item.providerID))
                                         .tag(item.id)
                                 }
                             }
@@ -224,16 +227,31 @@ struct AccountListRow: View {
     var providerID: String
     var name: String
     var title: String
+    var isExperimental = false
 
     var body: some View {
         HStack(spacing: 8) {
             ProviderGlyph(providerID: providerID, name: name, size: 24)
             VStack(alignment: .leading, spacing: 1) {
-                Text(name)
+                HStack(spacing: 5) {
+                    Text(name)
+                    if isExperimental { ExperimentalBadge() }
+                }
                 Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+struct ExperimentalBadge: View {
+    var body: some View {
+        Text(L("Experimental", "Eksperimentell"))
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.primary.opacity(0.045), in: Capsule())
     }
 }
 
@@ -243,11 +261,49 @@ struct AccountDetail: View {
     var onChange: () -> Void
     @State private var label = ""
     @State private var errorText: String?
+    @State private var replacingAccount: AccountDescriptor?
 
     private var snapshot: UsageSnapshot? {
         switch item.kind {
         case .saved(let account): model.snapshots.first { $0.account.id == account.id }
         default: model.snapshots.first { $0.providerID == item.providerID && $0.account.label == item.title }
+        }
+    }
+
+    private var isExperimental: Bool {
+        model.isExperimentalProvider(item.providerID)
+    }
+
+    private var localRecoveryNote: String? {
+        let name = model.providerName(item.providerID)
+        let rejected = snapshot?.errorMessage == ProviderError.unauthorized.userMessage
+        switch item.kind {
+        case .profile(let profile):
+            let expandedPath = (profile.credentialPath as NSString).expandingTildeInPath
+            if !FileManager.default.fileExists(atPath: expandedPath) {
+                return L(
+                    "Credential file is missing. Sign in again in the \(name) CLI, then Refresh.",
+                    "Påloggingsfilen mangler. Logg inn på nytt i \(name)-CLI-en, og oppdater deretter.")
+            }
+            if rejected {
+                return L(
+                    "The provider rejected this saved sign-in. Sign in again in the \(name) CLI, then Refresh.",
+                    "Leverandøren avviste denne påloggingen. Logg inn på nytt i \(name)-CLI-en, og oppdater deretter.")
+            }
+            return L(
+                "Sign in again in the \(name) CLI if needed, then Refresh. Credential file: \(profile.credentialPath)",
+                "Logg inn på nytt i \(name)-CLI-en ved behov, og oppdater deretter. Påloggingsfil: \(profile.credentialPath)")
+        case .detected:
+            if rejected {
+                return L(
+                    "The provider rejected this local sign-in. Sign in again in the \(name) CLI, then Refresh.",
+                    "Leverandøren avviste denne lokale påloggingen. Logg inn på nytt i \(name)-CLI-en, og oppdater deretter.")
+            }
+            return L(
+                "If this local sign-in is rejected, sign in again in the \(name) CLI, then Refresh.",
+                "Hvis denne lokale påloggingen avvises, logg inn på nytt i \(name)-CLI-en, og oppdater deretter.")
+        default:
+            return nil
         }
     }
 
@@ -258,11 +314,13 @@ struct AccountDetail: View {
                     HStack(spacing: 6) {
                         ProviderGlyph(providerID: item.providerID, name: model.providerName(item.providerID), size: 20)
                         Text(model.providerName(item.providerID))
+                        if isExperimental { ExperimentalBadge() }
                     }
                 }
                 if case .saved(let account) = item.kind {
                     TextField(L("Label", "Navn"), text: $label)
                         .onSubmit { rename(account) }
+                        .disabled(model.codexLoginBusy)
                 } else {
                     LabeledContent(L("Label", "Navn"), value: item.title)
                 }
@@ -281,8 +339,87 @@ struct AccountDetail: View {
                     }
                 }
             }
+            if let snapshot {
+                Section(L("Freshness", "Oppdatering")) {
+                    if let successfulAt = snapshot.lastSuccessfulAt {
+                        LabeledContent(L("Last successful reading", "Siste vellykkede måling")) {
+                            Text(timestamp(successfulAt))
+                        }
+                        if snapshot.isStale {
+                            Text(L("Saved reading", "Lagret måling"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        LabeledContent(L("Last successful reading", "Siste vellykkede måling")) {
+                            Text(L("No successful reading yet", "Ingen vellykket måling ennå"))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if snapshot.errorMessage != nil, let attemptedAt = snapshot.lastAttemptedAt {
+                        LabeledContent(L("Last attempt", "Siste forsøk")) {
+                            Text(timestamp(attemptedAt))
+                        }
+                    }
+                }
+            }
             if let note {
                 Section { Text(note).foregroundStyle(.secondary) }
+            }
+            if let sourceNote = model.sourceNote(item.providerID) {
+                Section(L("Data source", "Datakilde")) {
+                    Text(sourceNote).foregroundStyle(.secondary)
+                }
+            }
+            if let recovery = localRecoveryNote {
+                Section(L("Sign-in", "Pålogging")) {
+                    Text(recovery).foregroundStyle(.secondary)
+                    Button(L("Refresh", "Oppdater")) { model.refreshNow() }
+                        .disabled(model.refreshing || model.isDemo)
+                }
+            }
+            if case .saved(let account) = item.kind {
+                Section(L("Credential", "Påloggingsinformasjon")) {
+                    Button(L("Replace Credential…", "Bytt påloggingsinformasjon…")) {
+                        replacingAccount = account
+                    }
+                    .disabled(model.isDemo || model.codexLoginBusy)
+                }
+            }
+            if case .subscription(let connection) = item.kind {
+                switch connection.kind {
+                case .codexAppServer:
+                    Section(L("Codex sign-in", "Codex-pålogging")) {
+                        if let status = model.codexLoginStatus {
+                            Text(status).foregroundStyle(model.codexLoginBusy ? Color.secondary : .orange)
+                        }
+                        if model.codexLoginBusy {
+                            HStack {
+                                ProgressView().controlSize(.small)
+                                Spacer()
+                                Button(L("Cancel", "Avbryt")) { model.cancelCodexLogin() }
+                            }
+                        } else {
+                            Button(L("Reconnect with ChatGPT…", "Koble til ChatGPT på nytt…")) {
+                                model.startCodexLogin(
+                                    label: connection.label,
+                                    executablePath: nil,
+                                    existingConnection: connection,
+                                    openAuthURL: { url in NSWorkspace.shared.open(url) })
+                            }
+                            .disabled(model.isDemo)
+                        }
+                    }
+                case .claudeStatusLine:
+                    Section(L("Claude Code", "Claude Code")) {
+                        Text(L(
+                            "OpenQuota reads the installed status line after Claude Code writes a new reading. Use Claude Code, then Refresh; no separate token can be reconnected here.",
+                            "OpenQuota leser den installerte statuslinjen etter at Claude Code skriver en ny måling. Bruk Claude Code, og oppdater deretter; ingen separat nøkkel kan kobles til på nytt her."))
+                            .foregroundStyle(.secondary)
+                        Button(L("Refresh", "Oppdater")) { model.refreshNow() }
+                            .disabled(model.refreshing || model.isDemo)
+                    }
+                }
             }
             if let url = model.dashboardURL(item.providerID) {
                 Section {
@@ -295,24 +432,33 @@ struct AccountDetail: View {
         }
         .formStyle(.grouped)
         .onAppear { label = item.title }
+        .sheet(item: $replacingAccount) { account in
+            ReplaceCredentialSheet(model: model, account: account) {
+                replacingAccount = nil
+                onChange()
+            }
+        }
     }
 
     private var source: String {
+        if let credentialSource = snapshot?.credentialSource {
+            return model.credentialSourceName(credentialSource)
+        }
         switch item.kind {
         case .subscription(let connection):
             connection.kind == .claudeStatusLine ? L("Claude Code status line", "Claude Code-statuslinje") : L("Codex sign-in", "Codex-pålogging")
         case .saved(let account):
             account.account.providerID == "cursor" ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen") : L("API key in Keychain", "API-nøkkel i nøkkelringen")
-        case .profile: L("Credential file", "Påloggingsfil")
-        case .detected: L("Provider CLI on this Mac", "Leverandørens CLI på denne Macen")
+        case .profile: L("Local provider file", "Lokal leverandørfil")
+        case .detected: L("Detected local credential", "Funnet lokal pålogging")
         }
     }
 
     private var note: String? {
         switch item.kind {
         case .saved(let account) where account.account.providerID == "cursor":
-            L("Experimental: unofficial endpoints and a sensitive session token. To renew, add a new Cursor token for the same account. No automatic renewal or browser import.",
-              "Eksperimentell: uoffisielle endepunkter og en sensitiv øktnøkkel. Legg til en ny Cursor-nøkkel for samme konto for å fornye. Ingen automatisk fornyelse eller nettleserimport.")
+            L("Experimental: unofficial endpoints and a sensitive session token. Replacement must be for the same Cursor account. No automatic renewal or browser import.",
+              "Eksperimentell: uoffisielle endepunkter og en sensitiv øktnøkkel. Erstatningen må tilhøre samme Cursor-konto. Ingen automatisk fornyelse eller nettleserimport.")
         case .subscription(let connection) where connection.kind == .claudeStatusLine:
             L("Updates while you use Claude Code. \(connection.directory)", "Oppdateres mens du bruker Claude Code. \(connection.directory)")
         case .profile(let profile) where profile.providerID == "claude" || profile.providerID == "codex":
@@ -322,10 +468,17 @@ struct AccountDetail: View {
             L("Mistral shows 30-day workspace activity, not a personal allowance.", "Mistral viser aktivitet i arbeidsområdet siste 30 dager, ikke en personlig kvote.")
         case .saved(let account) where account.account.providerID == "requesty":
             L("Balance is shared by every key in the organization.", "Saldoen deles av alle nøklene i organisasjonen.")
-        case .saved(let account) where model.specProviders().first { $0.id == account.account.providerID }?.unverified == true:
-            L("Experimental integration. Readings have not been verified against a live account.", "Eksperimentell integrasjon. Målingene er ikke bekreftet mot en ekte konto.")
+        case .saved(let account) where model.isExperimentalProvider(account.account.providerID):
+            L("Experimental integration. Provider-specific readings have not been independently verified.",
+              "Eksperimentell integrasjon. Leverandørspesifikke målinger er ikke bekreftet uavhengig.")
         default: nil
         }
+    }
+
+    private func timestamp(_ date: Date) -> String {
+        date.formatted(
+            .dateTime.year().month(.abbreviated).day().hour().minute()
+                .locale(Localized.appLocale))
     }
 
     private func rename(_ account: AccountDescriptor) {
@@ -335,6 +488,124 @@ struct AccountDetail: View {
             onChange()
         } catch {
             errorText = (error as? ProviderError)?.userMessage ?? L("The label could not be saved.", "Navnet kunne ikke lagres.")
+        }
+    }
+}
+
+private struct ReplaceCredentialSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var model: AppModel
+    var account: AccountDescriptor
+    var onSaved: () -> Void
+    @State private var secret = ""
+    @State private var cursorConsent = false
+    @State private var saving = false
+    @State private var errorText: String?
+
+    private var isCursor: Bool { account.account.providerID == "cursor" }
+    private var canSave: Bool {
+        !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!isCursor || cursorConsent)
+            && !saving
+            && !model.codexLoginBusy
+            && !model.isDemo
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Replace credential", "Bytt påloggingsinformasjon"))
+                .font(.title2.weight(.semibold))
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
+                GridRow {
+                    Text(L("Provider", "Leverandør")).foregroundStyle(.secondary)
+                    Text(model.providerName(account.account.providerID))
+                }
+                GridRow {
+                    Text(L("Account", "Konto")).foregroundStyle(.secondary)
+                    Text(account.account.label ?? L("Default", "Standard"))
+                }
+                GridRow {
+                    Text(L("New credential", "Ny påloggingsinformasjon")).foregroundStyle(.secondary)
+                    SecureField(
+                        isCursor ? "userID::token" : L("Paste a new API key", "Lim inn en ny API-nøkkel"),
+                        text: $secret)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(saving || model.codexLoginBusy)
+                }
+            }
+            Text(isCursor
+                 ? L("The new session must resolve to the same Cursor account. The existing session is checked locally; no browser import or automatic renewal is used.",
+                     "Den nye økten må tilhøre samme Cursor-konto. Den eksisterende økten kontrolleres lokalt; ingen nettleserimport eller automatisk fornyelse brukes.")
+                 : L("Use a key from the same account or workspace. Generic provider keys cannot be matched to an account offline.",
+                     "Bruk en nøkkel fra samme konto eller arbeidsområde. Generiske leverandørnøkler kan ikke knyttes til en konto uten nettforbindelse."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if isCursor {
+                Toggle(
+                    L("I understand this uses an unofficial Cursor session endpoint.", "Jeg forstår at dette bruker et uoffisielt Cursor-øktendepunkt."),
+                    isOn: $cursorConsent)
+                    .disabled(saving || model.codexLoginBusy)
+                Text(L("Experimental integration. Keep this session private; credentials are never shown again.",
+                       "Eksperimentell integrasjon. Hold denne økten privat; påloggingsinformasjonen vises ikke igjen."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let errorText {
+                Text(errorText)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button(L("Cancel", "Avbryt")) { dismiss() }
+                    .disabled(saving)
+                Button(L("Save", "Lagre"), action: save)
+                    .buttonStyle(.glassProminent)
+                    .disabled(!canSave)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 480)
+        .interactiveDismissDisabled(saving)
+    }
+
+    private func save() {
+        guard canSave else { return }
+        saving = true
+        errorText = nil
+        Task {
+            do {
+                try await model.replaceCredential(secret, for: account)
+                secret = ""
+                saving = false
+                onSaved()
+            } catch {
+                errorText = replacementError(error)
+                saving = false
+            }
+        }
+    }
+
+    private func replacementError(_ error: Error) -> String {
+        guard let error = error as? ProviderError else {
+            return L("The credential could not be saved. Check it and try again.",
+                     "Påloggingsinformasjonen kunne ikke lagres. Kontroller den og prøv igjen.")
+        }
+        switch error {
+        case .badResponse(_):
+            return error.userMessage
+        case .notLoggedIn:
+            return isCursor
+                ? L("The existing session could not be verified. Remove this entry and add the account again.",
+                    "Den eksisterende økten kunne ikke bekreftes. Fjern oppføringen og legg til kontoen på nytt.")
+                : L("This saved account could not be found. Refresh Settings and try again.",
+                    "Fant ikke denne lagrede kontoen. Oppdater Innstillinger og prøv igjen.")
+        default:
+            return L("The credential could not be saved. Check it and try again.",
+                     "Påloggingsinformasjonen kunne ikke lagres. Kontroller den og prøv igjen.")
         }
     }
 }

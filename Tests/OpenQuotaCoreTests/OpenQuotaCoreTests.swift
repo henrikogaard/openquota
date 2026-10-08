@@ -76,6 +76,8 @@ final class GenericProviderTests: XCTestCase {
     func test_refreshMapsSpec() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         let credentials = FileCredentialStore(directory: dir)
         let spec = ProviderSpec(
             id: "test", displayName: "Test", url: "https://example.test/usage",

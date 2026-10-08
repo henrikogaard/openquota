@@ -6,14 +6,14 @@ import OpenQuotaCore
 /// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
-        case claude, codex, cursor
+        case claude, codex, cursor, openCodeMethods
         case apiKey(String)
         case profile(String)
 
         /// Forms with a primary button draw their own Cancel/Add bar.
         var ownsActions: Bool {
             switch self {
-            case .claude, .codex: false
+            case .claude, .codex, .openCodeMethods: false
             case .cursor, .apiKey, .profile: true
             }
         }
@@ -29,25 +29,47 @@ struct AddAccountSheet: View {
     var model: AppModel
     var onDone: () -> Void
     @State private var target: Target?
+    @State private var backTarget: Target?
     @State private var search = ""
     @FocusState private var searchFocused: Bool
 
-    private var sections: [(title: String, tiles: [Tile])] {
-        let subscriptions = [
-            Tile(target: .claude, providerID: "claude", name: "Claude Code"),
-            Tile(target: .codex, providerID: "codex", name: "Codex / ChatGPT"),
+    private var tiles: [Tile] {
+        var byCanonicalID: [String: Tile] = [
+            "claude": Tile(target: .claude, providerID: "claude", name: "Claude Code"),
+            "codex": Tile(target: .codex, providerID: "codex", name: "Codex / ChatGPT"),
+            "cursor": Tile(
+                target: .cursor, providerID: "cursor",
+                name: L("Cursor · Experimental", "Cursor · Eksperimentell")),
         ]
-        let signIns = [Tile(target: .cursor, providerID: "cursor", name: L("Cursor (Experimental)", "Cursor (eksperimentell)"))]
-            + AppModel.credentialPaths.keys.sorted().map {
-                Tile(target: .profile($0), providerID: $0, name: model.providerName($0))
+        for provider in model.specProviders() {
+            let id = canonicalProviderID(provider.id)
+            guard byCanonicalID[id] == nil else { continue }
+            let target: Target = id == "opencode-go" ? .openCodeMethods : .apiKey(provider.id)
+            byCanonicalID[id] = Tile(target: target, providerID: id, name: provider.displayName)
+        }
+        for id in AppModel.credentialPaths.keys {
+            let canonicalID = canonicalProviderID(id)
+            if canonicalID == "opencode-go" {
+                byCanonicalID[canonicalID] = byCanonicalID[canonicalID]
+                    ?? Tile(
+                        target: .openCodeMethods, providerID: canonicalID,
+                        name: model.providerName(canonicalID))
+                continue
             }
-        let keys = model.specProviders()
-            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-            .map { Tile(target: .apiKey($0.id), providerID: $0.id, name: $0.displayName) }
-        return [(L("Subscriptions", "Abonnementer"), subscriptions), (L("Sign-Ins", "Pålogginger"), signIns),
-                (L("API Keys", "API-nøkler"), keys)]
-            .map { ($0.0, $0.1.filter(matches)) }
-            .filter { !$0.1.isEmpty }
+            guard byCanonicalID[canonicalID] == nil else { continue }
+            byCanonicalID[canonicalID] = Tile(
+                target: .profile(id), providerID: id, name: model.providerName(id))
+        }
+        return byCanonicalID.values
+            .filter(matches)
+            .sorted {
+                let order = $0.name.localizedCaseInsensitiveCompare($1.name)
+                return order == .orderedSame ? $0.providerID < $1.providerID : order == .orderedAscending
+            }
+    }
+
+    private func canonicalProviderID(_ id: String) -> String {
+        id == "opencode" ? "opencode-go" : id
     }
 
     private func matches(_ tile: Tile) -> Bool {
@@ -60,7 +82,18 @@ struct AddAccountSheet: View {
         case .claude: "Claude Code"
         case .codex: "Codex / ChatGPT"
         case .cursor: "Cursor"
+        case .openCodeMethods: model.providerName("opencode-go")
         case .apiKey(let id), .profile(let id): model.providerName(id)
+        }
+    }
+
+    private var sheetHeight: CGFloat {
+        switch target {
+        case nil: 470
+        case .some(.cursor): 480
+        case .some(.openCodeMethods): 300
+        case .some(.profile(_)): 420
+        default: 340
         }
     }
 
@@ -85,14 +118,21 @@ struct AddAccountSheet: View {
                 .padding(12)
             }
         }
-        .frame(width: 560, height: target == .cursor ? 480 : (target == nil ? 470 : (target.map { if case .profile = $0 { true } else { false } } == true ? 420 : 340)))
+        .frame(width: 560, height: sheetHeight)
         .onAppear { searchFocused = true }
     }
 
     private var header: some View {
         HStack(spacing: 8) {
             if let target {
-                Button { self.target = nil } label: {
+                Button {
+                    if let backTarget {
+                        self.target = backTarget
+                        self.backTarget = nil
+                    } else {
+                        self.target = nil
+                    }
+                } label: {
                     Label(L("Back", "Tilbake"), systemImage: "chevron.left").labelStyle(.iconOnly)
                 }
                 .buttonStyle(.glass)
@@ -116,30 +156,26 @@ struct AddAccountSheet: View {
     private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                ForEach(sections, id: \.title) { section in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(section.title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-                            ForEach(section.tiles) { tile in
-                                Button { target = tile.target } label: {
-                                    VStack(spacing: 8) {
-                                        ProviderGlyph(providerID: tile.providerID, name: tile.name, size: 32)
-                                        Text(tile.name)
-                                            .font(.callout)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.85)
-                                    }
-                                    .frame(maxWidth: .infinity, minHeight: 76)
-                                    .contentShape(.rect(cornerRadius: 12))
-                                }
-                                .buttonStyle(ProviderTileStyle())
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                    ForEach(tiles) { tile in
+                        Button {
+                            target = tile.target
+                            backTarget = nil
+                        } label: {
+                            VStack(spacing: 8) {
+                                ProviderGlyph(providerID: tile.providerID, name: tile.name, size: 32)
+                                Text(tile.name)
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
                             }
+                            .frame(maxWidth: .infinity, minHeight: 76)
+                            .contentShape(.rect(cornerRadius: 12))
                         }
+                        .buttonStyle(ProviderTileStyle())
                     }
                 }
-                if sections.isEmpty {
+                if tiles.isEmpty {
                     ContentUnavailableView.search(text: search)
                 }
             }
@@ -156,6 +192,27 @@ struct AddAccountSheet: View {
             SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone)
         case .cursor:
             CursorSessionForm(model: model, onDone: onDone)
+        case .openCodeMethods:
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L(
+                    "One OpenCode login can have several workspace subscriptions, each with its own key. Your main sign-in is detected automatically.",
+                    "Én OpenCode-pålogging kan ha flere arbeidsområdeabonnementer, hvert med sin egen nøkkel. Hovedpåloggingen oppdages automatisk."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(L("Add workspace subscription", "Legg til arbeidsområdeabonnement")) {
+                    backTarget = .openCodeMethods
+                    target = .apiKey("opencode-go")
+                }
+                .buttonStyle(.glass)
+                Button(L("Use another sign-in file", "Bruk en annen påloggingsfil")) {
+                    backTarget = .openCodeMethods
+                    target = .profile("opencode")
+                }
+                .buttonStyle(.glass)
+                Spacer()
+            }
+            .padding(20)
         case .apiKey(let id):
             if let provider = model.specProviders().first(where: { $0.id == id }) {
                 APIKeyForm(model: model, provider: provider, onDone: onDone)

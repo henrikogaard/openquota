@@ -36,10 +36,14 @@ struct PopoverView: View {
                             SpendPanel(model: model)
                             ForEach(groups, id: \.providerID) { group in
                                 ProviderSection(
+                                    model: model,
                                     providerID: group.providerID,
                                     name: model.providerName(group.providerID),
                                     dashboardURL: model.dashboardURL(group.providerID),
-                                    snapshots: group.snapshots)
+                                    snapshots: group.snapshots,
+                                    isExperimental: group.snapshots.contains {
+                                        model.isExperimentalProvider($0.providerID)
+                                    })
                             }
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
@@ -71,7 +75,7 @@ struct PopoverView: View {
     }
 
     private var lastUpdated: Date? {
-        model.snapshots.filter { $0.errorMessage == nil }.map(\.fetchedAt).max()
+        model.snapshots.compactMap(\.lastSuccessfulAt).max()
     }
 
     private var footer: some View {
@@ -144,10 +148,12 @@ struct PopoverView: View {
 /// One provider: header (glyph, name, plan, usage page), then each account's
 /// windows, balance, freshness and errors — nothing hidden behind a click.
 struct ProviderSection: View {
+    var model: AppModel
     var providerID: String
     var name: String
     var dashboardURL: URL?
     var snapshots: [UsageSnapshot]
+    var isExperimental = false
 
     private var single: UsageSnapshot? { snapshots.count == 1 ? snapshots[0] : nil }
 
@@ -164,6 +170,7 @@ struct ProviderSection: View {
             HStack(spacing: 8) {
                 ProviderGlyph(providerID: providerID, name: name, size: 22)
                 Text(name).font(.system(size: 13, weight: .semibold))
+                if isExperimental { ExperimentalBadge() }
                 if let subtitle {
                     Text(subtitle)
                         .font(.system(size: 11))
@@ -186,18 +193,25 @@ struct ProviderSection: View {
             }
             ForEach(Array(snapshots.enumerated()), id: \.element.account.id) { index, snapshot in
                 if index > 0 { Divider().opacity(0.5) }
-                AccountUsage(snapshot: snapshot, showsHeader: single == nil)
+                AccountUsage(
+                    snapshot: snapshot,
+                    showsHeader: single == nil,
+                    credentialSourceName: snapshot.credentialSource.map {
+                        model.credentialSourceName($0)
+                    })
             }
         }
         .padding(Tokens.modulePadding)
         .glassEffect(.regular, in: .rect(cornerRadius: Tokens.moduleRadius))
     }
+
 }
 
 /// Every window of one account, plus balance, freshness and errors.
 struct AccountUsage: View {
     var snapshot: UsageSnapshot
     var showsHeader: Bool
+    var credentialSourceName: String?
 
     private var balance: String? {
         guard let credits = snapshot.creditsRemaining,
@@ -240,8 +254,24 @@ struct AccountUsage: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            if snapshot.isStale {
-                Text(L("Last updated", "Sist oppdatert") + " " + snapshot.fetchedAt.formatted(.relative(presentation: .named).locale(Localized.appLocale)))
+            if let lastSuccessfulAt = snapshot.lastSuccessfulAt {
+                Text(
+                    (snapshot.isStale
+                        ? L("Saved reading · last successful", "Lagret måling · sist vellykket")
+                        : L("Last successful", "Sist vellykket"))
+                        + " " + lastSuccessfulAt.formatted(
+                            .relative(presentation: .named).locale(Localized.appLocale)))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            if snapshot.errorMessage != nil, let attemptedAt = snapshot.lastAttemptedAt {
+                Text(L("Last attempt", "Siste forsøk") + " " + attemptedAt.formatted(
+                    .relative(presentation: .named).locale(Localized.appLocale)))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            if let credentialSourceName {
+                Text(credentialSourceName)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

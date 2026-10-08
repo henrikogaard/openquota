@@ -100,6 +100,7 @@ public actor SnapshotStore {
                 )
             }
         }
+        snapshots[accountID]?.lastAttemptedAt = Date()
         return true
     }
 

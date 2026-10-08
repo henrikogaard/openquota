@@ -20,6 +20,25 @@ final class RefreshLifecycleTests: XCTestCase {
         XCTAssertEqual(stats.fetches, 1)
     }
 
+    func test_repeatedForcedRefreshKeepsAccountStateBounded() async {
+        let account = descriptor("p@one", label: "Primary")
+        let probe = RefreshTestProbe()
+        let provider = RefreshTestProvider(id: "p", accounts: [account], probe: probe)
+        let store = SnapshotStore()
+        let scheduler = RefreshScheduler(providers: [provider], store: store)
+
+        for _ in 0..<200 {
+            await scheduler.refreshAll(force: true)
+        }
+
+        let stats = await probe.stats()
+        let state = await store.state()
+        XCTAssertEqual(stats.discoveries, 200)
+        XCTAssertEqual(stats.fetches, 200)
+        XCTAssertEqual(Set(state.snapshots.keys), [account.account.id])
+        XCTAssertFalse(state.isRefreshing)
+    }
+
     func test_refreshConcurrencyIsBoundedByConfig() async {
         let accounts = (0..<9).map { descriptor("p@\($0)") }
         let probe = RefreshTestProbe(fetchDelayNanoseconds: 25_000_000)

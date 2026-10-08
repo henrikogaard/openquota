@@ -183,7 +183,7 @@ public actor RefreshScheduler {
         provider: any UsageProvider, account: AccountDescriptor
     ) async -> Result<UsageSnapshot, ProviderError>? {
         do {
-            let snapshot = try await withThrowingTaskGroup(of: UsageSnapshot.self) { group in
+            var snapshot = try await withThrowingTaskGroup(of: UsageSnapshot.self) { group in
                 group.addTask { try await provider.refresh(account: account) }
                 group.addTask {
                     try await Task.sleep(for: .seconds(self.config.fetchTimeout))
@@ -193,6 +193,7 @@ public actor RefreshScheduler {
                 group.cancelAll()
                 return first
             }
+            snapshot.credentialSource = account.source
             return Task.isCancelled ? nil : .success(snapshot)
         } catch let error as ProviderError {
             return Task.isCancelled ? nil : .failure(error)
