@@ -9,8 +9,16 @@ remaining percentage, pin an account/window, or keep the menu bar icon-only.
 [Account guide](docs/accounts.md) · [Troubleshooting](docs/troubleshooting.md) ·
 [Privacy](docs/privacy.md) · [Development](docs/development.md) · [Design](DESIGN.md)
 
-> These docs describe this branch. Unmerged features may not be in the latest
-> release; check its release notes for shipped changes.
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/popover-light.png" width="340" alt="OpenQuota in light appearance, showing estimated spend and Claude and Codex allowance in English">
+  <img src="docs/screenshots/popover-dark-nb.png" width="340" alt="OpenQuota in dark appearance, showing the same demo readings in Norwegian Bokmål">
+</p>
+
+Native macOS screenshots with synthetic **Demo Data**: English in light appearance
+and Norwegian Bokmål in dark appearance. These illustrate the UI, not live
+provider accuracy. Estimated spend is API-rate value, not a subscription bill.
 
 ## Getting started
 
@@ -57,8 +65,9 @@ Each saved key/session has its own row. Other local providers discover their def
 
 **Mistral personal Vibe allowance is not supported.** The legacy Admin-analytics
 connector measures workspace activity, not personal allowance. Do not create
-Studio or Admin keys for this purpose. Hiding that connector is tracked separately
-in [PR #8](https://github.com/henrikogaard/openquota/pull/8).
+Studio or Admin keys for this purpose. Mistral is temporarily hidden from setup
+and usage, with no background polling. Saved accounts and Keychain entries are
+retained.
 
 Provider mappings are fixture-tested, **not a claim that every provider has been verified with a live paid account**. Other providers' endpoints may change; errors retain the last good reading and mark it outdated. Claude and Codex use the documented integration surfaces linked in [provider details](docs/providers.md); their fixture tests do not replace live paid-account validation.
 

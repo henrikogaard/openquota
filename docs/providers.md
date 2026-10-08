@@ -24,6 +24,7 @@ and limits](estimated-spend.md).
 | Synthetic | bearer | `api.synthetic.new/v2/quotas` | unverified |
 | Kilo | bearer | `kilocode.ai/api/users/me/balance` | unverified |
 | Venice | bearer | `api.venice.ai/api/v1/apikeys` | unverified |
+| Mistral Vibe | Disabled | — | Temporarily hidden from setup and usage; no background requests. Saved accounts and keys are retained. No supported personal-allowance source confirmed. |
 | OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 | ClinePass | bearer | `api.cline.bot/api/v1/users/me/plan/usage-limits` | 5h/weekly/monthly % used + resets, unverified |
@@ -38,9 +39,8 @@ and limits](estimated-spend.md).
 Mistral's legacy mapping is not recommended for setup. It does not expose
 personal Vibe allowance; Studio keys cannot authenticate Admin analytics.
 The documented Admin API requires `x-api-key` and Enterprise Backoffice access,
-not the legacy connector's bearer authentication. Hiding that connector while
-preserving saved metadata is tracked in
-[PR #8](https://github.com/henrikogaard/openquota/pull/8). Do not use this table
+not the legacy connector's bearer authentication. The connector is hidden from
+setup and usage, and is not polled; saved metadata and keys are preserved. Do not use this table
 as a reason to create more Mistral keys.
 
 ## Next candidates (from the OpenUsage / CodexBar audit)

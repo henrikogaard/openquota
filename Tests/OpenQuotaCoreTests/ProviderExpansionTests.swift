@@ -617,6 +617,45 @@ final class RegressionTests: XCTestCase {
 }
 
 final class ProviderRegistryTests: XCTestCase {
+    func test_mistralIsHiddenEvenWithCustomSpecAndSavedAccount() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let credentials = FileCredentialStore(directory: home)
+        let http = RecordingHTTP()
+        let provider = GenericProvider(
+            spec: SpecLibrary.mistral, http: http, credentials: credentials,
+            manifestURL: home.appendingPathComponent("mistral-keys.json"))
+        let account = try provider.addKey("dummy-mistral-key", label: "Personal")
+        let registry = ProviderRegistry(
+            http: http, credentials: credentials,
+            extraSpecs: [SpecLibrary.mistral], adapters: [provider],
+            environment: ["PATH": "/usr/bin"])
+
+        XCTAssertFalse(registry.providers.contains { $0.id == "mistral" })
+        XCTAssertFalse(SpecLibrary.all.contains { $0.id == "mistral" })
+        XCTAssertTrue(registry.providers.contains { $0.id == "openrouter" })
+        let saved = try await provider.accounts()
+        XCTAssertEqual(saved.map(\.id), [account.id])
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func test_cachedMistralIsHiddenWithoutRemovingOtherSnapshots() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let cache = SnapshotCache(url: home.appendingPathComponent("snapshots.json"))
+        let mistral = UsageSnapshot(
+            account: AccountIdentity(providerID: "mistral", id: "mistral@saved"),
+            providerID: "mistral", errorMessage: "Old authentication error")
+        let other = UsageSnapshot(
+            account: AccountIdentity(providerID: "openrouter", id: "openrouter@saved"),
+            providerID: "openrouter")
+        try cache.save([mistral.account.id: mistral, other.account.id: other])
+
+        XCTAssertEqual(Set(cache.load().keys), [other.account.id])
+    }
+
     func test_registryContainsSpecsAdaptersAndCLIs() {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

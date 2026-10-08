@@ -18,8 +18,8 @@
 
 Personal Vibe allowance is not supported. Studio keys are not Admin analytics
 keys, and Admin analytics measures organization activity rather than personal
-allowance. Do not keep creating keys or upgrade for this connector. Hiding the
-legacy option is tracked in [PR #8](https://github.com/henrikogaard/openquota/pull/8).
+allowance. Do not keep creating keys or upgrade for this connector. The legacy
+option is hidden and no longer polled; saved accounts and keys are preserved.
 
 ## Keychain prompts
 
