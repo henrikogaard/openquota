@@ -34,10 +34,11 @@ struct MenuBarLabel: View {
                 Image(systemName: symbol)
             }
             if style == .providerAndPercentage {
-                Text(reading.map { model.providerName($0.snapshot.providerID) } ?? "OpenQuota")
+                Text("\(reading.map { model.providerName($0.snapshot.providerID) } ?? "OpenQuota") \(reading.map { "\(Int($0.percentRemaining.rounded()))%" } ?? "—")")
                     .lineLimit(1)
+                    .monospacedDigit()
             }
-            if style != .iconOnly {
+            if style != .iconOnly && style != .providerAndPercentage {
                 Text(reading.map { "\(Int($0.percentRemaining.rounded()))%" } ?? "—")
                     .monospacedDigit()
             }
