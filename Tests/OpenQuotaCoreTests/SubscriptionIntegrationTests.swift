@@ -127,6 +127,28 @@ final class SubscriptionUsageTests: XCTestCase {
         }
     }
 
+    func test_readingSourceCapKeepsMostRecentlyWrittenFiles() throws {
+        let directory = try makeDirectory()
+        let config = try makeDirectory(inside: directory, name: "claude-config")
+        let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
+        let connection = try store.addClaude(label: "Claude", configurationDirectory: config.path)
+        let old = Date(timeIntervalSince1970: 1_700_000_000)
+        for index in 0..<ClaudeReadingSource.maxPerConnection {
+            let source = try XCTUnwrap(ClaudeReadingSource(client: .desktop, accountHash: String(format: "0000000%x", index)))
+            let url = try store.readingURL(for: connection.id, source: source)
+            try Data("{}".utf8).write(to: url)
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
+        }
+        // Sorts after every old file by name, so a name-based cap would drop it.
+        let fresh = try XCTUnwrap(ClaudeReadingSource(client: .desktop, accountHash: "ffffffff"))
+        try Data("{}".utf8).write(to: store.readingURL(for: connection.id, source: fresh))
+
+        let sources = try store.readingSources(for: connection.id)
+        XCTAssertEqual(sources.count, ClaudeReadingSource.maxPerConnection)
+        XCTAssertTrue(sources.contains(fresh))
+        XCTAssertEqual(sources, sources.sorted { $0.fileName < $1.fileName })
+    }
+
     func test_desktopReadingOnAnotherAccountGetsItsOwnCard() async throws {
         let directory = try makeDirectory()
         let config = try makeDirectory(inside: directory, name: "claude-config")

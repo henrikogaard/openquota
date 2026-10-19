@@ -175,13 +175,24 @@ public struct SubscriptionConnectionStore: Sendable {
         try appOwnedDirectory(for: id).appendingPathComponent(source?.fileName ?? "reading.json")
     }
 
-    /// Tagged reading files the bridge has written for a connection, in a
-    /// stable order and capped so a flood of files cannot grow the menu.
+    /// Tagged reading files the bridge has written for a connection, capped
+    /// so a flood of files cannot grow the menu. The most recently written
+    /// files win the cap, so a newly active account is never crowded out;
+    /// the result is in a stable order.
     public func readingSources(for id: UUID) throws -> [ClaudeReadingSource] {
-        let names = try FileManager.default.contentsOfDirectory(atPath: appOwnedDirectory(for: id).path)
-        return Array(names.compactMap(ClaudeReadingSource.init(fileName:))
+        let directory = try appOwnedDirectory(for: id)
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let dated = names.compactMap { name -> (source: ClaudeReadingSource, modified: Date)? in
+            guard let source = ClaudeReadingSource(fileName: name) else { return nil }
+            let modified = (try? directory.appendingPathComponent(name)
+                .resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return (source, modified)
+        }
+        return dated.sorted { $0.modified > $1.modified }
+            .prefix(ClaudeReadingSource.maxPerConnection)
+            .map(\.source)
             .sorted { $0.fileName < $1.fileName }
-            .prefix(ClaudeReadingSource.maxPerConnection))
     }
 
     public func codexHome(for connection: SubscriptionConnection) throws -> URL {
