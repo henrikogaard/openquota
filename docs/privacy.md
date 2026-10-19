@@ -26,8 +26,11 @@ provider-owned files.
 - Networking uses ephemeral sessions without retained cookies or response caches.
 - Cursor is explicitly opt-in, manually supplied, and unofficial. No automatic
   browser import or session renewal occurs.
-- The Claude bridge saves only allowlisted quota fields. It invokes any existing
-  status-line command with its original input; that command stays under your control.
+- The Claude bridge saves only allowlisted quota fields. When Claude Desktop
+  runs it, the reading's file name carries a short hash of Desktop's account
+  ids so another account gets its own card; the ids and email are not saved.
+  It invokes any existing status-line command with its original input; that
+  command stays under your control.
 - Optional spend scanning reads local logs transiently, retaining parsed usage
   rather than prompts/responses. No pricing request uploads your logs.
   See [scan limits and exclusions](estimated-spend.md).

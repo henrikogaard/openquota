@@ -122,7 +122,13 @@ previous `statusLine` object in private app-owned metadata. The helper receives
 Claude Code's documented status-line JSON, retains only `recordedAt`,
 `five_hour.used_percentage`, `five_hour.resets_at`,
 `seven_day.used_percentage`, and `seven_day.resets_at`, and atomically writes
-that sanitized reading. It never saves raw stdin/session context, cwd,
+that sanitized reading. A reading from Claude Desktop, which passes its
+signed-in account to Claude Code, goes to `reading-desktop-<hash>.json`
+instead of `reading.json`, where `<hash>` is eight hex characters derived from
+the account and organization ids. Each such file becomes its own card,
+labeled "<connection> · Desktop", so a Desktop login on another account never
+overwrites the CLI's card. To tag another client, add a case to
+`ClaudeReadingSource.Client`. It never saves raw stdin/session context, cwd,
 transcript or prompt, and it makes no network request. It invokes the previous
 status-line command with the same stdin and forwards its stdout.
 

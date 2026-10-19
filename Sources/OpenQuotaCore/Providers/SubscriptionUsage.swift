@@ -68,6 +68,61 @@ public struct ClaudeUsageReading: Codable, Sendable, Equatable {
     }
 }
 
+/// Which Claude client sent a status-line reading, when it says so. Claude
+/// Desktop starts Claude Code with its own signed-in account in the
+/// environment, and that account can differ from the CLI login in the same
+/// config directory. Tagged readings get their own file and card, so one
+/// account never overwrites another. Only a hash of the account ids is kept.
+/// Untagged readings (the CLI) keep using `reading.json`.
+public struct ClaudeReadingSource: Equatable, Hashable, Sendable {
+    /// Add a case here to tag another client; the file name and card follow.
+    public enum Client: String, CaseIterable, Sendable {
+        case desktop
+
+        public var displayName: String {
+            switch self {
+            case .desktop: Localized.text("Desktop", "Desktop")
+            }
+        }
+    }
+
+    public static let maxPerConnection = 8
+
+    public let client: Client
+    /// Eight lowercase hex characters.
+    public let accountHash: String
+
+    public init?(client: Client, accountHash: String) {
+        guard accountHash.count == 8,
+              accountHash.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else { return nil }
+        self.client = client
+        self.accountHash = accountHash
+    }
+
+    /// The source for a bridge run, from the environment Claude Code passes
+    /// to its status-line command. Nil means an untagged (CLI) reading.
+    public static func from(environment: [String: String]) -> Self? {
+        guard environment["CLAUDE_CODE_ENTRYPOINT"] == "claude-desktop",
+              let account = environment["CLAUDE_CODE_ACCOUNT_UUID"], !account.isEmpty else {
+            return nil
+        }
+        let organization = environment["CLAUDE_CODE_ORGANIZATION_UUID"] ?? ""
+        let id = AccountIdentity.makeID(providerID: "claude", identityKey: "\(account):\(organization)")
+        return Self(client: .desktop, accountHash: String(id.suffix(8)))
+    }
+
+    public init?(fileName: String) {
+        let prefix = "reading-", suffix = ".json"
+        guard fileName.hasPrefix(prefix), fileName.hasSuffix(suffix) else { return nil }
+        let parts = fileName.dropFirst(prefix.count).dropLast(suffix.count)
+            .split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 2, let client = Client(rawValue: String(parts[0])) else { return nil }
+        self.init(client: client, accountHash: String(parts[1]))
+    }
+
+    public var fileName: String { "reading-\(client.rawValue)-\(accountHash).json" }
+}
+
 /// Maps account/rateLimits/read results, not the private ChatGPT HTTP response.
 public enum CodexUsageMapping {
     private struct Response: Decodable {

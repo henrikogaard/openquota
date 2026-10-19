@@ -23,6 +23,13 @@ Claude Code supports separate logins through `CLAUDE_CONFIG_DIR`:
 4. Restart that Claude session and use it normally. After a response, Claude can
    send the documented rate-limit fields through the status-line bridge.
 
+**Claude Desktop on another account.** Desktop uses the normal `~/.claude`
+configuration but its own login. If Desktop runs the status line, its
+readings get a separate card named after the connection plus "· Desktop",
+so they never mix with the CLI's numbers. As of Claude Desktop 2.42304,
+Desktop sessions were not seen running the status line, so this card may
+not appear yet.
+
 Repeat with a different directory per account. Use the same command when
 returning to that profile; normal `claude` keeps its normal configuration unless
 your shell already overrides it.

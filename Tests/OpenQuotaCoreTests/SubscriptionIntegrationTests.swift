@@ -108,6 +108,52 @@ final class SubscriptionUsageTests: XCTestCase {
         }
     }
 
+    func test_readingSourceTagsOnlyDesktopWithAccount() throws {
+        XCTAssertNil(ClaudeReadingSource.from(environment: [:]))
+        XCTAssertNil(ClaudeReadingSource.from(environment: [
+            "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_ACCOUNT_UUID": "a"]))
+        XCTAssertNil(ClaudeReadingSource.from(environment: ["CLAUDE_CODE_ENTRYPOINT": "claude-desktop"]))
+        let a = try XCTUnwrap(ClaudeReadingSource.from(environment: [
+            "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CODE_ACCOUNT_UUID": "a",
+            "CLAUDE_CODE_ORGANIZATION_UUID": "org"]))
+        let b = try XCTUnwrap(ClaudeReadingSource.from(environment: [
+            "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CODE_ACCOUNT_UUID": "b",
+            "CLAUDE_CODE_ORGANIZATION_UUID": "org"]))
+        XCTAssertNotEqual(a, b)
+        XCTAssertEqual(ClaudeReadingSource(fileName: a.fileName), a)
+        for name in ["reading.json", "reading-desktop-XYZ.json", "reading-desktop-ABCDEF12.json",
+                     "reading-other-abcdef12.json", "reading-desktop-abcdef12-x.json", "../reading-desktop-abcdef12.json"] {
+            XCTAssertNil(ClaudeReadingSource(fileName: name), name)
+        }
+    }
+
+    func test_desktopReadingOnAnotherAccountGetsItsOwnCard() async throws {
+        let directory = try makeDirectory()
+        let config = try makeDirectory(inside: directory, name: "claude-config")
+        let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
+        let connection = try store.addClaude(label: "Claude", configurationDirectory: config.path)
+        let desktop = try XCTUnwrap(ClaudeReadingSource(client: .desktop, accountHash: "0123abcd"))
+        let now = Date()
+        try JSONEncoder.openQuota.encode(ClaudeUsageReading(
+            recordedAt: now, fiveHour: .init(usedPercentage: 10, resetsAt: nil), sevenDay: nil))
+            .write(to: store.readingURL(for: connection.id))
+        try JSONEncoder.openQuota.encode(ClaudeUsageReading(
+            recordedAt: now, fiveHour: .init(usedPercentage: 80, resetsAt: nil), sevenDay: nil))
+            .write(to: store.readingURL(for: connection.id, source: desktop))
+
+        let provider = ClaudeStatusLineProvider(connections: [connection], store: store)
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.count, 2)
+        XCTAssertEqual(accounts[0].account.id, connection.accountID)
+        XCTAssertNotEqual(accounts[1].account.id, connection.accountID)
+        XCTAssertEqual(accounts[1].account.label, "Claude · Desktop")
+        let cli = try await provider.refresh(account: accounts[0])
+        let app = try await provider.refresh(account: accounts[1])
+        XCTAssertEqual(cli.windows.first?.used, 10)
+        XCTAssertEqual(app.windows.first?.used, 80)
+        XCTAssertEqual(app.account.id, accounts[1].account.id)
+    }
+
     func test_codexHomeCanBePreparedBeforeConnectionIsSaved() throws {
         let directory = try makeDirectory()
         let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))

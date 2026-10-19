@@ -13,24 +13,17 @@ public struct ClaudeStatusLineProvider: UsageProvider {
         self.store = store
     }
 
+    /// One card per connection, plus one per tagged source (e.g. Claude
+    /// Desktop signed in to another account) that has written a reading.
     public func accounts() async throws -> [AccountDescriptor] {
-        connections.map { connection in
-            AccountDescriptor(
-                account: AccountIdentity(
-                    providerID: id,
-                    id: connection.accountID,
-                    label: connection.label),
-                source: .configFile)
-        }
+        cards().map(\.descriptor)
     }
 
     public func refresh(account: AccountDescriptor) async throws -> UsageSnapshot {
-        guard let connection = connections.first(where: {
-            $0.accountID == account.account.id
-        }) else {
+        guard let card = cards().first(where: { $0.descriptor.id == account.account.id }) else {
             throw ProviderError.notLoggedIn
         }
-        let readingURL = try store.readingURL(for: connection.id)
+        let readingURL = try store.readingURL(for: card.connection.id, source: card.source)
         let handle: FileHandle
         do {
             handle = try FileHandle(forReadingFrom: readingURL)
@@ -58,6 +51,35 @@ public struct ClaudeStatusLineProvider: UsageProvider {
             return try reading.snapshot(account: account.account)
         } catch {
             throw ProviderError.badResponse(Localized.text("Invalid Claude usage reading", "Ugyldig måling fra Claude"))
+        }
+    }
+
+    private struct Card {
+        let connection: SubscriptionConnection
+        let source: ClaudeReadingSource?
+        let descriptor: AccountDescriptor
+    }
+
+    private func cards() -> [Card] {
+        connections.flatMap { connection -> [Card] in
+            let base = Card(
+                connection: connection, source: nil,
+                descriptor: AccountDescriptor(
+                    account: AccountIdentity(providerID: id, id: connection.accountID, label: connection.label),
+                    source: .configFile))
+            let tagged = ((try? store.readingSources(for: connection.id)) ?? []).map { source in
+                Card(
+                    connection: connection, source: source,
+                    descriptor: AccountDescriptor(
+                        account: AccountIdentity(
+                            providerID: id,
+                            id: AccountIdentity.makeID(
+                                providerID: id,
+                                identityKey: "\(connection.id.uuidString.lowercased())#\(source.fileName)"),
+                            label: "\(connection.label) · \(source.client.displayName)"),
+                        source: .configFile))
+            }
+            return [base] + tagged
         }
     }
 }

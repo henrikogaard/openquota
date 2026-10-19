@@ -171,8 +171,17 @@ public struct SubscriptionConnectionStore: Sendable {
             .standardizedFileURL
     }
 
-    public func readingURL(for id: UUID) throws -> URL {
-        try appOwnedDirectory(for: id).appendingPathComponent("reading.json")
+    public func readingURL(for id: UUID, source: ClaudeReadingSource? = nil) throws -> URL {
+        try appOwnedDirectory(for: id).appendingPathComponent(source?.fileName ?? "reading.json")
+    }
+
+    /// Tagged reading files the bridge has written for a connection, in a
+    /// stable order and capped so a flood of files cannot grow the menu.
+    public func readingSources(for id: UUID) throws -> [ClaudeReadingSource] {
+        let names = try FileManager.default.contentsOfDirectory(atPath: appOwnedDirectory(for: id).path)
+        return Array(names.compactMap(ClaudeReadingSource.init(fileName:))
+            .sorted { $0.fileName < $1.fileName }
+            .prefix(ClaudeReadingSource.maxPerConnection))
     }
 
     public func codexHome(for connection: SubscriptionConnection) throws -> URL {
