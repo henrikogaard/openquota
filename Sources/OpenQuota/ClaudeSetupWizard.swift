@@ -150,12 +150,16 @@ struct ClaudeSetupWizard: View {
                 Button(L("Choose…", "Velg…"), action: chooseFolder)
             }
             numbered(1, L("Copy this command and run it in Terminal:", "Kopier denne kommandoen og kjør den i Terminal:"))
+            Text(command)
+                .font(.system(.callout, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                .help(command)
             HStack(spacing: 8) {
-                Text(command)
-                    .font(.system(.callout, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                 Button(copied ? L("Copied", "Kopiert") : L("Copy", "Kopier")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(command, forType: .string)
