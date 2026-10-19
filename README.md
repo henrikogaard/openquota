@@ -53,7 +53,7 @@ Each saved key/session has its own row. Other local providers discover their def
 
 | Provider | Status | Source |
 |---|---|---|
-| Claude Code | Passive status line | Sanitized documented status-line readings; updates while you use Claude Code |
+| Claude Code | Passive status line, optional CLI check | Sanitized documented status-line readings; updates while you use Claude Code. Opt-in: runs your Claude CLI per profile folder every 30 minutes or on Refresh |
 | Codex / ChatGPT | Managed CLI sign-in | Codex app-server subscription limits and credits; isolated Codex home per connection |
 | OpenCode Go | Local API key | Rolling, weekly and monthly usage |
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
@@ -97,7 +97,7 @@ Quit an existing instance first. Demo mode uses synthetic data, performs no acco
 
 Settings → Accounts → + accepts API keys, manually pasted Cursor sessions, or a local credential-file path for supported providers. Saved secrets use device-only, non-synchronizable macOS Keychain entries; profile files store only labels and paths. Saved API-key/session accounts can be renamed, replaced, or removed. Removing a local profile never deletes its provider-owned credential file. See the [privacy guide](docs/privacy.md).
 
-Claude Code connection requires Claude Code and an existing config directory. OpenQuota installs a reversible status-line wrapper that keeps the existing command and unrelated settings. It stores only sanitized quota percentages and reset times from Claude's documented status-line input; it makes no quota requests. Readings follow whichever login is active in that configuration, and become outdated after ten minutes without a new Claude Code response. Disconnect restores the prior status-line object only if the installed command is still unchanged. Separate Claude configs/logins are needed for separate connections.
+Claude Code connection requires Claude Code and an existing config directory. OpenQuota installs a reversible status-line wrapper that keeps the existing command and unrelated settings. It stores only sanitized quota percentages and reset times from Claude's documented status-line input; it makes no quota requests unless you turn on **Check with Claude CLI** for that connection, which runs your own `claude` once at most every 30 minutes (or on Refresh) and costs one tiny request. Readings follow whichever login is active in that configuration, and become outdated after ten minutes without a new Claude Code response. Disconnect restores the prior status-line object only if the installed command is still unchanged. Separate Claude configs/logins are needed for separate connections.
 
 Codex connection requires the Codex CLI. “Sign in with ChatGPT” runs Codex's documented app-server flow in a dedicated app-managed `CODEX_HOME`, independent for each connection. OpenQuota does not read or copy `auth.json`; Codex manages its own sign-in files. API keys are for separate API billing and do not provide ChatGPT subscription quotas. Removing a Codex connection removes it from OpenQuota but retains Codex-managed files in that dedicated home.
 

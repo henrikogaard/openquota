@@ -416,6 +416,22 @@ struct AccountDetail: View {
                             "OpenQuota reads the installed status line after Claude Code writes a new reading. Use Claude Code, then Refresh; no separate token can be reconnected here.",
                             "OpenQuota leser den installerte statuslinjen etter at Claude Code skriver en ny måling. Bruk Claude Code, og oppdater deretter; ingen separat nøkkel kan kobles til på nytt her."))
                             .foregroundStyle(.secondary)
+                        Toggle(L("Check with Claude CLI", "Sjekk med Claude CLI"), isOn: Binding(
+                            get: { connection.cliUsageCheck == true },
+                            set: { enabled in
+                                do {
+                                    try model.setClaudeCLIUsageCheck(enabled, for: connection)
+                                    errorText = nil
+                                } catch {
+                                    errorText = error.localizedDescription
+                                }
+                            }))
+                            .disabled(model.isDemo)
+                        Text(L(
+                            "Runs your Claude CLI with this folder's login every 30 minutes and when you press Refresh, so the card stays current even when you don't use this login in the terminal. Each check sends one tiny request that counts toward this subscription. For Claude Desktop's account, sign that account in to its own folder and connect it.",
+                            "Kjører Claude CLI med påloggingen i denne mappen hvert 30. minutt og når du trykker Oppdater, slik at kortet holdes oppdatert selv om du ikke bruker påloggingen i terminalen. Hver sjekk sender én liten forespørsel som teller mot abonnementet. For kontoen i Claude Desktop: logg den inn i en egen mappe og koble til den."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Button(L("Refresh", "Oppdater")) { model.refreshNow() }
                             .disabled(model.refreshing || model.isDemo)
                     }

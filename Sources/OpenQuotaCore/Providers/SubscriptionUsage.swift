@@ -36,7 +36,9 @@ public struct ClaudeUsageReading: Codable, Sendable, Equatable {
         return reading.fiveHour == nil && reading.sevenDay == nil ? nil : reading
     }
 
-    public func snapshot(account: AccountIdentity, now: Date = Date()) throws -> UsageSnapshot {
+    public func snapshot(
+        account: AccountIdentity, now: Date = Date(), staleAfter: TimeInterval = 600
+    ) throws -> UsageSnapshot {
         try validate()
         guard recordedAt <= now.addingTimeInterval(60) else {
             throw ProviderError.badResponse(Localized.text("Claude reading has a future timestamp", "Claude-målingen har et tidspunkt i fremtiden"))
@@ -48,7 +50,7 @@ public struct ClaudeUsageReading: Codable, Sendable, Equatable {
         guard !windows.isEmpty else { throw ProviderError.badResponse(Localized.text("No Claude usage reported yet", "Claude har ikke rapportert bruk ennå")) }
         return UsageSnapshot(
             account: account, providerID: "claude", windows: windows,
-            fetchedAt: recordedAt, isStale: now.timeIntervalSince(recordedAt) > 600)
+            fetchedAt: recordedAt, isStale: now.timeIntervalSince(recordedAt) > staleAfter)
     }
 
     private func validate() throws {

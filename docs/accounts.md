@@ -24,19 +24,29 @@ Claude Code supports separate logins through `CLAUDE_CONFIG_DIR`:
    send the documented rate-limit fields through the status-line bridge.
 
 **Claude Desktop on another account.** Desktop uses the normal `~/.claude`
-configuration but its own login. If Desktop runs the status line, its
-readings get a separate card named after the connection plus "· Desktop",
-so they never mix with the CLI's numbers. As of Claude Desktop 2.42304,
-Desktop sessions were not seen running the status line, so this card may
-not appear yet.
+configuration but keeps its own login, which no other app can use. To track
+Desktop's account, sign that same account in to its own folder, for example
+`CLAUDE_CONFIG_DIR="$HOME/.claude-desktop" claude`, connect that folder as
+"Desktop", and turn on **Check with Claude CLI** (below). If Desktop ever runs
+the status line itself, its readings also get a separate "· Desktop" card so
+they never mix with the CLI's numbers. As of Claude Desktop 2.42304 it did not.
 
 Repeat with a different directory per account. Use the same command when
 returning to that profile; normal `claude` keeps its normal configuration unless
 your shell already overrides it.
 
-**Monitoring is passive.** Idle profiles do not continuously refresh. Readings
-become outdated after ten minutes without a bridge event. Refresh in OpenQuota
-only reads the latest file. A connection follows the login in that folder, not
+**Monitoring is passive by default.** Idle profiles do not continuously
+refresh. Readings become outdated after ten minutes without a bridge event, and
+Refresh only reads the latest file.
+
+**Check with Claude CLI (opt-in).** In Settings → Accounts, select the Claude
+connection and turn on **Check with Claude CLI**. OpenQuota then runs your own
+`claude` once in print mode with that folder's login and reads the usage limits
+Claude Code reports back. It runs at most every 30 minutes, plus when you press
+Refresh (at most once a minute), and skips the check while a status-line
+reading is newer. Each check sends one tiny request to the smallest model, which
+counts toward that subscription. OpenQuota never reads the token; the CLI signs
+in as usual. If the folder has no login, the card says to sign in. A connection follows the login in that folder, not
 an immutable provider identity. An API key does not provide subscription quotas.
 
 The bridge preserves your existing status-line command and forwards its output.

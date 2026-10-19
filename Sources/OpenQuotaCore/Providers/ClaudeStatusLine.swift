@@ -5,12 +5,24 @@ public struct ClaudeStatusLineProvider: UsageProvider {
     public let displayName = "Claude Code"
     public let dashboardURL = URL(string: "https://claude.ai/settings/usage")
 
+    /// Runs the CLI check for a config folder from an app-owned working folder.
+    public typealias CLICheck = @Sendable (_ configDirectory: String, _ workingDirectory: URL) async throws -> ClaudeUsageReading
+
     private let connections: [SubscriptionConnection]
     private let store: SubscriptionConnectionStore
+    private let refreshRequests: ClaudeCLIRefreshRequests
+    private let cliCheck: CLICheck
 
-    public init(connections: [SubscriptionConnection], store: SubscriptionConnectionStore) {
+    public init(
+        connections: [SubscriptionConnection],
+        store: SubscriptionConnectionStore,
+        refreshRequests: ClaudeCLIRefreshRequests = ClaudeCLIRefreshRequests(),
+        cliCheck: @escaping CLICheck = { try await ClaudeCLIUsageCheck.run(configDirectory: $0, workingDirectory: $1) }
+    ) {
         self.connections = connections.filter { $0.kind == .claudeStatusLine }
         self.store = store
+        self.refreshRequests = refreshRequests
+        self.cliCheck = cliCheck
     }
 
     /// One card per connection, plus one per tagged source (e.g. Claude
@@ -23,10 +35,41 @@ public struct ClaudeStatusLineProvider: UsageProvider {
         guard let card = cards().first(where: { $0.descriptor.id == account.account.id }) else {
             throw ProviderError.notLoggedIn
         }
-        let readingURL = try store.readingURL(for: card.connection.id, source: card.source)
+        if card.source == nil, card.connection.cliUsageCheck == true {
+            return try await refreshWithCLICheck(card.connection, account: account.account)
+        }
+        let reading = try readReading(at: store.readingURL(for: card.connection.id, source: card.source))
+        return try snapshot(reading, account: account.account)
+    }
+
+    /// Uses whichever reading is newer, the status line's or the last CLI
+    /// check's, and runs a new check when that is 30 minutes old, or a
+    /// minute old after the user pressed Refresh.
+    private func refreshWithCLICheck(
+        _ connection: SubscriptionConnection, account: AccountIdentity, now: Date = Date()
+    ) async throws -> UsageSnapshot {
+        let checkURL = try store.cliReadingURL(for: connection.id)
+        let latest = [
+            try? readReading(at: store.readingURL(for: connection.id)),
+            try? readReading(at: checkURL),
+        ].compactMap { $0 }.max { $0.recordedAt < $1.recordedAt }
+        let age = latest.map { now.timeIntervalSince($0.recordedAt) } ?? .infinity
+        let refreshPressed = refreshRequests.latest.map { pressed in
+            latest.map { pressed > $0.recordedAt } ?? true
+        } ?? false
+        if let latest, age < ClaudeCLIUsageCheck.minimumInterval,
+           !(refreshPressed && age >= ClaudeCLIUsageCheck.manualFloor) {
+            return try snapshot(latest, account: account, staleAfter: ClaudeCLIUsageCheck.staleAfter)
+        }
+        let fresh = try await cliCheck(connection.directory, checkURL.deletingLastPathComponent())
+        try SubscriptionConnectionStore.writePrivate(JSONEncoder.openQuota.encode(fresh), to: checkURL)
+        return try snapshot(fresh, account: account, staleAfter: ClaudeCLIUsageCheck.staleAfter)
+    }
+
+    private func readReading(at url: URL) throws -> ClaudeUsageReading {
         let handle: FileHandle
         do {
-            handle = try FileHandle(forReadingFrom: readingURL)
+            handle = try FileHandle(forReadingFrom: url)
         } catch {
             throw ProviderError.awaitingReading
         }
@@ -41,14 +84,18 @@ public struct ClaudeStatusLineProvider: UsageProvider {
         guard data.count <= SubscriptionConnectionStore.maxFileBytes else {
             throw ProviderError.badResponse(Localized.text("Claude reading is too large", "Claude-målingen er for stor"))
         }
-        let reading: ClaudeUsageReading
         do {
-            reading = try JSONDecoder.openQuota.decode(ClaudeUsageReading.self, from: data)
+            return try JSONDecoder.openQuota.decode(ClaudeUsageReading.self, from: data)
         } catch {
             throw ProviderError.badResponse(Localized.text("Invalid Claude usage reading", "Ugyldig måling fra Claude"))
         }
+    }
+
+    private func snapshot(
+        _ reading: ClaudeUsageReading, account: AccountIdentity, staleAfter: TimeInterval = 600
+    ) throws -> UsageSnapshot {
         do {
-            return try reading.snapshot(account: account.account)
+            return try reading.snapshot(account: account, staleAfter: staleAfter)
         } catch {
             throw ProviderError.badResponse(Localized.text("Invalid Claude usage reading", "Ugyldig måling fra Claude"))
         }
