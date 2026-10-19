@@ -31,6 +31,8 @@ provider-owned files.
   ids so another account gets its own card; the ids and email are not saved.
   It invokes any existing status-line command with its original input; that
   command stays under your control.
+- The Claude setup reads the signed-in email from a folder's `.claude.json`
+  to confirm the sign-in. It is shown, not saved.
 - The opt-in Claude CLI check runs your own `claude` with your folder's login.
   OpenQuota never reads the token and keeps only the 5-hour and weekly
   percentages and reset times. Each check is one tiny request to Anthropic.

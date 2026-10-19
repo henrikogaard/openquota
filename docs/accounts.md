@@ -9,7 +9,15 @@ Blank names get a default.
 
 ## Claude: another subscription without replacing your CLI login
 
-Claude Code supports separate logins through `CLAUDE_CONFIG_DIR`:
+**Settings → Accounts → + → Claude Code** opens a three-step setup. Pick which
+login to track (your usual CLI login, another Claude account, or Claude
+Desktop's account), sign it in to its folder with the command it shows, then
+name it and choose whether to check it with the Claude CLI. The setup notices
+the sign-in by itself and shows the signed-in email, read from Claude Code's
+own `.claude.json`. Run it once per account.
+
+Behind the scenes, Claude Code supports separate logins through
+`CLAUDE_CONFIG_DIR`:
 
 1. Start a separate profile in Terminal:
    ```bash

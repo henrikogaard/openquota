@@ -230,14 +230,20 @@ final class AppModel {
         configurationChanged()
     }
 
-    func installClaudeStatusLine(label: String, configurationDirectory: String, helper: URL) throws {
+    func installClaudeStatusLine(
+        label: String, configurationDirectory: String, helper: URL, cliUsageCheck: Bool = false
+    ) throws {
         guard !isDemo else { return }
         let directory = (configurationDirectory as NSString).expandingTildeInPath
         let installer = ClaudeStatusLineInstaller(store: subscriptionStore)
-        _ = try installer.install(
+        let connection = try installer.install(
             label: label,
             configurationDirectory: directory,
             helperExecutable: helper)
+        if cliUsageCheck {
+            try subscriptionStore.setCLIUsageCheck(true, for: connection.id)
+            claudeCLIRefreshRequests.request()
+        }
         configurationChanged()
     }
 

@@ -172,3 +172,42 @@ private final class CheckCounter: @unchecked Sendable {
         return count
     }
 }
+
+final class ClaudeProfileStatusTests: XCTestCase {
+    func test_statusFollowsFolderAndOauthAccount() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openquota-home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+
+        XCTAssertEqual(ClaudeProfileStatus.check(configDirectory: "~/.claude-work", homeDirectory: home), .folderMissing)
+        let work = home.appendingPathComponent(".claude-work")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        XCTAssertEqual(ClaudeProfileStatus.check(configDirectory: "~/.claude-work", homeDirectory: home), .signedOut)
+        try Data(#"{"oauthAccount":{"emailAddress":"work@example.com","accountUuid":"x"}}"#.utf8)
+            .write(to: work.appendingPathComponent(".claude.json"))
+        XCTAssertEqual(ClaudeProfileStatus.check(configDirectory: work.path, homeDirectory: home),
+                       .signedIn(email: "work@example.com"))
+
+        // The default folder reads ~/.claude.json, not ~/.claude/.claude.json.
+        let main = home.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        try Data(#"{"oauthAccount":{"emailAddress":"wrong@example.com"}}"#.utf8)
+            .write(to: main.appendingPathComponent(".claude.json"))
+        XCTAssertEqual(ClaudeProfileStatus.check(configDirectory: "~/.claude", homeDirectory: home), .signedOut)
+        try Data(#"{"oauthAccount":{"emailAddress":"me@example.com"}}"#.utf8)
+            .write(to: home.appendingPathComponent(".claude.json"))
+        XCTAssertEqual(ClaudeProfileStatus.check(configDirectory: "~/.claude", homeDirectory: home),
+                       .signedIn(email: "me@example.com"))
+    }
+
+    func test_signInCommand() {
+        let home = URL(fileURLWithPath: "/Users/fixture")
+        XCTAssertEqual(ClaudeProfileStatus.signInCommand(configDirectory: "~/.claude", homeDirectory: home), "claude")
+        XCTAssertEqual(ClaudeProfileStatus.signInCommand(configDirectory: "/Users/fixture/.claude/", homeDirectory: home), "claude")
+        XCTAssertEqual(ClaudeProfileStatus.signInCommand(configDirectory: "~/.claude-work", homeDirectory: home),
+                       #"CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude"#)
+        XCTAssertEqual(ClaudeProfileStatus.signInCommand(configDirectory: "/Volumes/it's here", homeDirectory: home),
+                       #"CLAUDE_CONFIG_DIR='/Volumes/it'\''s here' claude"#)
+    }
+}

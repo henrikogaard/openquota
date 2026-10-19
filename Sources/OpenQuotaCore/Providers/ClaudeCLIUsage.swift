@@ -163,3 +163,64 @@ public final class ClaudeCLIRefreshRequests: @unchecked Sendable {
         return requestedAt
     }
 }
+
+/// What the setup wizard can see about a Claude config folder without
+/// touching a token: whether it exists, and which account Claude Code says
+/// is signed in there, from Claude Code's own `.claude.json`.
+public enum ClaudeProfileStatus: Equatable, Sendable {
+    case folderMissing
+    case signedOut
+    case signedIn(email: String?)
+
+    public static func check(
+        configDirectory: String,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Self {
+        let directory = expanded(configDirectory, homeDirectory: homeDirectory)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return .folderMissing }
+        // The default folder keeps its config beside it, in ~/.claude.json.
+        let configFile = isDefault(directory, homeDirectory: homeDirectory)
+            ? homeDirectory.appendingPathComponent(".claude.json")
+            : URL(fileURLWithPath: directory).appendingPathComponent(".claude.json")
+        guard let handle = try? FileHandle(forReadingFrom: configFile) else { return .signedOut }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 16 * 1_048_576),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = root["oauthAccount"] as? [String: Any] else { return .signedOut }
+        return .signedIn(email: account["emailAddress"] as? String)
+    }
+
+    public static func isDefault(
+        _ configDirectory: String,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Bool {
+        let path = URL(fileURLWithPath: expanded(configDirectory, homeDirectory: homeDirectory))
+            .standardizedFileURL.path
+        return path == homeDirectory.appendingPathComponent(".claude").standardizedFileURL.path
+    }
+
+    /// The Terminal command that signs in to `configDirectory`.
+    public static func signInCommand(
+        configDirectory: String,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String {
+        if isDefault(configDirectory, homeDirectory: homeDirectory) { return "claude" }
+        let path = URL(fileURLWithPath: expanded(configDirectory, homeDirectory: homeDirectory))
+            .standardizedFileURL.path
+        let home = homeDirectory.standardizedFileURL.path + "/"
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/")
+        if path.hasPrefix(home), path.unicodeScalars.allSatisfy(safe.contains) {
+            return "CLAUDE_CONFIG_DIR=\"$HOME/\(path.dropFirst(home.count))\" claude"
+        }
+        let quoted = "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "CLAUDE_CONFIG_DIR=\(quoted) claude"
+    }
+
+    static func expanded(_ path: String, homeDirectory: URL) -> String {
+        if path == "~" { return homeDirectory.path }
+        if path.hasPrefix("~/") { return homeDirectory.appendingPathComponent(String(path.dropFirst(2))).path }
+        return path
+    }
+}
