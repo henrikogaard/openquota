@@ -326,6 +326,67 @@ final class SpendTests: XCTestCase {
         XCTAssertEqual(b, a)
     }
 
+    func testPrunedDaysStayPerSourceSoANewFolderStillCounts() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = root.appendingPathComponent("a/projects")
+        let second = root.appendingPathComponent("b/projects")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        var old = claude(id: "old-a", model: "known")
+        old["timestamp"] = now.addingTimeInterval(-10 * 86_400).ISO8601Format()
+        try json(old).write(to: first.appendingPathComponent("a.jsonl"))
+        var limits = LocalSpendScanner.Limits()
+        limits.eventDays = 2
+        let scanner = LocalSpendScanner(limits: limits, pricing: pricing)
+        _ = await scanner.scan(sources: [SpendLogSource(provider: .claude, directory: first)], now: now, calendar: calendar)
+        // A folder connected later has usage on that already-pruned day.
+        var other = old
+        other["message"] = ["id": "old-b", "model": "known", "usage": ["input_tokens": 100, "output_tokens": 20]]
+        try json(other).write(to: second.appendingPathComponent("b.jsonl"))
+        let both = await scanner.scan(sources: [SpendLogSource(provider: .claude, directory: first),
+                                               SpendLogSource(provider: .claude, directory: second)],
+                                      now: now, calendar: calendar)
+        XCTAssertEqual(both.days.reduce(0) { $0 + $1.total.pricedEvents }, 2)
+        XCTAssertEqual(Set(both.days.map(\.source)).count, 2)
+    }
+
+    func testUnreadableLinesKeepTheTotalPartialUntilTheFileChanges() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("log.jsonl")
+        try (json(claude(id: "ok", model: "known")) + Data("{\"usage\": broken\n".utf8)).write(to: file)
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let sources = [SpendLogSource(provider: .claude, directory: root)]
+        let first = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertTrue(first.isPartial)
+        let again = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(again.filesRead, 0)
+        XCTAssertTrue(again.isPartial, "Still short of the unusable line")
+        XCTAssertEqual(again.unreadableFiles, 1)
+        try json(claude(id: "ok", model: "known")).write(to: file)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(60)], ofItemAtPath: file.path)
+        let fixed = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertFalse(fixed.isPartial)
+    }
+
+    func testFileRewrittenAtTheSameSizeIsReadAgain() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("log.jsonl")
+        try json(claude(id: "same", model: "known")).write(to: file)
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let sources = [SpendLogSource(provider: .claude, directory: root)]
+        let first = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(first.total(period: .today, now: now, calendar: calendar).pricedEvents, 1)
+        try json(claude(id: "same", model: "other")).write(to: file) // same length, unpriced model
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(60)], ofItemAtPath: file.path)
+        let rewritten = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        let total = rewritten.total(period: .today, now: now, calendar: calendar)
+        XCTAssertEqual(total.pricedEvents, 0)
+        XCTAssertEqual(total.unpricedEvents, 1)
+    }
+
     func testUnchangedFileRetainsEventsWrittenAfterScanStart() async throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }

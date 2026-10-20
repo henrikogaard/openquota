@@ -50,6 +50,8 @@ public actor LocalSpendScanner {
         var offset: Int
         var lines: Int
         var parserState: SpendLogParser.State?
+        /// A part already read had lines that couldn't be used.
+        var hadUnreadable = false
     }
 
     /// What to read of a file: from the start, or on from a saved offset.
@@ -58,10 +60,12 @@ public actor LocalSpendScanner {
         var offset = 0
         var firstLine = 0
         var parserState: SpendLogParser.State?
+        /// The part read earlier had lines that couldn't be used.
+        var hadUnreadable = false
         var appends: Bool { offset > 0 }
     }
 
-    private static let schemaVersion = 3
+    private static let schemaVersion = 4
 
     private let limits: Limits
     private let databaseURL: URL?
@@ -123,12 +127,15 @@ public actor LocalSpendScanner {
             let unchanged = saved.size == file.size && saved.modified == file.modified.timeIntervalSince1970
             if unchanged && saved.state != "partial" { continue }
             // A grown or half-read file is read on from where the last pass
-            // stopped, with the Codex parser's running totals restored. A file
-            // that shrank was rewritten and is read again from the start.
-            if saved.offset > 0, saved.size <= file.size, saved.offset <= file.size,
+            // stopped, with the Codex parser's running totals restored. Any
+            // other change (shrunk, or rewritten at the same size) is read
+            // again from the start.
+            let resumable = (unchanged && saved.state == "partial") || saved.size < file.size
+            if resumable, saved.offset > 0, saved.offset <= file.size,
                file.provider == .claude || saved.parserState != nil {
                 pending.append(Work(file: file, offset: saved.offset, firstLine: saved.lines,
-                                    parserState: saved.parserState))
+                                    parserState: saved.parserState,
+                                    hadUnreadable: saved.hadUnreadable))
             } else {
                 pending.append(Work(file: file))
             }
@@ -171,6 +178,7 @@ public actor LocalSpendScanner {
                     try Self.saveEvents(
                         database, file: file, events: events, replacing: !work.appends,
                         state: parsed.interrupted ? "partial" : "read",
+                        unreadable: parsed.malformed || work.hadUnreadable,
                         offset: parsed.endOffset, lines: parsed.lines,
                         parserState: file.provider == .codex ? parsed.parserState : nil, calendar: calendar)
                 }
@@ -196,8 +204,10 @@ public actor LocalSpendScanner {
         }
         result.skippedFiles = (try? database.prepare("SELECT COUNT(*) FROM files WHERE state = 'skipped'")
             .first { $0.int(0) }) ?? result.skippedFiles
-        // Skipped files leave the totals short.
-        result.isPartial = result.isPartial || result.skippedFiles > 0
+        result.unreadableFiles = (try? database.prepare("SELECT COUNT(*) FROM files WHERE unreadable = 1")
+            .first { $0.int(0) }) ?? 0
+        // Skipped files and unusable lines leave the totals short, until those files change.
+        result.isPartial = result.isPartial || result.skippedFiles > 0 || result.unreadableFiles > 0
         result.days = (try? Self.loadDays(database, calendar: calendar)) ?? []
         result.hasLogs = !files.isEmpty || !result.days.isEmpty
         return result
@@ -211,12 +221,12 @@ public actor LocalSpendScanner {
         if database.userVersion != Self.schemaVersion {
             try database.execute("""
                 DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS events;
-                DROP TABLE IF EXISTS days; DROP TABLE IF EXISTS pruned_days;
+                DROP TABLE IF EXISTS days; DROP TABLE IF EXISTS pruned_days; DROP TABLE IF EXISTS pruned;
                 PRAGMA auto_vacuum = INCREMENTAL; VACUUM;
                 CREATE TABLE files(
                     id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
                     mtime REAL NOT NULL, state TEXT NOT NULL, offset INTEGER NOT NULL,
-                    lines INTEGER NOT NULL, parser TEXT);
+                    lines INTEGER NOT NULL, parser TEXT, unreadable INTEGER NOT NULL);
                 CREATE TABLE events(
                     file INTEGER NOT NULL, day TEXT NOT NULL, ts REAL NOT NULL, provider TEXT NOT NULL,
                     source TEXT NOT NULL, model TEXT NOT NULL,
@@ -233,7 +243,7 @@ public actor LocalSpendScanner {
                     unpriced INTEGER NOT NULL, input INTEGER NOT NULL, cache_write INTEGER NOT NULL,
                     cache_read INTEGER NOT NULL, output INTEGER NOT NULL,
                     PRIMARY KEY(day, provider, source, model));
-                CREATE TABLE pruned_days(day TEXT PRIMARY KEY);
+                CREATE TABLE pruned(day TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(day, source));
                 """)
             try database.setUserVersion(Self.schemaVersion)
         }
@@ -243,12 +253,12 @@ public actor LocalSpendScanner {
 
     private static func loadFiles(_ database: SQLiteDatabase) throws -> [String: SavedFile] {
         var files: [String: SavedFile] = [:]
-        try database.prepare("SELECT key, size, mtime, state, offset, lines, parser FROM files").forEach { row in
+        try database.prepare("SELECT key, size, mtime, state, offset, lines, parser, unreadable FROM files").forEach { row in
             let state = row.isNull(6) ? nil
                 : try? JSONDecoder().decode(SpendLogParser.State.self, from: Data(row.string(6).utf8))
             files[row.string(0)] = SavedFile(
                 size: row.int(1), modified: row.double(2), state: row.string(3), offset: row.int(4),
-                lines: row.int(5), parserState: state)
+                lines: row.int(5), parserState: state, hadUnreadable: row.int(7) != 0)
         }
         return files
     }
@@ -257,13 +267,15 @@ public actor LocalSpendScanner {
     @discardableResult
     private static func saveFile(
         _ database: SQLiteDatabase, _ file: LogFile, state: String, offset: Int, lines: Int,
-        parserState: SpendLogParser.State?
+        parserState: SpendLogParser.State?, unreadable: Bool = false
     ) throws -> Int {
         let parser = try parserState.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }
         try database.prepare("""
-            INSERT INTO files(key, size, mtime, state, offset, lines, parser) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(key) DO UPDATE SET size = ?2, mtime = ?3, state = ?4, offset = ?5, lines = ?6, parser = ?7
-            """).run([file.key, file.size, file.modified.timeIntervalSince1970, state, offset, lines, parser])
+            INSERT INTO files(key, size, mtime, state, offset, lines, parser, unreadable)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(key) DO UPDATE SET size = ?2, mtime = ?3, state = ?4, offset = ?5, lines = ?6,
+                parser = ?7, unreadable = ?8
+            """).run([file.key, file.size, file.modified.timeIntervalSince1970, state, offset, lines, parser, unreadable])
         return try database.prepare("SELECT id FROM files WHERE key = ?1").first([file.key]) { $0.int(0) } ?? 0
     }
 
@@ -282,9 +294,11 @@ public actor LocalSpendScanner {
     /// and how far it was read; returns the days touched.
     private static func saveEvents(
         _ database: SQLiteDatabase, file: LogFile, events: [SpendEvent], replacing: Bool,
-        state: String, offset: Int, lines: Int, parserState: SpendLogParser.State?, calendar: Calendar
+        state: String, unreadable: Bool, offset: Int, lines: Int, parserState: SpendLogParser.State?,
+        calendar: Calendar
     ) throws -> Set<String> {
-        let id = try saveFile(database, file, state: state, offset: offset, lines: lines, parserState: parserState)
+        let id = try saveFile(database, file, state: state, offset: offset, lines: lines,
+                              parserState: parserState, unreadable: unreadable)
         var days = Set<String>()
         if replacing {
             try database.prepare("SELECT DISTINCT day FROM events WHERE file = ?1").forEach([id]) {
@@ -312,31 +326,32 @@ public actor LocalSpendScanner {
     }
 
     /// Rebuilds the daily totals for `days` from the requests in the database.
-    /// Days whose requests were already pruned keep their totals: new requests
-    /// for them come from copied or resumed sessions and would double count.
+    /// A source whose requests for a day were already pruned keeps its totals
+    /// for that day: new requests for it come from copied or resumed sessions
+    /// and would double count. Other sources (a newly connected folder) are
+    /// counted as usual.
     private static func recompute(
         _ database: SQLiteDatabase, days: Set<String>, pricing: ModelPricing, calendar: Calendar
     ) throws {
         guard !days.isEmpty else { return }
-        var pruned = Set<String>()
-        try database.prepare("SELECT day FROM pruned_days").forEach { pruned.insert($0.string(0)) }
+        let prunedSources = try database.prepare("SELECT source FROM pruned WHERE day = ?1")
+        let savedSources = try database.prepare("SELECT DISTINCT source FROM days WHERE day = ?1")
+        let deleteSourceEvents = try database.prepare("DELETE FROM events WHERE day = ?1 AND source = ?2")
+        let deleteSourceDay = try database.prepare("DELETE FROM days WHERE day = ?1 AND source = ?2")
         let select = try database.prepare("""
             SELECT ts, provider, source, model, input, cache_write_5m, cache_write_1h, cache_read, output,
                 token_fast, recorded, identity, request, sidechain, has_speed, fast, ultrafast
             FROM events WHERE day = ?1
             """)
-        let deleteDay = try database.prepare("DELETE FROM days WHERE day = ?1")
-        let deleteEvents = try database.prepare("DELETE FROM events WHERE day = ?1")
         let insert = try database.prepare("""
             INSERT OR REPLACE INTO days(day, provider, source, model, estimated, recorded, priced, unpriced,
                 input, cache_write, cache_read, output)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             """)
         for day in days {
-            if pruned.contains(day) {
-                try deleteEvents.run([day])
-                continue
-            }
+            var pruned = Set<String>()
+            try prunedSources.forEach([day]) { pruned.insert($0.string(0)) }
+            for source in pruned { try deleteSourceEvents.run([day, source]) }
             var events: [SpendEvent] = []
             try select.forEach([day]) { row in
                 guard let provider = SpendProvider(rawValue: row.string(1)) else { return }
@@ -353,7 +368,9 @@ public actor LocalSpendScanner {
                 event.source = row.string(2)
                 events.append(event)
             }
-            try deleteDay.run([day])
+            var stale = Set<String>()
+            try savedSources.forEach([day]) { stale.insert($0.string(0)) }
+            for source in stale.subtracting(pruned) { try deleteSourceDay.run([day, source]) }
             for total in aggregate(deduplicate(events), pricing: pricing, calendar: calendar) {
                 let t = total.total
                 try insert.run([
@@ -369,7 +386,7 @@ public actor LocalSpendScanner {
     private static func prune(_ database: SQLiteDatabase, now: Date, keepDays: Int, calendar: Calendar) throws {
         let cutoff = calendar.date(byAdding: .day, value: -keepDays, to: calendar.startOfDay(for: now))!
         let key = SpendHistory.dayKey(cutoff, calendar: calendar)
-        try database.prepare("INSERT OR IGNORE INTO pruned_days(day) SELECT DISTINCT day FROM events WHERE day < ?1")
+        try database.prepare("INSERT OR IGNORE INTO pruned(day, source) SELECT DISTINCT day, source FROM events WHERE day < ?1")
             .run([key])
         try database.prepare("DELETE FROM events WHERE day < ?1").run([key])
         try database.execute("PRAGMA incremental_vacuum")

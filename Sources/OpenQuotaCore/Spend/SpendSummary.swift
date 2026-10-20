@@ -127,6 +127,8 @@ public struct SpendSummary: Sendable {
     public var pendingFiles = 0
     /// Files too large to read, skipped until they change.
     public var skippedFiles = 0
+    /// Files with lines that couldn't be used, until they change.
+    public var unreadableFiles = 0
     public var sourceCount = 0
     public var hasLogs = false
     public init() {}

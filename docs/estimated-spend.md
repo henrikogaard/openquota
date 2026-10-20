@@ -52,8 +52,12 @@ CLI folder's email.
   Claude and Codex, within the time and byte budget below. While older logs
   remain, passes repeat a few seconds apart; the panel says how many files are
   left. Each source folder has its own file and directory-entry budget.
-- Days whose requests were already removed keep their totals: requests for
-  them that show up later come from copied or resumed sessions.
+- A source whose requests for a day were already removed keeps its totals for
+  that day: its requests that show up later come from copied or resumed
+  sessions. A different source (a newly connected folder) still counts.
+- A file with lines that couldn't be used keeps the total marked partial
+  until the file changes. A file rewritten without growing is read again from
+  the start.
 - A Codex file over 64 MiB, or one a whole pass can't finish, is skipped until
   it changes and counted as partial. Claude files have no size limit.
 - Turning log reading off stops reading but keeps the database.
