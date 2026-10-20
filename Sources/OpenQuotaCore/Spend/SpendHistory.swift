@@ -17,6 +17,9 @@ public struct SpendHistory: Codable, Sendable, Equatable {
     public static let backfillDays = 365
     /// A first scan that hits a limit retries this much next time.
     static let retryDays = 30
+    /// A partial window is retried this many times before moving on. Each
+    /// retry reuses the files already read, so it gets further.
+    static let maxRetries = 6
 
     public var version = 1
     public private(set) var rows: [Row] = []
@@ -24,15 +27,19 @@ public struct SpendHistory: Codable, Sendable, Equatable {
     public private(set) var scannedThrough: Date?
     /// Days a scan could not read completely (a limit was reached).
     public private(set) var incompleteDays: Set<String> = []
+    /// Start of a window a scan didn't finish; the next scan repeats it.
+    public private(set) var retryFrom: Date?
+    public private(set) var retryAttempts: Int?
 
     public init() {}
 
     public var isEmpty: Bool { rows.isEmpty }
 
-    /// Where the next scan starts: the day before the last scan, or a year
-    /// back on the first scan.
+    /// Where the next scan starts: an unfinished window, else the day before
+    /// the last scan, or a year back on the first scan.
     public func nextScanStart(now: Date, calendar: Calendar = .current) -> Date {
         let today = calendar.startOfDay(for: now)
+        if let retryFrom { return min(calendar.startOfDay(for: retryFrom), today) }
         guard let scannedThrough else {
             return calendar.date(byAdding: .day, value: -(Self.backfillDays - 1), to: today)!
         }
@@ -67,12 +74,19 @@ public struct SpendHistory: Codable, Sendable, Equatable {
         }
         let today = calendar.startOfDay(for: now)
         let windowDays = calendar.dateComponents([.day], from: since, to: today).day ?? 0
-        if summary.isPartial, windowDays > Self.retryDays {
-            // A long first scan ran out of budget: retry the recent month
-            // next time rather than move on.
-            scannedThrough = calendar.date(byAdding: .day, value: -(Self.retryDays - 2), to: today)
+        scannedThrough = now
+        if summary.isPartial, windowDays >= Self.retryDays {
+            // A long first scan ran out of budget: retry the recent month.
+            retryFrom = calendar.date(byAdding: .day, value: -(Self.retryDays - 1), to: today)
+            retryAttempts = 0
+        } else if summary.isPartial, let attempts = retryAttempts, attempts < Self.maxRetries {
+            // Repeat the unfinished window until it completes or retries run out;
+            // after that its days stay marked incomplete.
+            retryFrom = since
+            retryAttempts = attempts + 1
         } else {
-            scannedThrough = now
+            retryFrom = nil
+            retryAttempts = nil
         }
     }
 

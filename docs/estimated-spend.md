@@ -34,7 +34,9 @@ cache-read and output tokens, estimated and log-reported cost, and priced and
 unpriced request counts. No prompts, request IDs, file paths or accounts.
 
 - The first scan reaches back up to a year, as far as the logs and the scan
-  limits allow. If it hits a limit, the next scan retries the last 30 days.
+  limits allow. If it hits a limit, later scans repeat the last 30 days until
+  one completes (each retry reuses files already read), up to six tries; then
+  those days stay marked incomplete.
 - Later scans start the day before the previous scan and read only log files
   modified since then; older days come from the saved file.
 - A saved day is replaced only when a scan sees at least as many requests for

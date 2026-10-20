@@ -37,14 +37,31 @@ final class SpendHistoryTests: XCTestCase {
         XCTAssertEqual(history.nextScanStart(now: now, calendar: calendar), day(-1))
     }
 
-    func test_partialFirstScanRetriesTheRecentMonth() {
+    func test_partialFirstScanRetriesTheRecentMonthUntilItCompletes() {
         var history = SpendHistory()
         history.record(summary([], partial: true), since: day(-364), calendar: calendar)
         XCTAssertEqual(history.nextScanStart(now: now, calendar: calendar), day(-29))
         XCTAssertTrue(history.hasIncompleteDays(.days30, now: now, calendar: calendar))
+        // A partial retry keeps the same window.
+        history.record(summary([], partial: true), since: day(-29), calendar: calendar)
+        XCTAssertEqual(history.nextScanStart(now: now, calendar: calendar), day(-29))
+        // A complete retry clears it and moves on.
         history.record(summary([]), since: day(-29), calendar: calendar)
+        XCTAssertEqual(history.nextScanStart(now: now, calendar: calendar), day(-1))
         XCTAssertFalse(history.hasIncompleteDays(.days30, now: now, calendar: calendar))
         XCTAssertTrue(history.hasIncompleteDays(.year, now: now, calendar: calendar))
+    }
+
+    func test_partialRetriesStopAfterTheLimit() {
+        var history = SpendHistory()
+        history.record(summary([], partial: true), since: day(-364), calendar: calendar)
+        for _ in 0..<SpendHistory.maxRetries {
+            history.record(summary([], partial: true), since: day(-29), calendar: calendar)
+            XCTAssertEqual(history.nextScanStart(now: now, calendar: calendar), day(-29))
+        }
+        history.record(summary([], partial: true), since: day(-29), calendar: calendar)
+        XCTAssertEqual(history.nextScanStart(now: now, calendar: calendar), day(-1))
+        XCTAssertTrue(history.hasIncompleteDays(.days30, now: now, calendar: calendar))
     }
 
     func test_rowIsReplacedOnlyWhenTheScanSawAtLeastAsManyRequests() {
