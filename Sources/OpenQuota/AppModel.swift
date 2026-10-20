@@ -25,9 +25,9 @@ final class AppModel {
     private(set) var spendScanning = false
     /// Daily totals saved on this Mac; outlives the logs it was read from.
     private(set) var spendHistory = SpendHistory()
-    private let historyStore = SpendHistoryStore(
-        url: AppModel.appSupportDir.appendingPathComponent("spend-history.json"))
-    private let spendScanner = LocalSpendScanner()
+    /// Reads logs into usage.sqlite: files already read, recent requests, daily totals.
+    private let spendScanner = LocalSpendScanner(
+        databaseURL: AppModel.appSupportDir.appendingPathComponent("usage.sqlite"))
     private nonisolated let spendTask = TaskBox()
     private var spendGeneration: UInt64 = 0
 
@@ -54,10 +54,18 @@ final class AppModel {
             snapshots = DemoSnapshots.all
             spendEnabled = true
             spend = Self.demoSpend()
-            spendHistory.record(spend, since: .distantPast)
+            spendHistory = SpendHistory(days: spend.days)
             return
         }
-        spendHistory = historyStore.load()
+        // 0.2.0 kept history in a JSON file; the database replaces it and
+        // rebuilds from the logs.
+        try? FileManager.default.removeItem(at: Self.appSupportDir.appendingPathComponent("spend-history.json"))
+        let scanner = spendScanner
+        spendTask.task = Task { [weak self] in
+            let days = await scanner.savedDays()
+            guard let self, self.spendHistory.isEmpty else { return }
+            self.spendHistory = SpendHistory(days: days)
+        }
         let cached = cache.load().mapValues { snapshot in
             var stale = snapshot
             stale.isStale = true
@@ -185,13 +193,8 @@ final class AppModel {
         UserDefaults.standard.set(enabled, forKey: "localSpendEnabled")
         spend = SpendSummary()
         spendScanning = false
-        let scanner = spendScanner
-        // Queue cache erasure before a subsequent scan on the same actor.
-        spendTask.task = Task { [weak self] in
-            await scanner.clear()
-            guard !Task.isCancelled else { return }
-            self?.refreshSpend(force: true)
-        }
+        // Turning off stops reading logs; saved history stays until deleted.
+        refreshSpend(force: true)
     }
 
     private func refreshSpend(force: Bool = false) {
@@ -201,23 +204,18 @@ final class AppModel {
         let generation = spendGeneration
         let sources = SpendLogSource.localSources(connections: subscriptionConnections)
         let scanner = spendScanner
-        // Only logs written since the day before the last scan; older days
-        // come from the saved history.
-        let since = spendHistory.nextScanStart(now: Date())
         spendTask.task = Task { [weak self] in
-            let summary = await scanner.scan(sources: sources, since: since)
+            let summary = await scanner.scan(sources: sources)
             guard !Task.isCancelled, let self, self.spendEnabled, self.spendGeneration == generation else { return }
-            var history = self.spendHistory
-            history.record(summary, since: since)
-            self.spendHistory = history
-            do { try self.historyStore.save(history) }
-            catch { self.statusMessage = L("Couldn't save usage history", "Kunne ikke lagre brukshistorikken") }
-            var merged = summary
-            merged.days = history.days()
-            merged.hasLogs = summary.hasLogs || !history.isEmpty
-            merged.isPartial = summary.isPartial || history.hasIncompleteDays(.days30)
-            self.spend = merged
+            self.spend = summary
+            self.spendHistory = SpendHistory(days: summary.days)
             self.spendScanning = false
+            // Catching up on older logs: keep going in short passes.
+            if summary.pendingFiles > 0 {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, self.spendGeneration == generation else { return }
+                self.refreshSpend(force: true)
+            }
         }
     }
 
@@ -225,8 +223,6 @@ final class AppModel {
     /// still hold.
     func deleteSpendHistory() {
         guard !isDemo else { return }
-        do { try historyStore.delete() }
-        catch { statusMessage = L("Couldn't delete usage history", "Kunne ikke slette brukshistorikken") }
         spendHistory = SpendHistory()
         spendGeneration &+= 1
         spendTask.task?.cancel()
@@ -234,9 +230,44 @@ final class AppModel {
         spendScanning = false
         let scanner = spendScanner
         spendTask.task = Task { [weak self] in
-            await scanner.clear()
+            await scanner.deleteAll()
             guard !Task.isCancelled else { return }
             self?.refreshSpend(force: true)
+        }
+    }
+
+    /// A readable name for a usage source, plus the account email when known.
+    func spendSourceName(_ key: String) -> (name: String, email: String?) {
+        guard let source = SpendSource(key: key) else { return (key, nil) }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let connection = subscriptionConnections.first {
+            URL(fileURLWithPath: $0.directory).standardizedFileURL.path == source.folder
+        }
+        let email = connection.flatMap { connection in
+            snapshots.first { $0.account.id == connection.accountID }?.account.email
+        }
+        switch source.provider {
+        case .claude:
+            let app: String = switch source.app {
+            case "claude-desktop": "Claude Desktop"
+            case "cli", "": "Claude CLI"
+            case "claude-vscode": "Claude · VS Code"
+            case let other where other.hasPrefix("sdk"): "Claude · Agent SDK"
+            case let other: "Claude · \(other)"
+            }
+            if source.folder == home + "/.claude" {
+                // Desktop signs in on its own; only the CLI uses this folder's login.
+                guard source.app != "claude-desktop" else { return (app, nil) }
+                if case .signedIn(let folderEmail) = ClaudeProfileStatus.check(configDirectory: source.folder) {
+                    return (app, folderEmail ?? email)
+                }
+                return (app, email)
+            }
+            let label = connection?.label ?? (source.folder as NSString).lastPathComponent
+            return ("\(app) · \(label)", email)
+        case .codex:
+            if source.folder == home + "/.codex" { return ("Codex", nil) }
+            return ("Codex · \(connection?.label ?? (source.folder as NSString).lastPathComponent)", email)
         }
     }
 
