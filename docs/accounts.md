@@ -114,6 +114,15 @@ screenshots, or bug reports.
 A new token for the same Cursor identity replaces its saved token. A different
 identity gets an independent entry. [Technical details](providers.md#cursor-experimental-explicit-opt-in).
 
+## Hide a detected provider
+
+Providers found from a CLI sign-in on this Mac (Amp, Grok, Devin and so on)
+can't be removed, because the sign-in belongs to that CLI. Select one under
+**Detected on This Mac** and press **−** (or **Hide from OpenQuota**).
+OpenQuota stops checking it and drops it from the menu. Its sign-in is not
+changed. Hidden providers are listed under **Hidden**; select one and press
+**Show Again** to bring it back.
+
 ## Replace or remove
 
 - **Saved key/session:** select it and use **Replace Credential…**. The ID and
