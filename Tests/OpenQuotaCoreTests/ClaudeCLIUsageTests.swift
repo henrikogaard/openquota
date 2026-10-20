@@ -211,3 +211,58 @@ final class ClaudeProfileStatusTests: XCTestCase {
                        #"CLAUDE_CONFIG_DIR='/Volumes/it'\''s here' claude"#)
     }
 }
+
+final class AccountEmailTests: XCTestCase {
+    func test_sameAccountMatchesEmailWithinProviderOnly() {
+        func snap(_ provider: String, _ id: String, _ email: String?) -> UsageSnapshot {
+            UsageSnapshot(account: AccountIdentity(providerID: provider, id: id, label: id, email: email), providerID: provider)
+        }
+        let a = snap("claude", "a", "Me@Example.com")
+        let b = snap("claude", "b", "me@example.com")
+        let c = snap("claude", "c", "other@example.com")
+        let d = snap("codex", "d", "me@example.com")
+        let e = snap("claude", "e", nil)
+        let all = [a, b, c, d, e]
+        XCTAssertEqual(a.sameAccount(in: all).map(\.account.id), ["b"])
+        XCTAssertEqual(c.sameAccount(in: all).count, 0)
+        XCTAssertEqual(e.sameAccount(in: all).count, 0)
+        XCTAssertEqual(d.sameAccount(in: all).count, 0)
+    }
+
+    func test_storeKeepsCachedEmailWhenRegisterHasNone() async {
+        let store = SnapshotStore()
+        let withEmail = AccountIdentity(providerID: "codex", id: "codex@1", label: "Work", email: "work@example.com")
+        await store.register(account: withEmail)
+        await store.finishRefresh(accountID: "codex@1", result: .success(UsageSnapshot(account: withEmail, providerID: "codex")))
+        await store.register(account: AccountIdentity(providerID: "codex", id: "codex@1", label: "Work"))
+        let snapshot = await store.snapshot(for: "codex@1")
+        XCTAssertEqual(snapshot?.account.email, "work@example.com")
+    }
+
+    func test_claudeCardCarriesFolderEmail() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openquota-email-\(UUID().uuidString)")
+            .standardizedFileURL.resolvingSymlinksInPath()
+        let config = directory.appendingPathComponent("claude-work")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        try Data(#"{"oauthAccount":{"emailAddress":"work@example.com"}}"#.utf8)
+            .write(to: config.appendingPathComponent(".claude.json"))
+        let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
+        let connection = try store.addClaude(label: "Work", configurationDirectory: config.path)
+        try JSONEncoder.openQuota.encode(ClaudeUsageReading(
+            recordedAt: Date(), fiveHour: .init(usedPercentage: 5, resetsAt: nil), sevenDay: nil))
+            .write(to: store.readingURL(for: connection.id))
+        let provider = ClaudeStatusLineProvider(connections: [connection], store: store)
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.first?.account.email, "work@example.com")
+        let snapshot = try await provider.refresh(account: XCTUnwrap(accounts.first))
+        XCTAssertEqual(snapshot.account.email, "work@example.com")
+    }
+
+    func test_identityWithoutEmailStillDecodes() throws {
+        let json = #"{"providerID":"claude","id":"claude@1","label":"Claude"}"#
+        let identity = try JSONDecoder().decode(AccountIdentity.self, from: Data(json.utf8))
+        XCTAssertNil(identity.email)
+    }
+}

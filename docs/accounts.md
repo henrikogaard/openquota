@@ -16,6 +16,10 @@ name it and choose whether to check it with the Claude CLI. The setup notices
 the sign-in by itself and shows the signed-in email, read from Claude Code's
 own `.claude.json`. Run it once per account.
 
+Each Claude and Codex card shows its signed-in email. If two connections
+are signed in to the same account, both cards say so: their numbers are one
+shared allowance, not two. The setup warns before you add such a duplicate.
+
 Behind the scenes, Claude Code supports separate logins through
 `CLAUDE_CONFIG_DIR`:
 

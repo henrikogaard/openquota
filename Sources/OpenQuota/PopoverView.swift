@@ -163,7 +163,7 @@ struct ProviderSection: View {
     private var subtitle: String? {
         guard let single else { return nil }
         let label = single.account.label.flatMap { $0 == name ? nil : $0 }
-        let parts = [single.account.plan?.capitalized, label].compactMap { $0 }
+        let parts = [single.account.plan?.capitalized, label, single.account.email].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -202,6 +202,9 @@ struct ProviderSection: View {
                 AccountUsage(
                     snapshot: snapshot,
                     showsHeader: single == nil,
+                    sameAccountLabels: snapshot.sameAccount(in: snapshots).map {
+                        $0.account.label ?? L("Default", "Standard")
+                    },
                     credentialSourceName: snapshot.credentialSource.map {
                         model.credentialSourceName($0)
                     })
@@ -213,10 +216,26 @@ struct ProviderSection: View {
 
 }
 
+/// Two connections signed in to one account show the same quota twice.
+struct SameAccountWarning: View {
+    var labels: [String]
+
+    var body: some View {
+        let names = labels.joined(separator: ", ")
+        Label(L("Same account as \(names). These numbers are shared, not extra.",
+                "Samme konto som \(names). Tallene deles, de kommer ikke i tillegg."),
+              systemImage: "person.2.fill")
+            .font(.system(size: 11))
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// Every window of one account, plus balance, freshness and errors.
 struct AccountUsage: View {
     var snapshot: UsageSnapshot
     var showsHeader: Bool
+    var sameAccountLabels: [String] = []
     var credentialSourceName: String?
 
     private var balance: String? {
@@ -236,11 +255,18 @@ struct AccountUsage: View {
                     if let plan = snapshot.account.plan {
                         Text(plan.capitalized).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
+                    if let email = snapshot.account.email {
+                        Text(email).font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .lineLimit(1).truncationMode(.middle).help(email)
+                    }
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(.secondary)
             }
             ForEach(snapshot.windows) { window in QuotaRow(window: window) }
+            if !sameAccountLabels.isEmpty {
+                SameAccountWarning(labels: sameAccountLabels)
+            }
             if let balance {
                 MetricLine(label: L("Balance", "Saldo"), value: balance, detail: nil)
             }

@@ -328,6 +328,12 @@ struct AccountDetail: View {
                 if let plan = snapshot?.account.plan {
                     LabeledContent(L("Plan", "Plan"), value: plan.capitalized)
                 }
+                if let email = snapshot?.account.email {
+                    LabeledContent(L("Account", "Konto"), value: email)
+                }
+                if let snapshot, case let same = snapshot.sameAccount(in: model.snapshots), !same.isEmpty {
+                    SameAccountWarning(labels: same.map { $0.account.label ?? L("Default", "Standard") })
+                }
             }
             if let snapshot, !snapshot.windows.isEmpty || snapshot.errorMessage != nil {
                 Section(L("Usage", "Bruk")) {

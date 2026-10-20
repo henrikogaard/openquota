@@ -101,6 +101,12 @@ public struct ClaudeStatusLineProvider: UsageProvider {
         }
     }
 
+    /// The email Claude Code records for the folder's login (a local read).
+    static func signedInEmail(_ directory: String) -> String? {
+        if case .signedIn(let email) = ClaudeProfileStatus.check(configDirectory: directory) { return email }
+        return nil
+    }
+
     private struct Card {
         let connection: SubscriptionConnection
         let source: ClaudeReadingSource?
@@ -112,7 +118,9 @@ public struct ClaudeStatusLineProvider: UsageProvider {
             let base = Card(
                 connection: connection, source: nil,
                 descriptor: AccountDescriptor(
-                    account: AccountIdentity(providerID: id, id: connection.accountID, label: connection.label),
+                    account: AccountIdentity(
+                        providerID: id, id: connection.accountID, label: connection.label,
+                        email: Self.signedInEmail(connection.directory)),
                     source: .configFile))
             let tagged = ((try? store.readingSources(for: connection.id)) ?? []).map { source in
                 Card(

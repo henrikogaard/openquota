@@ -209,6 +209,21 @@ struct ClaudeSetupWizard: View {
             }
         }
         .font(.callout)
+        if case .signedIn(let email?) = status, case let same = connectedLabels(signedInAs: email), !same.isEmpty {
+            Label(L("This account is already connected as \(same.joined(separator: ", ")). A second card would show the same numbers. In Terminal, type /logout and sign in with a different account.",
+                    "Denne kontoen er allerede koblet til som \(same.joined(separator: ", ")). Et nytt kort ville vist de samme tallene. Skriv /logout i Terminal og logg inn med en annen konto."),
+                  systemImage: "person.2.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Labels of Claude cards already signed in to `email`.
+    private func connectedLabels(signedInAs email: String) -> [String] {
+        model.snapshots
+            .filter { $0.providerID == "claude" && $0.account.email?.lowercased() == email.lowercased() }
+            .map { $0.account.label ?? "Claude" }
     }
 
     // MARK: Step 3

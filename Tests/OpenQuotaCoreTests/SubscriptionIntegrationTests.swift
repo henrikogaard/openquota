@@ -527,6 +527,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
         let executable = try makeExecutable(in: directory, name: "codex", script: serverScript())
         let result = try await CodexAppServerClient.readAccount(executable: executable, codexHome: home)
         XCTAssertEqual(result.planType, "plus")
+        XCTAssertEqual(result.email, "fixture@example.com")
         XCTAssertTrue(String(decoding: result.rateLimits, as: UTF8.self).contains("rateLimits"))
         let observed = try String(
             contentsOf: home.appendingPathComponent("observed.txt"),
@@ -687,7 +688,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
                         timeout) sleep 5; exit 0 ;;
                         cancel) printf '%s' "$$" > "$CODEX_HOME/server.pid"; sleep 60; exit 0 ;;
                     esac
-                    printf '{"jsonrpc":"2.0","id":%s,"result":{"account":{"type":"%s","planType":"plus"},"requiresOpenaiAuth":true}}\\n' "$request_id" "$TYPE"
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"account":{"type":"%s","planType":"plus","email":"fixture@example.com"},"requiresOpenaiAuth":true}}\\n' "$request_id" "$TYPE"
                     ;;
                 *'"method":"account/rateLimits/read"'*)
                     printf '{"jsonrpc":"2.0","id":%s,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":20,"windowDurationMins":300}}}}\\n' "$request_id"
