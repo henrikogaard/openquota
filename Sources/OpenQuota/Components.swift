@@ -118,6 +118,51 @@ struct QuotaRow: View {
     }
 }
 
+/// One line per percentage window, used when a provider lists several
+/// accounts: label, meter, percent left, reset. Other windows keep QuotaRow.
+struct CompactQuotaRow: View {
+    var window: UsageWindow
+
+    static func fits(_ window: UsageWindow) -> Bool {
+        window.unit == "%" && window.fractionUsed != nil
+    }
+
+    private var resetHelp: String? {
+        guard let reset = Format.reset(window) else { return nil }
+        return reset == Format.resetting ? L("Resetting now", "Nullstilles nå") : L("Resets in \(reset)", "Nullstilles om \(reset)")
+    }
+
+    var body: some View {
+        let fraction = window.fractionUsed ?? 0
+        HStack(spacing: 8) {
+            Text(Localized.windowLabel(window.label))
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .frame(minWidth: 34, alignment: .leading)
+                .fixedSize()
+            Meter(fractionUsed: fraction, height: 5)
+            Text(Format.value(window))
+                .font(.system(size: 11, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(fraction >= Tokens.warnThreshold
+                                 ? AnyShapeStyle(Tokens.tint(fractionUsed: fraction))
+                                 : AnyShapeStyle(.secondary))
+                .frame(width: 34, alignment: .trailing)
+            Text(Format.reset(window).map { $0 == Format.resetting ? L("now", "nå") : $0 } ?? "")
+                .font(.system(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(width: 46, alignment: .trailing)
+        }
+        .help(resetHelp ?? "")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([Localized.windowLabel(window.label),
+                             L("\(Format.value(window)) left", "\(Format.value(window)) igjen"),
+                             resetHelp].compactMap { $0 }.joined(separator: ", "))
+    }
+}
+
 /// Capsule meter showing what's left. Neutral until usage gets tight.
 struct Meter: View {
     var fractionUsed: Double

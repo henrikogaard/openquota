@@ -49,12 +49,12 @@ struct PopoverView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                     }
                 }
-                .contentMargins(.trailing, 16, for: .scrollContent)
-                .scrollIndicators(.automatic)
+                .scrollIndicators(.never)
+                .scrollEdgeEffectStyle(.soft, for: .vertical)
                 .scrollBounceBehavior(.basedOnSize)
                 // A window-style MenuBarExtra can't size a scroll view itself;
-                // follow the measured content up to a cap.
-                .frame(height: min(contentHeight, Tokens.popoverMaxContentHeight))
+                // follow the measured content up to most of the screen.
+                .frame(height: min(contentHeight, maxContentHeight))
                 .clipped()
             }
             if let status = model.statusMessage {
@@ -68,6 +68,12 @@ struct PopoverView: View {
         }
         .padding(Tokens.inset)
         .frame(width: Tokens.popoverWidth)
+    }
+
+    /// Grow with the screen so scrolling is rare; never below the token.
+    private var maxContentHeight: CGFloat {
+        let screen = NSScreen.main?.visibleFrame.height ?? Tokens.popoverMaxContentHeight
+        return max(Tokens.popoverMaxContentHeight, screen - 140)
     }
 
     private func showSettings(addingAccount: Bool = false) {
@@ -219,15 +225,19 @@ struct ProviderSection: View {
 /// Two connections signed in to one account show the same quota twice.
 struct SameAccountWarning: View {
     var labels: [String]
+    var compact = false
 
     var body: some View {
         let names = labels.joined(separator: ", ")
-        Label(L("Same account as \(names). These numbers are shared, not extra.",
-                "Samme konto som \(names). Tallene deles, de kommer ikke i tillegg."),
+        let full = L("Same account as \(names). These numbers are shared, not extra.",
+                     "Samme konto som \(names). Tallene deles, de kommer ikke i tillegg.")
+        Label(compact ? L("Shared with \(names)", "Delt med \(names)") : full,
               systemImage: "person.2.fill")
-            .font(.system(size: 11))
+            .font(.system(size: compact ? 10 : 11))
             .foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(compact ? 1 : nil)
+            .fixedSize(horizontal: false, vertical: !compact)
+            .help(full)
     }
 }
 
@@ -245,7 +255,7 @@ struct AccountUsage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: showsHeader ? 6 : 9) {
             if showsHeader {
                 HStack(spacing: 6) {
                     Text(snapshot.account.label ?? L("Default", "Standard"))
@@ -263,9 +273,15 @@ struct AccountUsage: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            ForEach(snapshot.windows) { window in QuotaRow(window: window) }
+            ForEach(snapshot.windows) { window in
+                if showsHeader && CompactQuotaRow.fits(window) {
+                    CompactQuotaRow(window: window)
+                } else {
+                    QuotaRow(window: window)
+                }
+            }
             if !sameAccountLabels.isEmpty {
-                SameAccountWarning(labels: sameAccountLabels)
+                SameAccountWarning(labels: sameAccountLabels, compact: true)
             }
             if let balance {
                 MetricLine(label: L("Balance", "Saldo"), value: balance, detail: nil)
@@ -285,7 +301,8 @@ struct AccountUsage: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            if let lastSuccessfulAt = snapshot.lastSuccessfulAt {
+            // Fresh readings say nothing extra; the footer has the time.
+            if snapshot.isStale || snapshot.errorMessage != nil, let lastSuccessfulAt = snapshot.lastSuccessfulAt {
                 Text(
                     (snapshot.isStale
                         ? L("Saved reading · last successful", "Lagret måling · sist vellykket")
@@ -301,7 +318,7 @@ struct AccountUsage: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-            if let credentialSourceName {
+            if snapshot.errorMessage != nil, let credentialSourceName {
                 Text(credentialSourceName)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)

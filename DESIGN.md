@@ -14,15 +14,20 @@ macOS 26 Tahoe and later. Real Liquid Glass (`glassEffect`, `.glass` buttons) �
   Provider name, account subtitle, and experimental badge have separate lines
   rather than competing in a single crowded row.
 - Every window remains visible: label, reset time, meter, percentage left.
-  The trailing value column is 72pt wide so stacked meters align.
-  Long window/reset labels stack vertically instead of clipping.
-- Balances, source, last successful reading, and errors stay visible. Error text
-  wraps in full; the popover scrolls rather than hiding recovery instructions.
+  A provider with one account uses two-line rows (label and reset above, meter
+  and value below; the value column is 72pt wide so meters align). A provider
+  with several accounts uses one line per percentage window: label, meter,
+  percent, short reset. Absolute values keep the two-line row.
+- Balances and errors stay visible; error text wraps in full. Last successful
+  reading and source appear only for a saved (stale) reading or an error. The
+  footer carries the overall update time.
+- Accounts sharing one sign-in show a one-line "Shared with …" note; the full
+  explanation is in its help text and the Settings detail.
 - Bottom: freshness text, circular Refresh button, and Options menu containing
   Add Account, Settings, Check for Updates, and Quit.
-- Height follows content, scrolling past 600pt.
+- Height follows content up to the screen height minus 140pt (never below
+  600pt), then scrolls with no visible scrollbar and a soft edge fade.
 - Meters show what's **left**: system accent normally, orange at 80% used, red at 90%.
-- Scroll content reserves a 16pt trailing gutter so the native scrollbar never overlaps provider cards.
 - Menu bar (General → Menu Bar): icon only, percentage only, icon + percentage, or provider + percentage. Default is the lowest remaining percentage across all accounts; an account and optionally a specific window can be pinned. Never switch away from an unavailable pinned source. Hover/accessibility text identifies provider, account, window, timestamp, and cached state. Cached readings are dimmed; unavailable percentages show an em dash. Existing icon-only preferences are preserved.
 
 ## Settings (native toolbar tabs)
