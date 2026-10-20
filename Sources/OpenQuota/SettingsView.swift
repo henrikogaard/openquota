@@ -6,7 +6,7 @@ import OpenQuotaCore
 /// Settings in the standard macOS shape: toolbar tabs, with a Mail-style
 /// Accounts pane (list with +/− and the selection's form beside it).
 struct SettingsView: View {
-    enum Tab: Hashable { case accounts, general }
+    enum Tab: Hashable { case accounts, history, general }
 
     var model: AppModel
     @State private var tab = Tab.accounts
@@ -17,6 +17,9 @@ struct SettingsView: View {
             AccountsPane(model: model, adding: $adding)
                 .tabItem { Label(L("Accounts", "Kontoer"), systemImage: "person.crop.circle") }
                 .tag(Tab.accounts)
+            HistoryPane(model: model)
+                .tabItem { Label(L("History", "Historikk"), systemImage: "chart.bar.xaxis") }
+                .tag(Tab.history)
             GeneralPane(model: model)
                 .tabItem { Label(L("General", "Generelt"), systemImage: "gearshape") }
                 .tag(Tab.general)

@@ -14,14 +14,38 @@ invoice or convert subscription percentages into dollars.
 - Codex JSONL rollouts under `~/.codex/sessions` and `archived_sessions`, or
   `CODEX_HOME`.
 - The corresponding directories of explicitly connected Claude/Codex profiles.
-- Today, Yesterday, or 30 calendar days including today, in the Mac's time zone.
+- Today, Yesterday, or 30 calendar days including today, in the Mac's time zone,
+  in the popover; 30 days, 90 days, 1 year or all saved history under
+  **Settings → History**.
 - Separate Claude and Codex totals, in USD.
 
 No browser, private usage endpoint, or subscription-token access is involved.
 The opt-in concerns **local logs only**. Nothing is uploaded or sent to a pricing
 service. The scanner reads JSONL lines transiently but retains only token counts,
 model IDs, timestamps, request identities and costs—not prompts or responses.
-No usage cache is written to disk.
+The parsed-request cache stays in memory.
+
+## Saved history
+
+Claude Code deletes its session logs after 30 days by default, so OpenQuota
+saves **daily totals** in `~/Library/Application Support/openquota/spend-history.json`
+(0600). One row per local day, provider and model: input, cache-write,
+cache-read and output tokens, estimated and log-reported cost, and priced and
+unpriced request counts. No prompts, request IDs, file paths or accounts.
+
+- The first scan reaches back up to a year, as far as the logs and the scan
+  limits allow. If it hits a limit, later scans repeat the last 30 days until
+  one completes (each retry reuses files already read), up to six tries; then
+  those days stay marked incomplete.
+- Later scans start the day before the previous scan and read only log files
+  modified since then; older days come from the saved file.
+- A saved day is replaced only when a scan sees at least as many requests for
+  it, so days whose logs were deleted keep their saved totals.
+- Days a scan could not read completely are marked and shown as possibly
+  incomplete.
+- Turning log reading off stops saving new days but keeps the file.
+  **Settings → History → Delete History…** removes it; the next scan rebuilds
+  whatever the logs still hold.
 
 Other devices, deleted logs, unsupported tools and disabled/unrecorded logging
 are not covered. Default CLI directories can contain several logins' history.
@@ -71,6 +95,7 @@ than a claim that the total is complete.
   minutes; Refresh can request another scan but never overlaps a running scan.
 - Unchanged files reuse parsed metadata by path, size and modification time.
   Changed files are reread from their start so cumulative baselines stay valid.
+  Files not modified since the scan start are skipped.
 - Only regular `.jsonl` files under the selected log roots are read; symlinks
   inside them are skipped. Credentials, settings and other files are ignored.
 - Each pass is bounded to 20,000 directory entries, 2,000 files, 64 MiB per file,

@@ -30,6 +30,8 @@ public actor LocalSpendScanner {
     private let limits: Limits
     private var pricing: ModelPricing?
     private var cache: [String: CachedFile] = [:]
+    /// Cached files hold only events after this; an earlier start needs a reread.
+    private var cachedSince: Date?
 
     public init() { limits = Limits() }
     init(limits: Limits, pricing: ModelPricing) {
@@ -37,11 +39,20 @@ public actor LocalSpendScanner {
         self.pricing = pricing
     }
 
-    public func clear() { cache.removeAll() }
+    public func clear() {
+        cache.removeAll()
+        cachedSince = nil
+    }
 
-    public func scan(sources: [SpendLogSource], now: Date = Date(), calendar: Calendar = .current) -> SpendSummary {
+    /// Reads events from `since` (default: the last 30 days). Files not
+    /// modified since then can't hold newer events and are skipped.
+    public func scan(
+        sources: [SpendLogSource], since: Date? = nil, now: Date = Date(), calendar: Calendar = .current
+    ) -> SpendSummary {
         let start = ContinuousClock.now
-        let since = SpendPeriod.thirtyDays.interval(now: now, calendar: calendar).start
+        let since = since ?? SpendPeriod.thirtyDays.interval(now: now, calendar: calendar).start
+        if let cachedSince, since < cachedSince { cache.removeAll() }
+        cachedSince = since
         var result = SpendSummary()
         result.scannedAt = now
         result.sourceCount = sources.count
@@ -220,12 +231,14 @@ public actor LocalSpendScanner {
     }
 
     static func aggregate(_ events: [SpendEvent], pricing: ModelPricing, calendar: Calendar) -> [SpendDay] {
-        var days: [SpendProvider: [Date: SpendTotal]] = [:]
+        struct Key: Hashable { let day: Date; let model: String }
+        var days: [SpendProvider: [Key: SpendTotal]] = [:]
         var rates: [String: ModelRates?] = [:]
         var codexRates: [String: CodexUsagePricing.RateResolution] = [:]
         for event in events {
-            let day = calendar.startOfDay(for: event.timestamp)
+            let day = Key(day: calendar.startOfDay(for: event.timestamp), model: event.model)
             var total = days[event.provider, default: [:]][day] ?? SpendTotal()
+            total.add(event.tokens)
             let cost: Double?
             if let recorded = event.recordedUSD {
                 cost = recorded
@@ -255,8 +268,10 @@ public actor LocalSpendScanner {
             days[event.provider, default: [:]][day] = total
         }
         return SpendProvider.allCases.flatMap { provider in
-            (days[provider] ?? [:]).map { SpendDay(date: $0.key, provider: provider, total: $0.value) }
-                .sorted { $0.date < $1.date }
+            (days[provider] ?? [:]).map {
+                SpendDay(date: $0.key.day, provider: provider, model: $0.key.model, total: $0.value)
+            }
+            .sorted { ($0.date, $0.model) < ($1.date, $1.model) }
         }
     }
 }

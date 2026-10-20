@@ -32,7 +32,10 @@ macOS 26 Tahoe and later. Real Liquid Glass (`glassEffect`, `.glass` buttons) â€
 
 ## Settings (native toolbar tabs)
 
-- `TabView` toolbar tabs: Accounts and General. Accounts has a Mail-style bordered
+- `TabView` toolbar tabs: Accounts, History and General. History shows a range
+  picker (30 days, 90 days, 1 year, all), a cost/tokens switch, the total with
+  per-provider totals, a stacked bar chart (days, weeks or months; Claude
+  orange, Codex green), top models, and the saved-history note with Delete. Accounts has a Mail-style bordered
   list with a bottom +/âˆ’ bar, alongside a grouped detail `Form`.
 - Account rows separate provider, account label, and optional experimental badge.
   Long names have help text. Detail includes source, plan, usage, freshness, and
