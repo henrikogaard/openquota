@@ -36,6 +36,7 @@ final class AppModel {
         url: AppModel.appSupportDir.appendingPathComponent("profiles.json"))
     private let subscriptionStore = SubscriptionConnectionStore(
         url: AppModel.appSupportDir.appendingPathComponent("connections.json"))
+    private let claudeCLIRefreshRequests = ClaudeCLIRefreshRequests()
     private var codexLoginTask: Task<Void, Never>?
     private var codexLoginGeneration: UInt64 = 0
 
@@ -111,7 +112,8 @@ final class AppModel {
         if subscriptionConnections.contains(where: { $0.kind == .claudeStatusLine }) {
             providers.append(ClaudeStatusLineProvider(
                 connections: subscriptionConnections,
-                store: subscriptionStore))
+                store: subscriptionStore,
+                refreshRequests: claudeCLIRefreshRequests))
         }
         if subscriptionConnections.contains(where: { $0.kind == .codexAppServer }) {
             providers.append(CodexUsageProvider(
@@ -138,6 +140,7 @@ final class AppModel {
 
     func refreshNow() {
         guard !isDemo else { return }
+        claudeCLIRefreshRequests.request()
         refreshSpend(force: true)
         Task {
             await scheduler?.refreshAll(force: true)
@@ -220,14 +223,27 @@ final class AppModel {
         configurationChanged()
     }
 
-    func installClaudeStatusLine(label: String, configurationDirectory: String, helper: URL) throws {
+    func setClaudeCLIUsageCheck(_ enabled: Bool, for connection: SubscriptionConnection) throws {
+        guard !isDemo else { return }
+        try subscriptionStore.setCLIUsageCheck(enabled, for: connection.id)
+        if enabled { claudeCLIRefreshRequests.request() }
+        configurationChanged()
+    }
+
+    func installClaudeStatusLine(
+        label: String, configurationDirectory: String, helper: URL, cliUsageCheck: Bool = false
+    ) throws {
         guard !isDemo else { return }
         let directory = (configurationDirectory as NSString).expandingTildeInPath
         let installer = ClaudeStatusLineInstaller(store: subscriptionStore)
-        _ = try installer.install(
+        let connection = try installer.install(
             label: label,
             configurationDirectory: directory,
             helperExecutable: helper)
+        if cliUsageCheck {
+            try subscriptionStore.setCLIUsageCheck(true, for: connection.id)
+            claudeCLIRefreshRequests.request()
+        }
         configurationChanged()
     }
 

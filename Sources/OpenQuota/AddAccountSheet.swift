@@ -435,11 +435,15 @@ struct FormActions: View {
     var disabled: Bool
     var action: () -> Void
     var cancel: () -> Void
+    var back: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
             HStack {
+                if let back {
+                    Button(L("Back", "Tilbake"), action: back)
+                }
                 Spacer()
                 Button(L("Cancel", "Avbryt"), action: cancel).keyboardShortcut(.cancelAction)
                 Button(primary, action: action)

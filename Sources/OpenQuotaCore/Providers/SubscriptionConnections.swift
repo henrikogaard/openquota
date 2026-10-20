@@ -17,17 +17,21 @@ public struct SubscriptionConnection: Codable, Sendable, Identifiable, Equatable
     public let kind: SubscriptionConnectionKind
     public var label: String
     public let directory: String
+    /// Claude only: also check usage by running the Claude CLI (opt-in).
+    public var cliUsageCheck: Bool?
 
     public init(
         id: UUID = UUID(),
         kind: SubscriptionConnectionKind,
         label: String,
-        directory: String
+        directory: String,
+        cliUsageCheck: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
         self.label = label
         self.directory = directory
+        self.cliUsageCheck = cliUsageCheck
     }
 
     public var accountID: String {
@@ -152,6 +156,15 @@ public struct SubscriptionConnectionStore: Sendable {
         try save(values)
     }
 
+    public func setCLIUsageCheck(_ enabled: Bool, for id: UUID) throws {
+        var values = try connections()
+        guard let index = values.firstIndex(where: { $0.id == id && $0.kind == .claudeStatusLine }) else {
+            throw SubscriptionConnectionStoreError.connectionNotFound
+        }
+        values[index].cliUsageCheck = enabled ? true : nil
+        try save(values)
+    }
+
     public func appOwnedDirectory(for id: UUID) throws -> URL {
         let connectionsRoot = appOwnedConnectionsDirectory
         try Self.createPrivateDirectory(at: connectionsRoot)
@@ -171,8 +184,33 @@ public struct SubscriptionConnectionStore: Sendable {
             .standardizedFileURL
     }
 
-    public func readingURL(for id: UUID) throws -> URL {
-        try appOwnedDirectory(for: id).appendingPathComponent("reading.json")
+    public func readingURL(for id: UUID, source: ClaudeReadingSource? = nil) throws -> URL {
+        try appOwnedDirectory(for: id).appendingPathComponent(source?.fileName ?? "reading.json")
+    }
+
+    /// Where the opt-in Claude CLI check keeps its latest reading.
+    public func cliReadingURL(for id: UUID) throws -> URL {
+        try appOwnedDirectory(for: id).appendingPathComponent("cli-reading.json")
+    }
+
+    /// Tagged reading files the bridge has written for a connection, capped
+    /// so a flood of files cannot grow the menu. The most recently written
+    /// files win the cap, so a newly active account is never crowded out;
+    /// the result is in a stable order.
+    public func readingSources(for id: UUID) throws -> [ClaudeReadingSource] {
+        let directory = try appOwnedDirectory(for: id)
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let dated = names.compactMap { name -> (source: ClaudeReadingSource, modified: Date)? in
+            guard let source = ClaudeReadingSource(fileName: name) else { return nil }
+            let modified = (try? directory.appendingPathComponent(name)
+                .resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return (source, modified)
+        }
+        return dated.sorted { $0.modified > $1.modified }
+            .prefix(ClaudeReadingSource.maxPerConnection)
+            .map(\.source)
+            .sorted { $0.fileName < $1.fileName }
     }
 
     public func codexHome(for connection: SubscriptionConnection) throws -> URL {
@@ -299,7 +337,7 @@ public struct SubscriptionConnectionStore: Sendable {
             [.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: url.path)
     }
 
-    private static func writePrivate(_ data: Data, to url: URL) throws {
+    static func writePrivate(_ data: Data, to url: URL) throws {
         try createPrivateDirectory(at: url.deletingLastPathComponent())
         try data.write(to: url, options: .atomic)
         try FileManager.default.setAttributes(

@@ -97,14 +97,24 @@ public struct CLIProvider: UsageProvider {
                              providerID: spec.id, windows: windows)
     }
 
-    /// Runs the binary with a 10s watchdog; stdout must fit a JSON payload.
-    static func run(binary: URL, args: [String]) async throws -> Data {
+    /// Runs the binary with a watchdog (10s by default); stdout must fit a
+    /// JSON payload. `environment` and `currentDirectory` default to the
+    /// app's own; stdin is closed whenever an environment is given.
+    static func run(
+        binary: URL, args: [String],
+        environment: [String: String]? = nil,
+        currentDirectory: URL? = nil,
+        timeout: TimeInterval = 10
+    ) async throws -> Data {
         let cancellation = CLIRunCancellation()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 let run = CLIProcessRun(
                     binary: binary,
                     args: args,
+                    environment: environment,
+                    currentDirectory: currentDirectory,
+                    timeout: timeout,
                     continuation: continuation)
                 cancellation.install(run)
                 run.start()
@@ -149,6 +159,9 @@ private final class CLIProcessRun: @unchecked Sendable {
     private let readLock = NSLock()
     private let binary: URL
     private let args: [String]
+    private let environment: [String: String]?
+    private let currentDirectory: URL?
+    private let timeout: TimeInterval
     private var continuation: CheckedContinuation<Data, Error>?
     private var process: Process?
     private var stdout: Pipe?
@@ -162,10 +175,16 @@ private final class CLIProcessRun: @unchecked Sendable {
     init(
         binary: URL,
         args: [String],
+        environment: [String: String]?,
+        currentDirectory: URL?,
+        timeout: TimeInterval,
         continuation: CheckedContinuation<Data, Error>
     ) {
         self.binary = binary
         self.args = args
+        self.environment = environment
+        self.currentDirectory = currentDirectory
+        self.timeout = timeout
         self.continuation = continuation
     }
 
@@ -204,6 +223,11 @@ private final class CLIProcessRun: @unchecked Sendable {
         self.readFD = fd
         process.executableURL = binary
         process.arguments = args
+        if let environment {
+            process.environment = environment
+            process.standardInput = FileHandle.nullDevice
+        }
+        if let currentDirectory { process.currentDirectoryURL = currentDirectory }
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] process in
@@ -211,7 +235,7 @@ private final class CLIProcessRun: @unchecked Sendable {
         }
 
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + .seconds(10))
+        timer.schedule(deadline: .now() + timeout)
         timer.setEventHandler { [weak self] in
             self?.timedOut()
         }

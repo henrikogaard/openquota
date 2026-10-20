@@ -30,10 +30,13 @@ public actor SnapshotStore {
     public func register(account: AccountIdentity) {
         registeredAccounts[account.id] = account
         if var snapshot = snapshots[account.id] {
-            let cachedPlan = snapshot.account.plan
+            let cached = snapshot.account
             snapshot.account = account
             if snapshot.account.plan == nil {
-                snapshot.account.plan = cachedPlan
+                snapshot.account.plan = cached.plan
+            }
+            if snapshot.account.email == nil {
+                snapshot.account.email = cached.email
             }
             snapshot.providerID = account.providerID
             snapshots[account.id] = snapshot

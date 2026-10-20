@@ -8,7 +8,14 @@ import Darwin
 
 public struct CodexAccountRead: Sendable {
     public let planType: String?
+    public let email: String?
     public let rateLimits: Data
+
+    public init(planType: String?, email: String? = nil, rateLimits: Data) {
+        self.planType = planType
+        self.email = email
+        self.rateLimits = rateLimits
+    }
 }
 
 public enum CodexExecutableResolver {
@@ -131,6 +138,7 @@ public struct CodexUsageProvider: UsageProvider {
             environment: environment)
         var identity = account.account
         identity.plan = accountRead.planType
+        identity.email = accountRead.email ?? identity.email
         return try CodexUsageMapping.snapshot(
             result: accountRead.rateLimits,
             account: identity)
@@ -160,7 +168,7 @@ public enum CodexAppServerClient {
                 method: "account/rateLimits/read",
                 params: [:])
             let data = try JSONSerialization.data(withJSONObject: limits, options: [.sortedKeys])
-            return CodexAccountRead(planType: accountInfo.planType, rateLimits: data)
+            return CodexAccountRead(planType: accountInfo.planType, email: accountInfo.email, rateLimits: data)
         }
     }
 
@@ -201,7 +209,7 @@ public enum CodexAppServerClient {
         }
     }
 
-    private static func chatGPTAccount(from result: Any) throws -> (planType: String?, type: String) {
+    private static func chatGPTAccount(from result: Any) throws -> (planType: String?, email: String?, type: String) {
         guard let object = result as? [String: Any],
               let account = object["account"] as? [String: Any],
               let type = account["type"] as? String else {
@@ -210,7 +218,7 @@ public enum CodexAppServerClient {
         guard type == "chatgpt" else {
             throw ProviderError.badResponse(Localized.text("Sign in with ChatGPT to use subscription limits", "Logg inn med ChatGPT for å se abonnementsgrensene"))
         }
-        return (account["planType"] as? String, type)
+        return (account["planType"] as? String, account["email"] as? String, type)
     }
 
     private static func validatedAuthURL(_ value: String) -> URL? {

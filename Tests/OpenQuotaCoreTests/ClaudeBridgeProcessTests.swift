@@ -57,12 +57,34 @@ final class ClaudeBridgeProcessTests: XCTestCase {
         XCTAssertNotNil(try? Data(contentsOf: pidFile))
     }
 
+    func test_desktopAccountReadingGoesToItsOwnFile() throws {
+        let input = Data(#"{"rate_limits":{"five_hour":{"used_percentage":7}}}"#.utf8)
+        let environment = [
+            "CLAUDE_CODE_ENTRYPOINT": "claude-desktop",
+            "CLAUDE_CODE_ACCOUNT_UUID": "fixture-account-uuid",
+            "CLAUDE_CODE_ORGANIZATION_UUID": "fixture-org-uuid",
+            "CLAUDE_CODE_USER_EMAIL": "fixture@example.com",
+        ]
+        let result = try runBridge(command: "printf ok", input: input, environment: environment)
+        XCTAssertEqual(result.status, 0)
+        let source = try XCTUnwrap(ClaudeReadingSource.from(environment: environment))
+        let files = try FileManager.default.contentsOfDirectory(atPath: result.connectionDirectory.path)
+        XCTAssertEqual(Set(files), ["bridge-metadata.json", source.fileName])
+        let data = try Data(contentsOf: result.connectionDirectory.appendingPathComponent(source.fileName))
+        let encoded = String(decoding: data, as: UTF8.self)
+        for value in ["fixture-account-uuid", "fixture-org-uuid", "fixture@example.com"] {
+            XCTAssertFalse(encoded.contains(value))
+        }
+        XCTAssertEqual(try JSONDecoder.openQuota.decode(ClaudeUsageReading.self, from: data).fiveHour?.usedPercentage, 7)
+    }
+
     private func runBridge(
         command: String,
         input: Data,
         in parent: URL? = nil,
         cleanupPIDFile: URL? = nil,
-        timeout: TimeInterval = 5
+        timeout: TimeInterval = 5,
+        environment: [String: String] = [:]
     ) throws -> BridgeResult {
         signal(SIGPIPE, SIG_IGN)
         let directory = try makeDirectory(inside: parent)
@@ -81,6 +103,10 @@ final class ClaudeBridgeProcessTests: XCTestCase {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["--connection-directory", directory.path]
+        // Tests may run inside a Claude session; never let its tags leak in.
+        process.environment = ProcessInfo.processInfo.environment
+            .filter { !$0.key.hasPrefix("CLAUDE") }
+            .merging(environment) { $1 }
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = FileHandle.nullDevice

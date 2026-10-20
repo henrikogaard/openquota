@@ -108,6 +108,74 @@ final class SubscriptionUsageTests: XCTestCase {
         }
     }
 
+    func test_readingSourceTagsOnlyDesktopWithAccount() throws {
+        XCTAssertNil(ClaudeReadingSource.from(environment: [:]))
+        XCTAssertNil(ClaudeReadingSource.from(environment: [
+            "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_ACCOUNT_UUID": "a"]))
+        XCTAssertNil(ClaudeReadingSource.from(environment: ["CLAUDE_CODE_ENTRYPOINT": "claude-desktop"]))
+        let a = try XCTUnwrap(ClaudeReadingSource.from(environment: [
+            "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CODE_ACCOUNT_UUID": "a",
+            "CLAUDE_CODE_ORGANIZATION_UUID": "org"]))
+        let b = try XCTUnwrap(ClaudeReadingSource.from(environment: [
+            "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CODE_ACCOUNT_UUID": "b",
+            "CLAUDE_CODE_ORGANIZATION_UUID": "org"]))
+        XCTAssertNotEqual(a, b)
+        XCTAssertEqual(ClaudeReadingSource(fileName: a.fileName), a)
+        for name in ["reading.json", "reading-desktop-XYZ.json", "reading-desktop-ABCDEF12.json",
+                     "reading-other-abcdef12.json", "reading-desktop-abcdef12-x.json", "../reading-desktop-abcdef12.json"] {
+            XCTAssertNil(ClaudeReadingSource(fileName: name), name)
+        }
+    }
+
+    func test_readingSourceCapKeepsMostRecentlyWrittenFiles() throws {
+        let directory = try makeDirectory()
+        let config = try makeDirectory(inside: directory, name: "claude-config")
+        let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
+        let connection = try store.addClaude(label: "Claude", configurationDirectory: config.path)
+        let old = Date(timeIntervalSince1970: 1_700_000_000)
+        for index in 0..<ClaudeReadingSource.maxPerConnection {
+            let source = try XCTUnwrap(ClaudeReadingSource(client: .desktop, accountHash: String(format: "0000000%x", index)))
+            let url = try store.readingURL(for: connection.id, source: source)
+            try Data("{}".utf8).write(to: url)
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
+        }
+        // Sorts after every old file by name, so a name-based cap would drop it.
+        let fresh = try XCTUnwrap(ClaudeReadingSource(client: .desktop, accountHash: "ffffffff"))
+        try Data("{}".utf8).write(to: store.readingURL(for: connection.id, source: fresh))
+
+        let sources = try store.readingSources(for: connection.id)
+        XCTAssertEqual(sources.count, ClaudeReadingSource.maxPerConnection)
+        XCTAssertTrue(sources.contains(fresh))
+        XCTAssertEqual(sources, sources.sorted { $0.fileName < $1.fileName })
+    }
+
+    func test_desktopReadingOnAnotherAccountGetsItsOwnCard() async throws {
+        let directory = try makeDirectory()
+        let config = try makeDirectory(inside: directory, name: "claude-config")
+        let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
+        let connection = try store.addClaude(label: "Claude", configurationDirectory: config.path)
+        let desktop = try XCTUnwrap(ClaudeReadingSource(client: .desktop, accountHash: "0123abcd"))
+        let now = Date()
+        try JSONEncoder.openQuota.encode(ClaudeUsageReading(
+            recordedAt: now, fiveHour: .init(usedPercentage: 10, resetsAt: nil), sevenDay: nil))
+            .write(to: store.readingURL(for: connection.id))
+        try JSONEncoder.openQuota.encode(ClaudeUsageReading(
+            recordedAt: now, fiveHour: .init(usedPercentage: 80, resetsAt: nil), sevenDay: nil))
+            .write(to: store.readingURL(for: connection.id, source: desktop))
+
+        let provider = ClaudeStatusLineProvider(connections: [connection], store: store)
+        let accounts = try await provider.accounts()
+        XCTAssertEqual(accounts.count, 2)
+        XCTAssertEqual(accounts[0].account.id, connection.accountID)
+        XCTAssertNotEqual(accounts[1].account.id, connection.accountID)
+        XCTAssertEqual(accounts[1].account.label, "Claude · Desktop")
+        let cli = try await provider.refresh(account: accounts[0])
+        let app = try await provider.refresh(account: accounts[1])
+        XCTAssertEqual(cli.windows.first?.used, 10)
+        XCTAssertEqual(app.windows.first?.used, 80)
+        XCTAssertEqual(app.account.id, accounts[1].account.id)
+    }
+
     func test_codexHomeCanBePreparedBeforeConnectionIsSaved() throws {
         let directory = try makeDirectory()
         let store = SubscriptionConnectionStore(url: directory.appendingPathComponent("connections.json"))
@@ -459,6 +527,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
         let executable = try makeExecutable(in: directory, name: "codex", script: serverScript())
         let result = try await CodexAppServerClient.readAccount(executable: executable, codexHome: home)
         XCTAssertEqual(result.planType, "plus")
+        XCTAssertEqual(result.email, "fixture@example.com")
         XCTAssertTrue(String(decoding: result.rateLimits, as: UTF8.self).contains("rateLimits"))
         let observed = try String(
             contentsOf: home.appendingPathComponent("observed.txt"),
@@ -619,7 +688,7 @@ final class SubscriptionCodexAppServerTests: XCTestCase {
                         timeout) sleep 5; exit 0 ;;
                         cancel) printf '%s' "$$" > "$CODEX_HOME/server.pid"; sleep 60; exit 0 ;;
                     esac
-                    printf '{"jsonrpc":"2.0","id":%s,"result":{"account":{"type":"%s","planType":"plus"},"requiresOpenaiAuth":true}}\\n' "$request_id" "$TYPE"
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"account":{"type":"%s","planType":"plus","email":"fixture@example.com"},"requiresOpenaiAuth":true}}\\n' "$request_id" "$TYPE"
                     ;;
                 *'"method":"account/rateLimits/read"'*)
                     printf '{"jsonrpc":"2.0","id":%s,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":20,"windowDurationMins":300}}}}\\n' "$request_id"

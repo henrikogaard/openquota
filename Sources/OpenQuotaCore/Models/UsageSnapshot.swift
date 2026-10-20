@@ -11,11 +11,16 @@ public struct AccountIdentity: Codable, Equatable, Hashable, Sendable {
     public var label: String?
     public var plan: String?
 
-    public init(providerID: String, id: String, label: String? = nil, plan: String? = nil) {
+    /// The provider's signed-in email, when it reports one. Display and
+    /// duplicate detection only; never part of `id`.
+    public var email: String?
+
+    public init(providerID: String, id: String, label: String? = nil, plan: String? = nil, email: String? = nil) {
         self.providerID = providerID
         self.id = id
         self.label = label
         self.plan = plan
+        self.email = email
     }
 
     /// Mint `provider@ab12cd34` from a stable identity key.
@@ -82,6 +87,16 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     }
 
     /// Worst remaining percent across consumption windows — drives the menu-bar number.
+    /// Other snapshots signed in to the same provider account, by email.
+    /// Two connections to one account show the same quota twice.
+    public func sameAccount(in all: [UsageSnapshot]) -> [UsageSnapshot] {
+        guard let email = account.email?.lowercased(), !email.isEmpty else { return [] }
+        return all.filter {
+            $0.account.id != account.id && $0.providerID == providerID
+                && $0.account.email?.lowercased() == email
+        }
+    }
+
     public var lowestPercentRemaining: Double? {
         windows.compactMap(\.percentRemaining).min()
     }

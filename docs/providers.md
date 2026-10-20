@@ -122,7 +122,13 @@ previous `statusLine` object in private app-owned metadata. The helper receives
 Claude Code's documented status-line JSON, retains only `recordedAt`,
 `five_hour.used_percentage`, `five_hour.resets_at`,
 `seven_day.used_percentage`, and `seven_day.resets_at`, and atomically writes
-that sanitized reading. It never saves raw stdin/session context, cwd,
+that sanitized reading. A reading from Claude Desktop, which passes its
+signed-in account to Claude Code, goes to `reading-desktop-<hash>.json`
+instead of `reading.json`, where `<hash>` is eight hex characters derived from
+the account and organization ids. Each such file becomes its own card,
+labeled "<connection> · Desktop", so a Desktop login on another account never
+overwrites the CLI's card. To tag another client, add a case to
+`ClaudeReadingSource.Client`. It never saves raw stdin/session context, cwd,
 transcript or prompt, and it makes no network request. It invokes the previous
 status-line command with the same stdin and forwards its stdout.
 
@@ -133,6 +139,21 @@ new status-line event. On disconnect, the original status-line object is
 restored only if the current command still exactly matches OpenQuota's
 installed command. Later user edits and unrelated settings are preserved.
 Settings are not removed if a user changed the command to refer to the helper.
+
+**Check with Claude CLI (opt-in, per connection).** OpenQuota runs the
+user's `claude` with `-p --output-format stream-json --verbose`, a one-word
+prompt on `haiku`, no tools, MCP servers, slash commands or user settings
+(`--setting-sources project` in an app-owned working folder), and
+`--no-session-persistence`. `CLAUDE*` and `ANTHROPIC_*` variables are removed;
+`CLAUDE_CONFIG_DIR` is set to the connection's folder unless it is `~/.claude`,
+because setting it changes which Keychain item Claude Code reads. OpenQuota
+keeps only `five_hour` and `seven_day` utilization and reset times from the
+last `rate_limit_event.rate_limit_info.unifiedWindows`, in
+`cli-reading.json`. The card shows whichever of that and the status-line
+reading is newer. Checks run when the newer reading is 30 minutes old, or a
+minute old after Refresh; readings are outdated after 35 minutes. Live-checked
+once with Claude Code 2.1.299; `unifiedWindows` is not in the public docs, so a
+CLI update may change it.
 
 Official documentation: [Claude Code status line](https://code.claude.com/docs/en/statusline)
 and [Claude usage dashboard](https://claude.ai/settings/usage).

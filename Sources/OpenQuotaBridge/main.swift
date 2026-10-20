@@ -23,7 +23,8 @@ struct OpenQuotaBridge {
         }
         if let reading = try? ClaudeUsageReading.capture(input),
            let encoded = try? encodeReading(reading) {
-            writeReading(encoded, to: directory.appendingPathComponent("reading.json"))
+            let source = ClaudeReadingSource.from(environment: ProcessInfo.processInfo.environment)
+            writeReading(encoded, to: directory.appendingPathComponent(source?.fileName ?? "reading.json"))
         }
         guard let command = metadata.originalCommand, !command.isEmpty else { return }
         let status = run(command: command, input: input, deadline: deadline)
