@@ -72,7 +72,9 @@ struct QuotaRow: View {
 
     private var resetText: String? {
         guard let reset = Format.reset(window) else { return nil }
-        return reset == Format.resetting ? L("Resetting now", "Nullstilles nå") : L("Resets in \(reset)", "Nullstilles om \(reset)")
+        if reset == Format.resetting { return L("Resetting now", "Nullstilles nå") }
+        let text = L("Resets in \(reset)", "Nullstilles om \(reset)")
+        return Format.resetDay(window).map { "\(text) · \($0)" } ?? text
     }
 
     var body: some View {
@@ -260,10 +262,17 @@ enum Format {
         return countdown(to: resetsAt)
     }
 
+    /// The weekday of a reset two or more days away, as extra context next to
+    /// the countdown ("4d 3h · Sun").
+    static func resetDay(_ window: UsageWindow, now: Date = Date()) -> String? {
+        guard let resetsAt = window.resetsAt, resetsAt.timeIntervalSince(now) >= 2 * 86_400 else { return nil }
+        return resetsAt.formatted(.dateTime.weekday(.abbreviated).locale(Localized.appLocale))
+    }
+
+    /// Time left until a reset: "4d 3h", "5h 12m" or "8m".
     static func countdown(to date: Date, now: Date = Date()) -> String {
         let seconds = Int(date.timeIntervalSince(now))
         let days = seconds / 86_400, hours = (seconds % 86_400) / 3_600, minutes = (seconds % 3_600) / 60
-        if days >= 2 { return date.formatted(.dateTime.weekday(.abbreviated).locale(Localized.appLocale)) }
         let h = L("h", "t")
         if days >= 1 { return "\(days)d \(hours)\(h)" }
         if hours >= 1 { return "\(hours)\(h) \(minutes)m" }
