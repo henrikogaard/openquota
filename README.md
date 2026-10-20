@@ -43,7 +43,7 @@ not a normal Dock window. Check for updates through the Options menu.
 OpenQuota prioritizes a small native UI, independent account state and bounded background work:
 
 - **No automatic browser-cookie import.** Providers use API keys, local CLI sources, or explicit connections. Cursor is an opt-in exception using a manually supplied session and unofficial endpoints.
-- **Optional local spend estimates.** Opt in to a bounded Claude/Codex log scan for Today, Yesterday and 30 Days. This estimates API-rate value, not subscription charges; prompts are not retained and nothing is uploaded. [Pricing and privacy](docs/estimated-spend.md).
+- **Optional local spend estimates.** Opt in to a bounded Claude/Codex log scan for Today, Yesterday and 30 Days, with saved daily token and cost history (30 days to all time) under Settings → History. This estimates API-rate value, not subscription charges; prompts are not retained and nothing is uploaded. [Pricing and privacy](docs/estimated-spend.md).
 - **Shared ephemeral URLSession.** Four concurrent account fetches; last-good snapshots replace old values rather than accumulating history.
 - **Hard timeouts.** 15s request / 30s resource / 60s per-fetch ceiling. A blocked network fails fast instead of hanging.
 

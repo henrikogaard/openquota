@@ -23,6 +23,10 @@ final class AppModel {
     private(set) var spendEnabled = UserDefaults.standard.bool(forKey: "localSpendEnabled")
     private(set) var spend = SpendSummary()
     private(set) var spendScanning = false
+    /// Daily totals saved on this Mac; outlives the logs it was read from.
+    private(set) var spendHistory = SpendHistory()
+    private let historyStore = SpendHistoryStore(
+        url: AppModel.appSupportDir.appendingPathComponent("spend-history.json"))
     private let spendScanner = LocalSpendScanner()
     private nonisolated let spendTask = TaskBox()
     private var spendGeneration: UInt64 = 0
@@ -50,8 +54,10 @@ final class AppModel {
             snapshots = DemoSnapshots.all
             spendEnabled = true
             spend = Self.demoSpend()
+            spendHistory.record(spend, since: .distantPast)
             return
         }
+        spendHistory = historyStore.load()
         let cached = cache.load().mapValues { snapshot in
             var stale = snapshot
             stale.isStale = true
@@ -195,11 +201,42 @@ final class AppModel {
         let generation = spendGeneration
         let sources = SpendLogSource.localSources(connections: subscriptionConnections)
         let scanner = spendScanner
+        // Only logs written since the day before the last scan; older days
+        // come from the saved history.
+        let since = spendHistory.nextScanStart(now: Date())
         spendTask.task = Task { [weak self] in
-            let summary = await scanner.scan(sources: sources)
+            let summary = await scanner.scan(sources: sources, since: since)
             guard !Task.isCancelled, let self, self.spendEnabled, self.spendGeneration == generation else { return }
-            self.spend = summary
+            var history = self.spendHistory
+            history.record(summary, since: since)
+            self.spendHistory = history
+            do { try self.historyStore.save(history) }
+            catch { self.statusMessage = L("Couldn't save usage history", "Kunne ikke lagre brukshistorikken") }
+            var merged = summary
+            merged.days = history.days()
+            merged.hasLogs = summary.hasLogs || !history.isEmpty
+            merged.isPartial = summary.isPartial || history.hasIncompleteDays(.days30)
+            self.spend = merged
             self.spendScanning = false
+        }
+    }
+
+    /// Deletes the saved daily totals. The next scan rebuilds what the logs
+    /// still hold.
+    func deleteSpendHistory() {
+        guard !isDemo else { return }
+        do { try historyStore.delete() }
+        catch { statusMessage = L("Couldn't delete usage history", "Kunne ikke slette brukshistorikken") }
+        spendHistory = SpendHistory()
+        spendGeneration &+= 1
+        spendTask.task?.cancel()
+        spend = SpendSummary()
+        spendScanning = false
+        let scanner = spendScanner
+        spendTask.task = Task { [weak self] in
+            await scanner.clear()
+            guard !Task.isCancelled else { return }
+            self?.refreshSpend(force: true)
         }
     }
 

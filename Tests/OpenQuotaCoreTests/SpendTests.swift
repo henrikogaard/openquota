@@ -79,11 +79,13 @@ final class SpendTests: XCTestCase {
         zero["costUSD"] = 0
         let events = try [known, otherRequest, zero, claude(id: "unknown", model: "unknown")]
             .flatMap { try parse($0, with: &parser) }
-        let day = LocalSpendScanner.aggregate(LocalSpendScanner.deduplicate(events), pricing: pricing, calendar: calendar)[0]
-        XCTAssertEqual(day.total.recordedUSD, 2.5)
-        XCTAssertEqual(day.total.estimatedUSD, 0)
-        XCTAssertEqual(day.total.unpricedEvents, 1)
-        XCTAssertEqual(day.total.pricedEvents, 3)
+        let rows = LocalSpendScanner.aggregate(LocalSpendScanner.deduplicate(events), pricing: pricing, calendar: calendar)
+        XCTAssertEqual(Set(rows.map(\.model)), ["known", "unknown"])
+        let total = rows.reduce(into: SpendTotal()) { $0.add($1.total) }
+        XCTAssertEqual(total.recordedUSD, 2.5)
+        XCTAssertEqual(total.estimatedUSD, 0)
+        XCTAssertEqual(total.unpricedEvents, 1)
+        XCTAssertEqual(total.pricedEvents, 3)
     }
 
     func testDuplicateWithRicherSpeedKeepsRecordedCost() throws {
@@ -131,6 +133,29 @@ final class SpendTests: XCTestCase {
         let events = try parse(codex(input: 1100, cached: 240, output: 120), with: &parser)
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].tokens.totalTokens, 120)
+    }
+
+    func testScanStartSkipsUntouchedFilesAndCountsTokens() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let old = root.appendingPathComponent("old.jsonl")
+        let fresh = root.appendingPathComponent("fresh.jsonl")
+        try json(claude(id: "old", model: "known")).write(to: old)
+        try json(claude(id: "fresh", model: "known")).write(to: fresh)
+        let lastWeek = now.addingTimeInterval(-7 * 86_400)
+        try FileManager.default.setAttributes([.modificationDate: lastWeek], ofItemAtPath: old.path)
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let sources = [SpendLogSource(provider: .claude, directory: root)]
+        let since = calendar.startOfDay(for: now.addingTimeInterval(-86_400))
+        let recent = await scanner.scan(sources: sources, since: since, now: now, calendar: calendar)
+        XCTAssertEqual(recent.filesRead, 1, "A file untouched since the start is not read")
+        let total = recent.total(period: .today, now: now, calendar: calendar)
+        XCTAssertEqual(total.inputTokens, 100)
+        XCTAssertEqual(total.outputTokens, 20)
+        XCTAssertEqual(recent.days.first?.model, "known")
+        // An earlier start can't reuse files cached for a later one.
+        let wider = await scanner.scan(sources: sources, since: lastWeek.addingTimeInterval(-60), now: now, calendar: calendar)
+        XCTAssertEqual(wider.filesRead, 2)
     }
 
     func testScanCacheAppendDeletionAndPrivacyBoundary() async throws {

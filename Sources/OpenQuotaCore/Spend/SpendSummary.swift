@@ -26,22 +26,63 @@ public enum SpendPeriod: String, CaseIterable, Sendable {
     }
 }
 
-public struct SpendTotal: Sendable {
+public struct SpendTotal: Codable, Sendable, Equatable {
     public var estimatedUSD: Double = 0
     public var recordedUSD: Double = 0
     public var pricedEvents = 0
     public var unpricedEvents = 0
+    /// Plain input, cache writes (5 min + 1 h), cache reads and output.
+    public var inputTokens = 0
+    public var cacheWriteTokens = 0
+    public var cacheReadTokens = 0
+    public var outputTokens = 0
     public var dollars: Double { estimatedUSD + recordedUSD }
+    public var events: Int { pricedEvents + unpricedEvents }
+    public var tokens: Int { inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens }
     public init() {}
+
+    public mutating func add(_ other: SpendTotal) {
+        estimatedUSD += other.estimatedUSD
+        recordedUSD += other.recordedUSD
+        pricedEvents += other.pricedEvents
+        unpricedEvents += other.unpricedEvents
+        inputTokens += other.inputTokens
+        cacheWriteTokens += other.cacheWriteTokens
+        cacheReadTokens += other.cacheReadTokens
+        outputTokens += other.outputTokens
+    }
+
+    mutating func add(_ tokens: TokenBreakdown) {
+        inputTokens += tokens.input
+        cacheWriteTokens += tokens.cacheWrite5m + tokens.cacheWrite1h
+        cacheReadTokens += tokens.cacheRead
+        outputTokens += tokens.output
+    }
+
+    // Older saved totals have no token fields.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        estimatedUSD = try c.decodeIfPresent(Double.self, forKey: .estimatedUSD) ?? 0
+        recordedUSD = try c.decodeIfPresent(Double.self, forKey: .recordedUSD) ?? 0
+        pricedEvents = try c.decodeIfPresent(Int.self, forKey: .pricedEvents) ?? 0
+        unpricedEvents = try c.decodeIfPresent(Int.self, forKey: .unpricedEvents) ?? 0
+        inputTokens = try c.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
+        cacheWriteTokens = try c.decodeIfPresent(Int.self, forKey: .cacheWriteTokens) ?? 0
+        cacheReadTokens = try c.decodeIfPresent(Int.self, forKey: .cacheReadTokens) ?? 0
+        outputTokens = try c.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+    }
 }
 
+/// One provider's usage of one model on one local calendar day.
 public struct SpendDay: Sendable {
     public let date: Date
     public let provider: SpendProvider
+    public let model: String
     public var total: SpendTotal
-    public init(date: Date, provider: SpendProvider, total: SpendTotal) {
+    public init(date: Date, provider: SpendProvider, model: String = "", total: SpendTotal) {
         self.date = date
         self.provider = provider
+        self.model = model
         self.total = total
     }
 }
@@ -65,12 +106,7 @@ public struct SpendSummary: Sendable {
         return days.filter {
             $0.date >= interval.start && $0.date < interval.end
                 && (provider == nil || $0.provider == provider)
-        }.reduce(into: SpendTotal()) { sum, day in
-            sum.estimatedUSD += day.total.estimatedUSD
-            sum.recordedUSD += day.total.recordedUSD
-            sum.pricedEvents += day.total.pricedEvents
-            sum.unpricedEvents += day.total.unpricedEvents
-        }
+        }.reduce(into: SpendTotal()) { sum, day in sum.add(day.total) }
     }
 }
 

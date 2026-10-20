@@ -15,7 +15,7 @@ a read-only credential or guarantee secrecy on a compromised Mac.
 | Profile/connection metadata | Local labels, IDs, paths—not keys |
 | Last-good usage | Bounded local snapshot cache |
 | Claude bridge | Sanitized percentages, reset times, and timestamp |
-| Local spend estimates | Opt-in bounded scan; parsed usage cache remains in memory |
+| Local spend estimates | Opt-in bounded scan; parsed usage cache remains in memory; daily token/cost totals per provider and model saved in `spend-history.json` (0600) |
 
 App-written private files use 0600 permissions in 0700 directories. Existing
 files acquire these protections when rewritten; this is not an audit of all
@@ -39,7 +39,9 @@ provider-owned files.
   OpenQuota never reads the token and keeps only the 5-hour and weekly
   percentages and reset times. Each check is one tiny request to Anthropic.
 - Optional spend scanning reads local logs transiently, retaining parsed usage
-  rather than prompts/responses. No pricing request uploads your logs.
+  rather than prompts/responses. Daily totals (tokens, cost, model, date) are
+  saved on this Mac for History and can be deleted there. No pricing request
+  uploads your logs.
   See [scan limits and exclusions](estimated-spend.md).
 - Sparkle checks and downloads updates from GitHub.
 
