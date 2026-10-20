@@ -17,11 +17,13 @@ echo "==> swift build -c release"
 swift build -c release
 
 # SPM may put products in a triple-scoped dir; resolve dynamically.
-BIN="$(find .build -path '*/release/openquota' -type f 2>/dev/null | head -1)"
-BRIDGE_BIN="$(find .build -path '*/release/openquota-bridge' -type f 2>/dev/null | head -1)"
-BUILD_DIR="$(dirname "$BIN")"
-[[ -n "$BIN" ]] || { echo "!! openquota binary not found under .build/*/release" >&2; exit 1; }
-[[ -n "$BRIDGE_BIN" ]] || { echo "!! openquota-bridge binary not found under .build/*/release" >&2; exit 1; }
+# Ask SwiftPM where products landed: .build/<triple>/release on the old build
+# system, .build/out/Products/Release on the new one.
+BUILD_DIR="$(swift build -c release --show-bin-path)"
+BIN="$BUILD_DIR/openquota"
+BRIDGE_BIN="$BUILD_DIR/openquota-bridge"
+[[ -f "$BIN" ]] || { echo "!! openquota binary not found in $BUILD_DIR" >&2; exit 1; }
+[[ -f "$BRIDGE_BIN" ]] || { echo "!! openquota-bridge binary not found in $BUILD_DIR" >&2; exit 1; }
 
 echo "==> assemble $APP (v$VERSION)"
 rm -rf "$APP"
