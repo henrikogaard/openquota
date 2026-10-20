@@ -19,6 +19,35 @@ struct SpendLogParser {
         self.fileIdentity = fileIdentity
     }
 
+    /// What a Codex parser carries from line to line, saved so a file can be
+    /// read on from where the last pass stopped.
+    struct State: Codable, Equatable {
+        var model = ""
+        var sessionID = ""
+        var previous: [Int]?
+        var sawMeta = false
+        var childGate: Date?
+        var fast = false
+        var ultrafast = false
+    }
+
+    var state: State {
+        get {
+            State(model: model, sessionID: sessionID,
+                  previous: previous.map { [$0.input, $0.cached, $0.output, $0.reasoning] },
+                  sawMeta: sawMeta, childGate: childGate, fast: fast, ultrafast: ultrafast)
+        }
+        set {
+            model = newValue.model
+            sessionID = newValue.sessionID
+            previous = newValue.previous.flatMap { $0.count == 4 ? CodexTokens(input: $0[0], cached: $0[1], output: $0[2], reasoning: $0[3]) : nil }
+            sawMeta = newValue.sawMeta
+            childGate = newValue.childGate
+            fast = newValue.fast
+            ultrafast = newValue.ultrafast
+        }
+    }
+
     mutating func parse(_ line: Data, lineNumber: Int) -> [SpendEvent] {
         guard line.range(of: Data("usage".utf8)) != nil
             || (provider == .codex && line.range(of: Data("\"type\"".utf8)) != nil) else { return [] }
@@ -42,6 +71,7 @@ struct SpendLogParser {
             sidechain: object["isSidechain"] as? Bool == true,
             hasSpeed: usage["speed"] != nil)
         event.requestID = Self.text(object["requestId"])
+        event.client = Self.client(object["entrypoint"])
         var events = [event]
         for (index, iteration) in ((usage["iterations"] as? [[String: Any]]) ?? []).enumerated()
             where iteration["type"] as? String == "advisor_message" {
@@ -147,6 +177,14 @@ struct SpendLogParser {
                               cacheRead: read, output: output, isFast: usage["speed"] as? String == "fast")
     }
 
+    /// The Claude app that wrote a line ("claude-desktop", "cli", "sdk-ts", …),
+    /// kept only when it looks like a short identifier.
+    static func client(_ value: Any?) -> String {
+        guard let value = text(value), value.count <= 32,
+              value.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { return "cli" }
+        return value.lowercased()
+    }
+
     static func number(_ value: Any?) -> Double? {
         guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
               value.doubleValue.isFinite, value.doubleValue >= 0, value.doubleValue <= 1_000_000_000_000
@@ -180,6 +218,13 @@ struct SpendLogParser {
         var cached: Int
         var output: Int
         var reasoning: Int
+
+        init(input: Int, cached: Int, output: Int, reasoning: Int) {
+            self.input = input
+            self.cached = cached
+            self.output = output
+            self.reasoning = reasoning
+        }
 
         init?(_ object: [String: Any]) {
             guard let input = SpendLogParser.integer(object["input_tokens"] ?? object["prompt_tokens"] ?? object["input"] ?? 0),

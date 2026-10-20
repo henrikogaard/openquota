@@ -34,8 +34,10 @@ macOS 26 Tahoe and later. Real Liquid Glass (`glassEffect`, `.glass` buttons) â€
 
 - `TabView` toolbar tabs: Accounts, History and General. History shows a range
   picker (30 days, 90 days, 1 year, all), a cost/tokens switch, the total with
-  per-provider totals, a stacked bar chart (days, weeks or months; Claude
-  orange, Codex green), top models, and the saved-history note with Delete. Accounts has a Mail-style bordered
+  a row per source (Claude CLI, Claude Desktop, each profile folder, Codex;
+  email when known), a stacked bar chart per source (days, weeks or months;
+  oranges for Claude, greens for Codex), top models, catch-up progress, and
+  the saved-history note with Delete. Accounts has a Mail-style bordered
   list with a bottom +/âˆ’ bar, alongside a grouped detail `Form`.
 - Account rows separate provider, account label, and optional experimental badge.
   Long names have help text. Detail includes source, plan, usage, freshness, and

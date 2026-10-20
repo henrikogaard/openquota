@@ -73,18 +73,47 @@ public struct SpendTotal: Codable, Sendable, Equatable {
     }
 }
 
-/// One provider's usage of one model on one local calendar day.
+/// One source's usage of one model on one local calendar day.
 public struct SpendDay: Sendable {
     public let date: Date
     public let provider: SpendProvider
+    /// Where the usage came from: provider, log folder and (for Claude) the
+    /// app that wrote it, as `provider:folder:app`. See `SpendSource`.
+    public let source: String
     public let model: String
     public var total: SpendTotal
-    public init(date: Date, provider: SpendProvider, model: String = "", total: SpendTotal) {
+    public init(date: Date, provider: SpendProvider, source: String = "", model: String = "", total: SpendTotal) {
         self.date = date
         self.provider = provider
+        self.source = source
         self.model = model
         self.total = total
     }
+}
+
+/// A usage source key, `provider:folder:app`, split back into its parts.
+public struct SpendSource: Hashable, Sendable {
+    public let provider: SpendProvider
+    /// The CLI home the logs came from, e.g. `/Users/me/.claude`.
+    public let folder: String
+    /// Claude's entrypoint ("claude-desktop", "cli", "sdk-ts", …); empty for Codex.
+    public let app: String
+
+    public init(provider: SpendProvider, folder: String, app: String) {
+        self.provider = provider
+        self.folder = folder
+        self.app = app
+    }
+
+    public init?(key: String) {
+        let parts = key.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, let provider = SpendProvider(rawValue: String(parts[0])) else { return nil }
+        let rest = String(parts[1])
+        guard let split = rest.lastIndex(of: ":") else { return nil }
+        self.init(provider: provider, folder: String(rest[..<split]), app: String(rest[rest.index(after: split)...]))
+    }
+
+    public var key: String { "\(provider.rawValue):\(folder):\(app)" }
 }
 
 public struct SpendSummary: Sendable {
@@ -94,6 +123,10 @@ public struct SpendSummary: Sendable {
     public var pricingUnavailable = false
     public var filesRead = 0
     public var filesReused = 0
+    /// Log files not read yet; later scans continue with them.
+    public var pendingFiles = 0
+    /// Files too large to read, skipped until they change.
+    public var skippedFiles = 0
     public var sourceCount = 0
     public var hasLogs = false
     public init() {}
@@ -156,6 +189,10 @@ struct SpendEvent: Sendable {
     var hasSpeed = false
     var fast = false
     var ultrafast = false
+    /// Claude's entrypoint (which app wrote it); empty for Codex.
+    var client = ""
+    /// `SpendSource.key`, set by the scanner from the file's folder and `client`.
+    var source = ""
 }
 
 extension ModelPricing {

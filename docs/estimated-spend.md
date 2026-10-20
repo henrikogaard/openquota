@@ -23,28 +23,41 @@ No browser, private usage endpoint, or subscription-token access is involved.
 The opt-in concerns **local logs only**. Nothing is uploaded or sent to a pricing
 service. The scanner reads JSONL lines transiently but retains only token counts,
 model IDs, timestamps, request identities and costs—not prompts or responses.
-The parsed-request cache stays in memory.
 
 ## Saved history
 
 Claude Code deletes its session logs after 30 days by default, so OpenQuota
-saves **daily totals** in `~/Library/Application Support/openquota/spend-history.json`
-(0600). One row per local day, provider and model: input, cache-write,
-cache-read and output tokens, estimated and log-reported cost, and priced and
-unpriced request counts. No prompts, request IDs, file paths or accounts.
+keeps what it reads in a small SQLite database,
+`~/Library/Application Support/openquota/usage.sqlite` (0600):
 
-- The first scan reaches back up to a year, as far as the logs and the scan
-  limits allow. If it hits a limit, later scans repeat the last 30 days until
-  one completes (each retry reuses files already read), up to six tries; then
-  those days stay marked incomplete.
-- Later scans start the day before the previous scan and read only log files
-  modified since then; older days come from the saved file.
-- A saved day is replaced only when a scan sees at least as many requests for
-  it, so days whose logs were deleted keep their saved totals.
-- Days a scan could not read completely are marked and shown as possibly
-  incomplete.
-- Turning log reading off stops saving new days but keeps the file.
-  **Settings → History → Delete History…** removes it; the next scan rebuilds
+- **Files:** path, size, modification time and read position of each log. A
+  file is read once, including across launches. When a Claude log grows, only
+  the new lines are read; a large one is read across several passes. A Codex
+  log is reread in full when it changes, because its totals are cumulative.
+- **Requests:** per-request token counts, model, timestamp, request identity
+  and source for the last 40 days, used to drop duplicates across files (a
+  resumed Claude session copies earlier messages into a new file). Older
+  requests are removed once every log has been read.
+- **Days:** daily totals per source and model: input, cache-write, cache-read
+  and output tokens, estimated and log-reported cost, priced and unpriced
+  request counts. Kept until you delete them. No prompts or responses.
+
+A **source** is the provider, the CLI home the log came from, and for Claude
+the app that wrote it (Claude Code's `entrypoint`: CLI, Claude Desktop, Agent
+SDK, …). History shows each source with the email of the matching connection
+when known. Claude Desktop signs in separately, so its usage is not given the
+CLI folder's email.
+
+- Each pass reads new or changed files, newest first, taking turns between
+  Claude and Codex, within the time and byte budget below. While older logs
+  remain, passes repeat a few seconds apart; the panel says how many files are
+  left. Each source folder has its own file and directory-entry budget.
+- Days whose requests were already removed keep their totals: requests for
+  them that show up later come from copied or resumed sessions.
+- A Codex file over 64 MiB, or one a whole pass can't finish, is skipped until
+  it changes and counted as partial. Claude files have no size limit.
+- Turning log reading off stops reading but keeps the database.
+  **Settings → History → Delete History…** deletes it; the next scan rebuilds
   whatever the logs still hold.
 
 Other devices, deleted logs, unsupported tools and disabled/unrecorded logging
@@ -93,15 +106,15 @@ than a claim that the total is complete.
 
 - One actor performs scans away from the UI executor, at most once every five
   minutes; Refresh can request another scan but never overlaps a running scan.
-- Unchanged files reuse parsed metadata by path, size and modification time.
-  Changed files are reread from their start so cumulative baselines stay valid.
-  Files not modified since the scan start are skipped.
+- Files already read are recognised by path, size and modification time and
+  skipped. Changed files are reread from their start so cumulative baselines
+  stay valid.
 - Only regular `.jsonl` files under the selected log roots are read; symlinks
   inside them are skipped. Credentials, settings and other files are ignored.
-- Each pass is bounded to 20,000 directory entries, 2,000 files, 64 MiB per file,
-  256 MiB of new reads, 1 MiB per line, 100,000 retained usage events, and a
-  10-second discovery/read budget. The subsequent in-memory pricing pass is
-  bounded by the retained event count.
+- Each pass is bounded to 20,000 directory entries and 2,000 files per source
+  folder, 64 MiB per Codex file, 256 MiB of new reads, 1 MiB per line, 100,000
+  events per file read, and a 10-second discovery/read budget. Daily totals are
+  then rebuilt only for the days the pass touched.
 - Exceeding a limit shows **Partial total**. It does not quietly claim zero
   spend. Old cache entries and removed sources/files are dropped.
 

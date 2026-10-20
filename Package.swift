@@ -27,8 +27,16 @@ let package = Package(
     targets: [
         // Pure-Foundation core: providers, models, engine. Compiles on Linux so CI
         // can type-check and test everything except the AppKit/SwiftUI shell.
+        // System SQLite on Linux; macOS uses the SDK's SQLite3 module.
+        .systemLibrary(
+            name: "CSQLite",
+            path: "Sources/CSQLite",
+            pkgConfig: "sqlite3",
+            providers: [.apt(["libsqlite3-dev"])]
+        ),
         .target(
             name: "OpenQuotaCore",
+            dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux]))],
             path: "Sources/OpenQuotaCore",
             resources: [.process("Resources")]
         ),

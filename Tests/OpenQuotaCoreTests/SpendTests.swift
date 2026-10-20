@@ -135,27 +135,94 @@ final class SpendTests: XCTestCase {
         XCTAssertEqual(events[0].tokens.totalTokens, 120)
     }
 
-    func testScanStartSkipsUntouchedFilesAndCountsTokens() async throws {
+    func testDatabaseRemembersReadFilesAcrossLaunchesAndKeepsDeletedHistory() async throws {
         let root = try directory()
+        let databaseURL = root.appendingPathComponent("usage.sqlite")
         defer { try? FileManager.default.removeItem(at: root) }
-        let old = root.appendingPathComponent("old.jsonl")
-        let fresh = root.appendingPathComponent("fresh.jsonl")
-        try json(claude(id: "old", model: "known")).write(to: old)
-        try json(claude(id: "fresh", model: "known")).write(to: fresh)
-        let lastWeek = now.addingTimeInterval(-7 * 86_400)
-        try FileManager.default.setAttributes([.modificationDate: lastWeek], ofItemAtPath: old.path)
-        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
-        let sources = [SpendLogSource(provider: .claude, directory: root)]
-        let since = calendar.startOfDay(for: now.addingTimeInterval(-86_400))
-        let recent = await scanner.scan(sources: sources, since: since, now: now, calendar: calendar)
-        XCTAssertEqual(recent.filesRead, 1, "A file untouched since the start is not read")
-        let total = recent.total(period: .today, now: now, calendar: calendar)
+        let logs = root.appendingPathComponent("projects")
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let file = logs.appendingPathComponent("log.jsonl")
+        try json(claude(id: "one", model: "known")).write(to: file)
+        let sources = [SpendLogSource(provider: .claude, directory: logs)]
+
+        let first = await LocalSpendScanner(limits: .init(), pricing: pricing, databaseURL: databaseURL)
+            .scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(first.filesRead, 1)
+        let total = first.total(period: .today, now: now, calendar: calendar)
         XCTAssertEqual(total.inputTokens, 100)
         XCTAssertEqual(total.outputTokens, 20)
-        XCTAssertEqual(recent.days.first?.model, "known")
-        // An earlier start can't reuse files cached for a later one.
-        let wider = await scanner.scan(sources: sources, since: lastWeek.addingTimeInterval(-60), now: now, calendar: calendar)
-        XCTAssertEqual(wider.filesRead, 2)
+        XCTAssertEqual(first.days.first?.model, "known")
+
+        // A new scanner on the same database (the next launch) reads nothing.
+        let relaunched = LocalSpendScanner(limits: .init(), pricing: pricing, databaseURL: databaseURL)
+        let saved = await relaunched.savedDays(calendar: calendar)
+        XCTAssertEqual(saved.count, 1)
+        let second = await relaunched.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(second.filesRead, 0)
+        XCTAssertEqual(second.filesReused, 1)
+        XCTAssertEqual(second.total(period: .today, now: now, calendar: calendar).pricedEvents, 1)
+
+        // Logs deleted by the CLI keep their saved totals.
+        try FileManager.default.removeItem(at: file)
+        let deleted = await relaunched.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(deleted.total(period: .today, now: now, calendar: calendar).pricedEvents, 1)
+
+        await relaunched.deleteAll()
+        let empty = await LocalSpendScanner(limits: .init(), pricing: pricing, databaseURL: databaseURL)
+            .savedDays(calendar: calendar)
+        XCTAssertTrue(empty.isEmpty)
+    }
+
+    func testBigClaudeFolderDoesNotCrowdOutCodex() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let claudeLogs = root.appendingPathComponent(".claude/projects")
+        let codexLogs = root.appendingPathComponent(".codex/sessions")
+        try FileManager.default.createDirectory(at: claudeLogs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexLogs, withIntermediateDirectories: true)
+        for index in 0..<5 {
+            try json(claude(id: "c\(index)", model: "known")).write(to: claudeLogs.appendingPathComponent("\(index).jsonl"))
+        }
+        try json(codex(input: 1000, cached: 0, output: 100)).write(to: codexLogs.appendingPathComponent("rollout.jsonl"))
+        var limits = LocalSpendScanner.Limits()
+        limits.files = 3
+        func size(_ url: URL) throws -> Int { try FileManager.default.attributesOfItem(atPath: url.path)[.size] as! Int }
+        // Room for one Claude file and the Codex file only.
+        limits.scanBytes = try size(claudeLogs.appendingPathComponent("0.jsonl"))
+            + size(codexLogs.appendingPathComponent("rollout.jsonl")) + 10
+        let scanner = LocalSpendScanner(limits: limits, pricing: pricing)
+        let sources = [SpendLogSource(provider: .claude, directory: claudeLogs),
+                       SpendLogSource(provider: .codex, directory: codexLogs)]
+        let first = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(first.total(provider: .codex, period: .today, now: now, calendar: calendar).events, 1,
+                       "Codex gets a turn even though Claude has more files than the limits")
+        XCTAssertGreaterThan(first.pendingFiles, 0)
+        // Later passes continue where the last one stopped.
+        var pass = first
+        while pass.pendingFiles > 0 { pass = await scanner.scan(sources: sources, now: now, calendar: calendar) }
+        XCTAssertEqual(pass.total(provider: .claude, period: .today, now: now, calendar: calendar).pricedEvents, 3,
+                       "Per-folder file limit")
+    }
+
+    func testClaudeUsageIsSplitByAppAndResumedCopiesCountOnce() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let logs = root.appendingPathComponent(".claude/projects")
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        var desktop = claude(id: "d1", model: "known")
+        desktop["entrypoint"] = "claude-desktop"
+        var cli = claude(id: "c1", model: "known")
+        cli["entrypoint"] = "cli"
+        try (json(desktop) + json(cli)).write(to: logs.appendingPathComponent("a.jsonl"))
+        // A resumed session copies an earlier message into a new file.
+        try json(cli).write(to: logs.appendingPathComponent("b.jsonl"))
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let result = await scanner.scan(sources: [SpendLogSource(provider: .claude, directory: logs)], now: now, calendar: calendar)
+        let folder = logs.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath().path
+        let bySource = Dictionary(grouping: result.days, by: \.source).mapValues { $0.reduce(0) { $0 + $1.total.pricedEvents } }
+        XCTAssertEqual(bySource["claude:\(folder):claude-desktop"], 1)
+        XCTAssertEqual(bySource["claude:\(folder):cli"], 1)
+        XCTAssertEqual(SpendSource(key: "claude:\(folder):cli"), SpendSource(provider: .claude, folder: folder, app: "cli"))
     }
 
     func testScanCacheAppendDeletionAndPrivacyBoundary() async throws {
@@ -177,20 +244,86 @@ final class SpendTests: XCTestCase {
         XCTAssertEqual(third.total(period: .today, now: now, calendar: calendar).pricedEvents, 2)
         try FileManager.default.removeItem(at: file)
         let deleted = await scanner.scan(sources: sources, now: now, calendar: calendar)
-        XCTAssertFalse(deleted.hasLogs)
-        XCTAssertEqual(deleted.total(period: .today, now: now, calendar: calendar).pricedEvents, 0)
+        XCTAssertEqual(deleted.total(period: .today, now: now, calendar: calendar).pricedEvents, 2,
+                       "Saved history outlives deleted logs")
     }
 
-    func testBoundedScannerReportsPartialInsteadOfCompleteZero() async throws {
+    func testOversizedCodexFileIsSkippedAndReportedPartial() async throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }
-        try json(claude(id: "one", model: "known")).write(to: root.appendingPathComponent("large.jsonl"))
+        try json(codex(input: 100, cached: 0, output: 10)).write(to: root.appendingPathComponent("large.jsonl"))
         var limits = LocalSpendScanner.Limits()
         limits.fileBytes = 1
         let scanner = LocalSpendScanner(limits: limits, pricing: pricing)
-        let result = await scanner.scan(sources: [.init(provider: .claude, directory: root)], now: now, calendar: calendar)
+        let result = await scanner.scan(sources: [.init(provider: .codex, directory: root)], now: now, calendar: calendar)
         XCTAssertTrue(result.isPartial)
+        XCTAssertEqual(result.skippedFiles, 1)
         XCTAssertEqual(result.filesRead, 0)
+    }
+
+    func testLargeClaudeFileIsReadAcrossPassesAndAppendsReadOnlyNewLines() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("long.jsonl")
+        let lines = try (0..<6).map { try json(claude(id: "m\($0)", model: "known")) }
+        try lines.reduce(Data(), +).write(to: file)
+        var limits = LocalSpendScanner.Limits()
+        limits.scanBytes = lines[0].count * 2 + 1 // about two lines per pass
+        let scanner = LocalSpendScanner(limits: limits, pricing: pricing)
+        let sources = [SpendLogSource(provider: .claude, directory: root)]
+        var passes = 0
+        var result = SpendSummary()
+        repeat {
+            result = await scanner.scan(sources: sources, now: now, calendar: calendar)
+            passes += 1
+        } while result.pendingFiles > 0 && passes < 10
+        XCTAssertGreaterThan(passes, 1, "Read in pieces")
+        XCTAssertEqual(result.total(period: .today, now: now, calendar: calendar).pricedEvents, 6)
+
+        // Two more lines appended, plus a half-written one: only the two are read.
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: json(claude(id: "m6", model: "known")) + json(claude(id: "m7", model: "known")))
+        try handle.write(contentsOf: Data(#"{"timestamp":"#.utf8))
+        try handle.close()
+        limits.scanBytes = 256 * 1_024 * 1_024
+        let grown = await LocalSpendScanner(limits: limits, pricing: pricing).scan(sources: sources, now: now, calendar: calendar)
+        // A fresh scanner without a database file rereads everything; the
+        // shared one below appends.
+        XCTAssertEqual(grown.total(period: .today, now: now, calendar: calendar).pricedEvents, 8)
+        let appended = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(appended.total(period: .today, now: now, calendar: calendar).pricedEvents, 8)
+        XCTAssertFalse(appended.isPartial, "A half-written last line waits for the next pass")
+    }
+
+    func testCodexFileReadInPiecesMatchesOneRead() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lines: [[String: Any]] = [
+            ["type": "session_meta", "timestamp": stamp, "payload": ["id": "session"]],
+            ["type": "turn_context", "payload": ["model": "gpt-5"]],
+            codex(input: 1000, cached: 200, output: 100),
+            codex(input: 2500, cached: 900, output: 300),
+            codex(input: 4000, cached: 1500, output: 650),
+        ]
+        let data = try lines.map(json).reduce(Data(), +)
+        try data.write(to: root.appendingPathComponent("rollout.jsonl"))
+        let sources = [SpendLogSource(provider: .codex, directory: root)]
+        let whole = await LocalSpendScanner(limits: .init(), pricing: pricing).scan(sources: sources, now: now, calendar: calendar)
+        var limits = LocalSpendScanner.Limits()
+        limits.scanBytes = 120 // a line or so per pass
+        let scanner = LocalSpendScanner(limits: limits, pricing: pricing)
+        var passes = 0
+        var pieces = SpendSummary()
+        repeat {
+            pieces = await scanner.scan(sources: sources, now: now, calendar: calendar)
+            passes += 1
+        } while pieces.pendingFiles > 0 && passes < 20
+        XCTAssertGreaterThan(passes, 2)
+        let a = whole.total(period: .today, now: now, calendar: calendar)
+        let b = pieces.total(period: .today, now: now, calendar: calendar)
+        XCTAssertEqual(a.pricedEvents, 3)
+        XCTAssertEqual(b, a)
     }
 
     func testUnchangedFileRetainsEventsWrittenAfterScanStart() async throws {
@@ -202,7 +335,7 @@ final class SpendTests: XCTestCase {
         let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
         let sources = [SpendLogSource(provider: .claude, directory: root)]
         let first = await scanner.scan(sources: sources, now: now, calendar: calendar)
-        XCTAssertEqual(first.total(period: .today, now: now, calendar: calendar).pricedEvents, 0)
+        XCTAssertEqual(first.filesRead, 1)
         let later = now.addingTimeInterval(120)
         let second = await scanner.scan(sources: sources, now: later, calendar: calendar)
         XCTAssertEqual(second.filesReused, 1)

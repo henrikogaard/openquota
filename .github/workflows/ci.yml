@@ -11,6 +11,8 @@ jobs:
     container: swift:6.1
     steps:
       - uses: actions/checkout@v4
+      - name: Install SQLite headers
+        run: apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev
       - name: Build
         run: swift build
       - name: Test

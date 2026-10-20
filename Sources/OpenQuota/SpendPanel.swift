@@ -90,6 +90,7 @@ struct SpendPanel: View {
 
     private var warning: String? {
         if model.spend.pricingUnavailable { return SpendCopy.noPricing }
+        if model.spend.pendingFiles > 0 { return SpendCopy.catchingUp(model.spend.pendingFiles) }
         if model.spend.isPartial { return SpendCopy.partial }
         if total.unpricedEvents > 0 { return "\(total.unpricedEvents) \(SpendCopy.unpriced)" }
         if model.spend.scannedAt == nil { return SpendCopy.scanning }
@@ -137,6 +138,10 @@ enum SpendCopy {
     static var checked: String { text("Scanned", "Skannet") }
     static var noPricing: String { text("Pricing data unavailable. Reinstall or update OpenQuota.", "Prisdata mangler. Installer OpenQuota på nytt eller oppdater appen.") }
     static var partial: String { text("Partial total: some logs could not be read, or a scan limit was reached. Unpriced usage is excluded.", "Delvis sum: noen logger kunne ikke leses, eller en skannegrense ble nådd. Bruk uten pris er utelatt.") }
+    static func catchingUp(_ files: Int) -> String {
+        text("Reading older logs, \(files) files left. Totals grow as it goes; each log is read once.",
+             "Leser eldre logger, \(files) filer igjen. Tallene øker underveis; hver logg leses bare én gang.")
+    }
     static var unpriced: String { text("unpriced requests excluded", "forespørsler uten pris er utelatt") }
     static var scanning: String { text("Scanning local logs…", "Skanner lokale logger…") }
     static var noLogs: String { text("No recent local usage logs found.", "Fant ingen nylige lokale brukslogger.") }

@@ -94,28 +94,53 @@ struct HistoryPane: View {
                 Text(metric == .cost ? SpendCopy.notBill : L("Input, output and cache", "Inndata, utdata og hurtigbuffer"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            HStack(spacing: 16) {
-                ForEach(SpendProvider.allCases, id: \.self) { provider in
-                    HStack(spacing: 4) {
-                        Circle().fill(Self.color(provider)).frame(width: 6, height: 6)
-                        Text(Self.name(provider)).foregroundStyle(.secondary)
-                        Text(format(history.total(range, provider: provider))).monospacedDigit()
+            let colors = sourceColors
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                ForEach(history.sources(range)) { row in
+                    let name = model.spendSourceName(row.source)
+                    GridRow {
+                        HStack(spacing: 6) {
+                            Circle().fill(colors[row.source] ?? .gray).frame(width: 6, height: 6)
+                            Text(name.name)
+                            if let email = name.email {
+                                Text(email).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(format(row.total)).monospacedDigit().gridColumnAlignment(.trailing)
                     }
+                    .font(.callout)
                 }
             }
-            .font(.callout)
         }
+    }
+
+    /// Oranges for Claude sources, greens for Codex, in order of size.
+    private var sourceColors: [String: Color] {
+        let claude: [Color] = [.orange, .red, .yellow, .brown, .pink]
+        let codex: [Color] = [.green, .teal, .mint, .cyan, .blue]
+        var colors: [String: Color] = [:]
+        var used: [SpendProvider: Int] = [:]
+        for row in history.sources(.all) {
+            let palette = row.provider == .claude ? claude : codex
+            let index = used[row.provider, default: 0]
+            colors[row.source] = palette[index % palette.count]
+            used[row.provider] = index + 1
+        }
+        return colors
     }
 
     private var chart: some View {
         let buckets = history.buckets(range)
+        let colors = sourceColors
+        let keys = colors.keys.sorted()
         return Chart(buckets) { bucket in
             BarMark(
                 x: .value(L("Date", "Dato"), bucket.start, unit: range.granularity),
                 y: .value(metric == .cost ? L("Cost", "Kostnad") : L("Tokens", "Tokens"), value(bucket.total)))
-            .foregroundStyle(by: .value(L("Provider", "Leverandør"), Self.name(bucket.provider)))
+            .foregroundStyle(by: .value(L("Source", "Kilde"), bucket.source))
         }
-        .chartForegroundStyleScale([Self.name(.claude): Self.color(.claude), Self.name(.codex): Self.color(.codex)])
+        .chartForegroundStyleScale(domain: keys, range: keys.map { colors[$0] ?? .gray })
         .chartLegend(.hidden)
         .chartYAxis {
             AxisMarks { mark in
@@ -161,9 +186,13 @@ struct HistoryPane: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if history.hasIncompleteDays(range) {
-                Label(L("Some days may be incomplete: a scan reached a limit before reading every log.",
-                        "Noen dager kan være ufullstendige: en skanning nådde en grense før alle logger ble lest."),
+            if model.spend.pendingFiles > 0 {
+                Label(SpendCopy.catchingUp(model.spend.pendingFiles), systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if model.spend.skippedFiles > 0 {
+                Label(L("\(model.spend.skippedFiles) log files are too large to read and are left out.",
+                        "\(model.spend.skippedFiles) loggfiler er for store til å leses og er utelatt."),
                       systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.secondary)
             }
