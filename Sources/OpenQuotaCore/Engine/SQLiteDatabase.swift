@@ -5,9 +5,10 @@ import SQLite3
 import CSQLite
 #endif
 
-/// A minimal SQLite connection for app-owned data. Not thread-safe: own it
-/// from one actor.
-final class SQLiteDatabase {
+/// A minimal SQLite connection for app-owned data. Opened in SQLite's
+/// serialized (full mutex) mode and owned by one actor, so passing it to
+/// that actor's helpers is safe.
+final class SQLiteDatabase: @unchecked Sendable {
     struct Failure: Error, CustomStringConvertible {
         let description: String
     }
@@ -74,7 +75,7 @@ final class SQLiteDatabase {
 
     func setUserVersion(_ version: Int) throws { try execute("PRAGMA user_version = \(version)") }
 
-    final class Statement {
+    final class Statement: @unchecked Sendable {
         private let statement: OpaquePointer
         private let database: OpaquePointer?
 
