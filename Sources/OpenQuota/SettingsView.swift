@@ -61,6 +61,9 @@ struct AccountsPane: View {
             AccountItem(id: "local:\($0.id)", providerID: $0.id, title: L("Signed-in CLI", "Pålogget CLI"),
                         kind: .detected(accounts: $0.accounts))
         }
+        out += model.hiddenProviderIDs.sorted().map {
+            AccountItem(id: "hidden:\($0)", providerID: $0, title: L("Hidden", "Skjult"), kind: .hidden)
+        }
         return out
     }
 
@@ -100,7 +103,8 @@ struct AccountsPane: View {
                         Image(systemName: "minus").frame(width: 24, height: 22)
                     }
                     .disabled(selected?.isRemovable != true)
-                    .help(L("Remove Account", "Fjern konto"))
+                    .help(selected?.hidesInsteadOfRemoving == true
+                          ? L("Hide Provider", "Skjul leverandør") : L("Remove Account", "Fjern konto"))
                     Spacer()
                 }
                 .buttonStyle(.borderless)
@@ -140,12 +144,31 @@ struct AccountsPane: View {
         .sheet(isPresented: $adding, onDismiss: reloadSoon) {
             AddAccountSheet(model: model) { adding = false }
         }
-        .alert(L("Remove “\(selected?.title ?? "")”?", "Fjerne «\(selected?.title ?? "")»?"), isPresented: $confirmingRemoval) {
+        .alert(removalTitle, isPresented: $confirmingRemoval) {
             Button(L("Cancel", "Avbryt"), role: .cancel) {}
-            Button(L("Remove", "Fjern"), role: .destructive, action: remove)
+            if selected?.hidesInsteadOfRemoving == true {
+                Button(L("Hide", "Skjul"), action: remove)
+            } else {
+                Button(L("Remove", "Fjern"), role: .destructive, action: remove)
+            }
         } message: {
-            Text(selected?.removalMessage ?? "")
+            if let selected, selected.hidesInsteadOfRemoving {
+                let name = model.providerName(selected.providerID)
+                Text(L("OpenQuota stops checking \(name) and hides it. Your \(name) sign-in is not changed. Show it again from Hidden in this list.",
+                       "OpenQuota slutter å sjekke \(name) og skjuler den. Påloggingen i \(name) endres ikke. Vis den igjen fra Skjult i denne listen."))
+            } else {
+                Text(selected?.removalMessage ?? "")
+            }
         }
+    }
+
+    private var removalTitle: String {
+        guard let selected else { return "" }
+        if selected.hidesInsteadOfRemoving {
+            let name = model.providerName(selected.providerID)
+            return L("Hide \(name)?", "Skjule \(name)?")
+        }
+        return L("Remove “\(selected.title)”?", "Fjerne «\(selected.title)»?")
     }
 
     private func remove() {
@@ -155,7 +178,8 @@ struct AccountsPane: View {
             case .subscription(let connection): try model.removeSubscriptionConnection(connection)
             case .saved(let account): try model.removeAccount(account)
             case .profile(let profile): try model.removeProfile(id: profile.id)
-            case .detected: return
+            case .detected: model.setProviderHidden(true, id: item.providerID)
+            case .hidden: return
             }
             errorText = nil
             selection = nil
@@ -183,6 +207,7 @@ struct AccountItem: Identifiable {
         case saved(AccountDescriptor)
         case profile(LocalAccountProfile)
         case detected(accounts: Int)
+        case hidden
     }
 
     var id: String
@@ -192,7 +217,8 @@ struct AccountItem: Identifiable {
 
     static var sectionTitles: [String] {
         [L("Subscriptions", "Abonnementer"), L("API Keys & Sessions", "API-nøkler og økter"),
-         L("Local Profiles", "Lokale profiler"), L("Detected on This Mac", "Funnet på denne Macen")]
+         L("Local Profiles", "Lokale profiler"), L("Detected on This Mac", "Funnet på denne Macen"),
+         L("Hidden", "Skjult")]
     }
 
     var section: String {
@@ -201,12 +227,19 @@ struct AccountItem: Identifiable {
         case .saved: Self.sectionTitles[1]
         case .profile: Self.sectionTitles[2]
         case .detected: Self.sectionTitles[3]
+        case .hidden: Self.sectionTitles[4]
         }
     }
 
     var isRemovable: Bool {
-        if case .detected = kind { return false }
+        if case .hidden = kind { return false }
         return true
+    }
+
+    /// Detected providers can't be removed (their sign-in isn't ours), only hidden.
+    var hidesInsteadOfRemoving: Bool {
+        if case .detected = kind { return true }
+        return false
     }
 
     var removalMessage: String {
@@ -443,6 +476,30 @@ struct AccountDetail: View {
                     }
                 }
             }
+            if case .detected = item.kind {
+                Section {
+                    Button(L("Hide from OpenQuota", "Skjul i OpenQuota")) {
+                        model.setProviderHidden(true, id: item.providerID)
+                        onChange()
+                    }
+                    .disabled(model.isDemo)
+                } footer: {
+                    Text(L("Stops checking this provider and removes it from the menu. Your sign-in is not changed.",
+                           "Slutter å sjekke denne leverandøren og fjerner den fra menyen. Påloggingen endres ikke."))
+                }
+            }
+            if case .hidden = item.kind {
+                Section {
+                    Button(L("Show Again", "Vis igjen")) {
+                        model.setProviderHidden(false, id: item.providerID)
+                        onChange()
+                    }
+                    .disabled(model.isDemo)
+                } footer: {
+                    Text(L("OpenQuota doesn't check hidden providers.",
+                           "OpenQuota sjekker ikke skjulte leverandører."))
+                }
+            }
             if let url = model.dashboardURL(item.providerID) {
                 Section {
                     Link(L("Open Usage Page", "Åpne bruksside"), destination: url)
@@ -473,6 +530,7 @@ struct AccountDetail: View {
             account.account.providerID == "cursor" ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen") : L("API key in Keychain", "API-nøkkel i nøkkelringen")
         case .profile: L("Local provider file", "Lokal leverandørfil")
         case .detected: L("Detected local credential", "Funnet lokal pålogging")
+        case .hidden: L("Hidden by you", "Skjult av deg")
         }
     }
 

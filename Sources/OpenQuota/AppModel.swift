@@ -11,6 +11,10 @@ final class AppModel {
     private(set) var profiles: [LocalAccountProfile] = []
     private(set) var subscriptionConnections: [SubscriptionConnection] = []
     private(set) var statusMessage: String?
+    /// Auto-detected local providers the user chose not to see.
+    private(set) var hiddenProviderIDs = Set(UserDefaults.standard.stringArray(forKey: AppModel.hiddenProvidersKey) ?? [])
+    /// Display names of hidden providers that are still installed.
+    private(set) var hiddenProviderNames: [String: String] = [:]
     private(set) var codexLoginStatus: String?
     private(set) var codexLoginBusy = false
     let isDemo: Bool
@@ -129,6 +133,11 @@ final class AppModel {
                 providers.append(ProfiledProvider(profile: profile, base: base))
             }
         }
+            // Hidden detected providers are dropped before refresh, so they are
+        // never queried and their cards disappear on the next pass.
+        let hidden = providers.filter { Self.isDetectedLocal($0) && hiddenProviderIDs.contains($0.id) }
+        hiddenProviderNames = Dictionary(hidden.map { ($0.id, $0.displayName) }) { first, _ in first }
+        providers.removeAll { Self.isDetectedLocal($0) && hiddenProviderIDs.contains($0.id) }
     }
 
     static var codexConnectedStatus: String { L("Codex account connected.", "Codex-kontoen er koblet til.") }
@@ -432,11 +441,25 @@ final class AppModel {
         providers.compactMap { $0 as? GenericProvider }
     }
 
+    static let hiddenProvidersKey = "hiddenProviderIDs"
+
+    /// Providers found from a local CLI sign-in, as opposed to ones the user added.
+    static func isDetectedLocal(_ provider: any UsageProvider) -> Bool {
+        !(provider is GenericProvider) && !(provider is ProfiledProvider) && !(provider is CursorProvider)
+            && provider.id != "claude" && provider.id != "codex"
+    }
+
+    /// Hide or show an auto-detected provider. Its sign-in is not touched.
+    func setProviderHidden(_ hidden: Bool, id: String) {
+        guard !isDemo else { return }
+        if hidden { hiddenProviderIDs.insert(id) } else { hiddenProviderIDs.remove(id) }
+        UserDefaults.standard.set(hiddenProviderIDs.sorted(), forKey: Self.hiddenProvidersKey)
+        configurationChanged()
+    }
+
     func detectedLocalProviders() async -> [(id: String, name: String, accounts: Int)] {
         var out: [(String, String, Int)] = []
-        for provider in providers where !(provider is GenericProvider)
-            && !(provider is ProfiledProvider) && !(provider is CursorProvider)
-            && provider.id != "claude" && provider.id != "codex" {
+        for provider in providers where Self.isDetectedLocal(provider) {
             out.append((provider.id, provider.displayName, (try? await provider.accounts())?.count ?? 0))
         }
         return out
@@ -444,6 +467,7 @@ final class AppModel {
 
     func providerName(_ id: String) -> String {
         providers.first(where: { $0.id == id })?.displayName
+            ?? hiddenProviderNames[id]
             ?? ["opencode": "OpenCode Go", "opencode-go": "OpenCode Go", "openrouter": "OpenRouter",
                 "claude": "Claude Code", "codex": "Codex / ChatGPT",
                 "mistral": "Mistral Vibe"][id] ?? id.capitalized
