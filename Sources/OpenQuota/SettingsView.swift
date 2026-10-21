@@ -695,6 +695,7 @@ private struct ReplaceCredentialSheet: View {
 
 struct GeneralPane: View {
     var model: AppModel
+    private let loginItem = LoginItemController.shared
     @State private var automaticallyChecks = UpdateController.shared.automaticallyChecks
     @AppStorage("menuBarShowsPercent") private var menuBarShowsPercent = true
     @AppStorage("menuBarDisplayStyle") private var storedStyle = ""
@@ -713,6 +714,12 @@ struct GeneralPane: View {
 
     var body: some View {
         Form {
+            Section {
+                Toggle(L("Open at login", "Åpne ved pålogging"), isOn: Binding(
+                    get: { loginItem.isEnabled }, set: { loginItem.setEnabled($0) }))
+            } footer: {
+                loginItemFooter
+            }
             Section {
                 Picker(L("Display", "Visning"), selection: displayStyle) {
                     ForEach(MenuBarDisplayStyle.allCases, id: \.rawValue) { style in
@@ -773,6 +780,29 @@ struct GeneralPane: View {
         .formStyle(.grouped)
         .scrollDisabled(true)
         .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
+        .onAppear { loginItem.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            loginItem.refresh()
+        }
+    }
+
+    @ViewBuilder private var loginItemFooter: some View {
+        Group {
+            if let error = loginItem.errorText {
+                Text(error)
+            } else if loginItem.requiresApproval {
+                HStack(spacing: 4) {
+                    Text(L("Needs your approval in Login Items.", "Må godkjennes under Påloggingsobjekter."))
+                    Button(L("Open System Settings", "Åpne Systeminnstillinger")) { loginItem.openSystemSettings() }
+                        .buttonStyle(.link)
+                }
+            } else {
+                Text(L("Starts OpenQuota in the menu bar when you log in.",
+                       "Starter OpenQuota i menylinjen når du logger på."))
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
 
