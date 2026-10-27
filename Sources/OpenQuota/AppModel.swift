@@ -462,6 +462,15 @@ final class AppModel {
         refreshNow()
     }
 
+    /// Wizard step: verify a pasted Mistral Cookie header against Mistral's
+    /// own endpoints without saving anything.
+    func previewMistralSession(_ raw: String) async throws -> UsageSnapshot {
+        guard !isDemo, let mistral = providers.compactMap({ $0 as? MistralProvider }).first else {
+            throw ProviderError.notLoggedIn
+        }
+        return try await mistral.preview(raw)
+    }
+
     func replaceCredential(_ secret: String, for account: AccountDescriptor) async throws {
         guard !isDemo else { return }
         if let generic = specProviders().first(where: { $0.id == account.account.providerID }) {

@@ -341,6 +341,23 @@ public struct MistralProvider: UsageProvider {
             http: http, credentials: credentials, manifestURL: manifestURL)
     }
 
+    /// What the wizard can check live while you paste: presence of the
+    /// required session cookie and the optional CSRF token. Cookie values are
+    /// never returned, shown or stored by this check.
+    public struct CookieCheck: Equatable, Sendable {
+        public var hasSessionCookie: Bool
+        public var hasCsrfToken: Bool
+    }
+
+    public static func checkCookieHeader(_ raw: String) -> CookieCheck {
+        guard let header = MistralCookieHeader(raw) else {
+            return CookieCheck(hasSessionCookie: false, hasCsrfToken: false)
+        }
+        return CookieCheck(
+            hasSessionCookie: true,
+            hasCsrfToken: header.csrfToken.map { !$0.isEmpty } ?? false)
+    }
+
     public func accounts() async throws -> [AccountDescriptor] {
         try await storage.accounts()
     }
@@ -379,6 +396,22 @@ public struct MistralProvider: UsageProvider {
         guard account.account.providerID == id,
               let raw = try credentials.secret(for: storage.credentialKey(account.account.id)),
               let cookie = MistralCookieHeader(raw) else { throw ProviderError.notLoggedIn }
+        return try await fetchSnapshot(account: account.account, cookie: cookie)
+    }
+
+    /// Wizard step: verifies a pasted `Cookie:` header before anything is
+    /// saved. Fetches exactly what a refresh would fetch, against a transient
+    /// identity, and returns the snapshot the card would show. Nothing is
+    /// stored; a failed preview leaves no trace.
+    public func preview(_ raw: String) async throws -> UsageSnapshot {
+        guard let cookie = MistralCookieHeader(raw) else { throw invalidCookieError }
+        return try await fetchSnapshot(
+            account: AccountIdentity(providerID: id, id: "mistral@preview"), cookie: cookie)
+    }
+
+    private func fetchSnapshot(
+        account: AccountIdentity, cookie: MistralCookieHeader
+    ) async throws -> UsageSnapshot {
         try Task.checkCancellation()
 
         var windows: [UsageWindow] = []
@@ -435,7 +468,7 @@ public struct MistralProvider: UsageProvider {
                 "Mistral rapporterte ingen abonnementskvote eller kredittsaldo for denne økten."))
         }
         return UsageSnapshot(
-            account: account.account,
+            account: account,
             providerID: id,
             windows: windows,
             creditsRemaining: creditsRemaining,

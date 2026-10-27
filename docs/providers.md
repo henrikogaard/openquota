@@ -95,12 +95,15 @@ be replaced through Add Account. Fixture coverage is not live account verificati
 
 ## Mistral (experimental, explicit opt-in)
 
-Settings → Accounts → + → **Mistral (Experimental)** accepts the `Cookie:`
-request header from any signed-in `admin.mistral.ai` request (DevTools →
-Network → a request → Request Headers → Cookie). It must include an
-`ory_session_*` cookie; a `csrftoken` cookie enables the console fallback.
-Paste the header value only, and never share it: it is a sensitive web session,
-not a read-only API key.
+Settings → Accounts → + → **Mistral (Experimental)** opens a short wizard: it
+opens admin.mistral.ai, explains how to copy the `Cookie:` request header in
+Safari, Chrome/Edge or Firefox (DevTools → Network → a request → Request
+Headers → Cookie), and runs a live check that fetches the card's data before
+saving — a summary is shown first, and a session that cannot be verified is
+never stored by accident. Paste the header value only, and never share it: it
+is a sensitive web session, not a read-only API key. The pasted header must
+include an `ory_session_*` cookie; a `csrftoken` cookie enables the console
+fallback.
 
 Why a session: Mistral's plans (Pro, Team) include monthly usage shared across
 Le Chat, Studio, the API and Vibe Code, but there is no public API for the

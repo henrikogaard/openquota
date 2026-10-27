@@ -117,17 +117,21 @@ identity gets an independent entry. [Technical details](providers.md#cursor-expe
 ## Mistral: experimental
 
 Mistral has no public API for Pro/Team subscription limits, so OpenQuota reads
-the signed-in web console: paste the `Cookie:` request header from an
-admin.mistral.ai request (it must include an `ory_session_*` cookie). Like
-Cursor, this is an unofficial endpoint with a sensitive session cookie, **not a
-read-only key**; nothing is imported from your browser automatically and the
-header should never be shared.
+the signed-in web console. Add Account → Mistral runs a short wizard: it opens
+admin.mistral.ai for you, explains how to copy the `Cookie:` request header in
+Safari, Chrome or Firefox, and **connects with a live check** — it shows what
+Mistral reports (allowances, credits) before anything is saved. Nothing is
+stored until you press Save; if the check can't read allowances but the session
+looks valid, you can save anyway and the card retries on every refresh.
 
-Sessions expire roughly monthly. When the card shows a sign-in error, sign in
-at admin.mistral.ai again and use **Replace Credential…** with a fresh header.
-Sessions cannot be matched to an account offline, so a replacement is not
-verified to be the same account; for a different Mistral account, add a second
-entry instead of replacing. [Technical details](providers.md#mistral-experimental-explicit-opt-in).
+Like Cursor, this is an unofficial endpoint with a sensitive session cookie,
+**not a read-only key**; nothing is imported from your browser automatically
+and the header should never be shared. Sessions expire roughly monthly. When
+the card shows a sign-in error, sign in at admin.mistral.ai again and use
+**Replace Credential…** with a fresh header. Sessions cannot be matched to an
+account offline, so a replacement is not verified to be the same account; for a
+different Mistral account, add a second entry instead of replacing.
+[Technical details](providers.md#mistral-experimental-explicit-opt-in).
 
 ## Hide a detected provider
 

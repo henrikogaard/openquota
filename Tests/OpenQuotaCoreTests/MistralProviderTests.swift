@@ -251,6 +251,89 @@ final class MistralProviderTests: XCTestCase {
         XCTAssertEqual(cancelling.calls, 1)
     }
 
+    // MARK: - Wizard preview
+
+    func testPreviewVerifiesWithoutStoring() async throws {
+        http.stub("subscription", body: Self.subscriptionHTML(api: [
+            "usage_percentage": 36.5, "initial_budget": 25.5,
+            "currency": "EUR", "reset_at": "2026-11-01T00:00:00Z",
+        ]))
+        http.stub("credits", body: #"{"wallet_amount":10,"credit_notes_amount":0,"ongoing_usage_balance":0.7,"currency":"EUR"}"#)
+        let snapshot = try await provider.preview("ory_session_x=fixture; csrftoken=fix")
+        XCTAssertEqual(snapshot.providerID, "mistral")
+        XCTAssertEqual(snapshot.windows.map(\.label), ["Included"])
+        XCTAssertEqual(snapshot.windows[0].percentRemaining, 63.5)
+        XCTAssertEqual(snapshot.creditsRemaining, 9.3)
+        // Nothing was saved by the check.
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent("mistral-keys.json").path))
+        XCTAssertNil(try credentials.secret(for: "mistral/mistral@preview"))
+    }
+
+    func testPreviewMatchesWhatRefreshWouldShow() async throws {
+        let html = Self.subscriptionHTML(api: [
+            "usage_percentage": 30, "initial_budget": 20, "currency": "USD",
+        ])
+        let credits = #"{"wallet_amount":5,"currency":"USD"}"#
+        http.stub("subscription", body: html)
+        http.stub("credits", body: credits)
+        let raw = "ory_session_x=fixture; csrftoken=fix"
+
+        let preview = try await provider.preview(raw)
+        let account = try await add(raw)
+        let refreshed = try await provider.refresh(account: account)
+        XCTAssertEqual(preview.windows, refreshed.windows)
+        XCTAssertEqual(preview.creditsRemaining, refreshed.creditsRemaining)
+        XCTAssertEqual(preview.creditsUnit, refreshed.creditsUnit)
+    }
+
+    func testPreviewRejectsInvalidCookieWithoutNetwork() async throws {
+        for raw in ["", "csrftoken=only", "ory_session_a=1\r\nEvil: header"] {
+            do {
+                _ = try await provider.preview(raw)
+                XCTFail("An unusable header must be rejected locally")
+            } catch {
+                XCTAssertEqual(error as? ProviderError, .badResponse(Localized.text(
+                    "Paste the Cookie request header from a signed-in admin.mistral.ai page. It must include an ory_session_ cookie.",
+                    "Lim inn Cookie-forespørselsoverskriften fra en innlogget side på admin.mistral.ai. Den må inneholde en ory_session_-cookie.")))
+            }
+        }
+        XCTAssertTrue(http.requests.isEmpty)
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
+    }
+
+    func testPreviewDeadSessionFailsAndStoresNothing() async throws {
+        http.stub("subscription", status: 302, body: "", headers: ["Location": "https://auth.mistral.ai/login"])
+        do {
+            _ = try await provider.preview("ory_session_x=fixture")
+            XCTFail("A dead session must fail the check")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .unauthorized)
+        }
+        let accounts = try await provider.accounts()
+        XCTAssertTrue(accounts.isEmpty)
+    }
+
+    func testCheckCookieHeaderReportsPresenceOnly() {
+        XCTAssertEqual(
+            MistralProvider.checkCookieHeader("ory_session_x=1; csrftoken=abc"),
+            .init(hasSessionCookie: true, hasCsrfToken: true))
+        XCTAssertEqual(
+            MistralProvider.checkCookieHeader("Cookie: ory_session_x=1"),
+            .init(hasSessionCookie: true, hasCsrfToken: false))
+        XCTAssertEqual(
+            MistralProvider.checkCookieHeader("ory_session_x=1; csrftoken="),
+            .init(hasSessionCookie: true, hasCsrfToken: false))
+        XCTAssertEqual(
+            MistralProvider.checkCookieHeader("csrftoken=abc; other=1"),
+            .init(hasSessionCookie: false, hasCsrfToken: false))
+        XCTAssertEqual(
+            MistralProvider.checkCookieHeader(""),
+            .init(hasSessionCookie: false, hasCsrfToken: false))
+    }
+
     // MARK: - RSC parser
 
     func testParserSkipsLengthDelimitedRows() throws {
