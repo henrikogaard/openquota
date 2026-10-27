@@ -11,15 +11,20 @@
 | OpenCode Go wrong workspace | Add that workspace's key through Add workspace subscription. Old credential files may not match the current CLI database login. |
 | Devin detected but failing | Detection only proves a local source exists. Sign in again with the CLI; the current field is `windsurf_api_key`. Never share file contents. |
 | Cursor stopped updating | Its session may have expired or the unofficial endpoint changed. Replace Credential for the same account; do not share cookies or keep adding duplicates. |
-| Add disabled | Supply the required key/file and Cursor consent where applicable. Labels have defaults. A duplicate/default credential file is not another account. |
+| Mistral stopped updating | The pasted web session expired (roughly monthly) or the console endpoint changed. Sign in at admin.mistral.ai, then Replace Credential with a fresh Cookie header. |
+| Add disabled | Supply the required key/file and Cursor/Mistral consent where applicable. Labels have defaults. A duplicate/default credential file is not another account. |
 | Offline or rate-limited | Last-good readings remain outdated. Wait for connectivity or the retry period; repeated refreshes do not bypass backoff. |
 
-## Mistral keys
+## Mistral sessions
 
-Personal Vibe allowance is not supported. Studio keys are not Admin analytics
-keys, and Admin analytics measures organization activity rather than personal
-allowance. Do not keep creating keys or upgrade for this connector. The legacy
-option is hidden and no longer polled; saved accounts and keys are preserved.
+Pro/Team subscription allowances are read through the web console session,
+not an API key: `api.mistral.ai` has no usage endpoint, and the Admin API is
+Enterprise-only. Studio or Admin API keys do not help here — do not create
+keys for this. Paste the `Cookie:` request header from a signed-in
+admin.mistral.ai request; it must include an `ory_session_*` cookie. Sessions
+expire roughly monthly; the row then shows a sign-in error until a fresh
+header is pasted. Allowances (Included / Vibe) are Mistral's own percentages;
+credits are shown as a balance, never as an allowance.
 
 ## Keychain prompts
 

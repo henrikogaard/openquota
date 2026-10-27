@@ -530,7 +530,11 @@ struct AccountDetail: View {
         case .subscription(let connection):
             connection.kind == .claudeStatusLine ? L("Claude Code status line", "Claude Code-statuslinje") : L("Codex sign-in", "Codex-pålogging")
         case .saved(let account):
-            account.account.providerID == "cursor" ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen") : L("API key in Keychain", "API-nøkkel i nøkkelringen")
+            account.account.providerID == "cursor"
+                ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen")
+                : account.account.providerID == "mistral"
+                    ? L("Session cookie in Keychain", "Øktcookie i nøkkelringen")
+                    : L("API key in Keychain", "API-nøkkel i nøkkelringen")
         case .profile: L("Local provider file", "Lokal leverandørfil")
         case .detected: L("Detected local credential", "Funnet lokal pålogging")
         case .hidden: L("Hidden by you", "Skjult av deg")
@@ -548,7 +552,8 @@ struct AccountDetail: View {
             L("This older profile is no longer used. Remove it and connect the account again.", "Denne eldre profilen brukes ikke lenger. Fjern den og koble til kontoen på nytt.")
         case .profile(let profile): profile.credentialPath
         case .saved(let account) where account.account.providerID == "mistral":
-            L("Mistral shows 30-day workspace activity, not a personal allowance.", "Mistral viser aktivitet i arbeidsområdet siste 30 dager, ikke en personlig kvote.")
+            L("Experimental: the web console's unofficial endpoints. Shows the included monthly usage and separate Vibe allowance as used percentages, plus any pay-as-you-go credits. Sessions expire roughly monthly — paste a fresh Cookie header then.",
+              "Eksperimentell: nettkonsollens uoffisielle endepunkter. Viser inkludert månedlig bruk og separat Vibe-kvote som brukt prosent, pluss eventuelle pay-as-you-go-kreditter. Økter utløper omtrent månedlig — lim inn en fersk Cookie-overskrift da.")
         case .saved(let account) where account.account.providerID == "requesty":
             L("Balance is shared by every key in the organization.", "Saldoen deles av alle nøklene i organisasjonen.")
         case .saved(let account) where model.isExperimentalProvider(account.account.providerID):
@@ -581,14 +586,16 @@ private struct ReplaceCredentialSheet: View {
     var account: AccountDescriptor
     var onSaved: () -> Void
     @State private var secret = ""
-    @State private var cursorConsent = false
+    @State private var sessionConsent = false
     @State private var saving = false
     @State private var errorText: String?
 
     private var isCursor: Bool { account.account.providerID == "cursor" }
+    private var isMistral: Bool { account.account.providerID == "mistral" }
+    private var isSession: Bool { isCursor || isMistral }
     private var canSave: Bool {
         !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (!isCursor || cursorConsent)
+            && (!isSession || sessionConsent)
             && !saving
             && !model.codexLoginBusy
             && !model.isDemo
@@ -610,7 +617,9 @@ private struct ReplaceCredentialSheet: View {
                 GridRow {
                     Text(L("New credential", "Ny påloggingsinformasjon")).foregroundStyle(.secondary)
                     SecureField(
-                        isCursor ? "userID::token" : L("Paste a new API key", "Lim inn en ny API-nøkkel"),
+                        isCursor ? "userID::token"
+                            : isMistral ? "ory_session_…; csrftoken=…"
+                            : L("Paste a new API key", "Lim inn en ny API-nøkkel"),
                         text: $secret)
                         .textFieldStyle(.roundedBorder)
                         .disabled(saving || model.codexLoginBusy)
@@ -619,15 +628,22 @@ private struct ReplaceCredentialSheet: View {
             Text(isCursor
                  ? L("The new session must resolve to the same Cursor account. The existing session is checked locally; no browser import or automatic renewal is used.",
                      "Den nye økten må tilhøre samme Cursor-konto. Den eksisterende økten kontrolleres lokalt; ingen nettleserimport eller automatisk fornyelse brukes.")
+                 : isMistral
+                 ? L("Mistral sessions cannot be matched to an account offline, so use a header from the same Mistral account. No browser import or automatic renewal is used.",
+                     "Mistral-økter kan ikke knyttes til en konto uten nettforbindelse, så bruk en overskrift fra samme Mistral-konto. Ingen nettleserimport eller automatisk fornyelse brukes.")
                  : L("Use a key from the same account or workspace. Generic provider keys cannot be matched to an account offline.",
                      "Bruk en nøkkel fra samme konto eller arbeidsområde. Generiske leverandørnøkler kan ikke knyttes til en konto uten nettforbindelse."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if isCursor {
+            if isSession {
                 Toggle(
-                    L("I understand this uses an unofficial Cursor session endpoint.", "Jeg forstår at dette bruker et uoffisielt Cursor-øktendepunkt."),
-                    isOn: $cursorConsent)
+                    isCursor
+                    ? L("I understand this uses an unofficial Cursor session endpoint.",
+                        "Jeg forstår at dette bruker et uoffisielt Cursor-øktendepunkt.")
+                    : L("I understand this uses an unofficial Mistral web session endpoint.",
+                        "Jeg forstår at dette bruker et uoffisielt øktendepunkt for Mistral på nettet."),
+                    isOn: $sessionConsent)
                     .disabled(saving || model.codexLoginBusy)
                 Text(L("Experimental integration. Keep this session private; credentials are never shown again.",
                        "Eksperimentell integrasjon. Hold denne økten privat; påloggingsinformasjonen vises ikke igjen."))

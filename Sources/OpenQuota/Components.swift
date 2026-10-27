@@ -227,6 +227,8 @@ enum Format {
         switch unit {
         case "$", "USD", "usd":
             return value.formatted(.currency(code: "USD").precision(.fractionLength(value >= 100 ? 0 : 2)))
+        case "€", "EUR", "eur":
+            return value.formatted(.currency(code: "EUR").precision(.fractionLength(value >= 100 ? 0 : 2)))
         case nil, "":
             return compact(value)
         default:

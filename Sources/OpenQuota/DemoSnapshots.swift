@@ -43,6 +43,16 @@ enum DemoSnapshots {
                 account: .init(providerID: "openrouter", id: "demo-key1", label: "Personal key"),
                 providerID: "openrouter", creditsRemaining: 18.75, creditsUnit: "USD"),
             UsageSnapshot(
+                account: .init(providerID: "mistral", id: "demo-mistral", label: "Pro"),
+                providerID: "mistral",
+                windows: [
+                    .init(id: "mistral.included", label: "Included", used: 36, limit: 100, unit: "%",
+                          resetsAt: Date().addingTimeInterval(120_000)),
+                    .init(id: "mistral.vibe", label: "Vibe", used: 58, limit: 100, unit: "%",
+                          resetsAt: Date().addingTimeInterval(120_000)),
+                ],
+                creditsRemaining: 4.20, creditsUnit: "EUR"),
+            UsageSnapshot(
                 account: .init(providerID: "grok", id: "demo-grok", label: "henrik@example.com"),
                 providerID: "grok",
                 windows: [.init(id: "week", label: "Weekly", used: 45, limit: 100, unit: "%",

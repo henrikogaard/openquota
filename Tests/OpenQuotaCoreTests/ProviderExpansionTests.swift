@@ -617,30 +617,35 @@ final class RegressionTests: XCTestCase {
 }
 
 final class ProviderRegistryTests: XCTestCase {
-    func test_mistralIsHiddenEvenWithCustomSpecAndSavedAccount() async throws {
+    func test_mistralWebSessionAdapterIsRegistered() {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
-        let credentials = FileCredentialStore(directory: home)
-        let http = RecordingHTTP()
-        let provider = GenericProvider(
-            spec: SpecLibrary.mistral, http: http, credentials: credentials,
-            manifestURL: home.appendingPathComponent("mistral-keys.json"))
-        let account = try provider.addKey("dummy-mistral-key", label: "Personal")
         let registry = ProviderRegistry(
-            http: http, credentials: credentials,
-            extraSpecs: [SpecLibrary.mistral], adapters: [provider],
+            http: RecordingHTTP(),
+            credentials: FileCredentialStore(directory: home),
             environment: ["PATH": "/usr/bin"])
-
-        XCTAssertFalse(registry.providers.contains { $0.id == "mistral" })
-        XCTAssertFalse(SpecLibrary.all.contains { $0.id == "mistral" })
-        XCTAssertTrue(registry.providers.contains { $0.id == "openrouter" })
-        let saved = try await provider.accounts()
-        XCTAssertEqual(saved.map(\.id), [account.id])
-        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertTrue(registry.providers.contains { $0 is MistralProvider })
     }
 
-    func test_cachedMistralIsHiddenWithoutRemovingOtherSnapshots() throws {
+    func test_customMistralSpecShadowsTheAdapterLikeAnyOtherID() {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let custom = ProviderSpec(
+            id: "mistral", displayName: "Custom Mistral",
+            url: "https://example.com/usage")
+        let registry = ProviderRegistry(
+            http: RecordingHTTP(),
+            credentials: FileCredentialStore(directory: home),
+            extraSpecs: [custom],
+            environment: ["PATH": "/usr/bin"])
+        let mistral = registry.providers.first { $0.id == "mistral" }
+        XCTAssertTrue(mistral is GenericProvider)
+        XCTAssertFalse(mistral is MistralProvider)
+    }
+
+    func test_cachedSnapshotsAreKeptForEveryProvider() throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: home) }
@@ -653,7 +658,7 @@ final class ProviderRegistryTests: XCTestCase {
             providerID: "openrouter")
         try cache.save([mistral.account.id: mistral, other.account.id: other])
 
-        XCTAssertEqual(Set(cache.load().keys), [other.account.id])
+        XCTAssertEqual(Set(cache.load().keys), [mistral.account.id, other.account.id])
     }
 
     func test_registryContainsSpecsAdaptersAndCLIs() {
@@ -670,7 +675,7 @@ final class ProviderRegistryTests: XCTestCase {
         }
         // adapters
         for adapterID in ["gemini", "grok", "opencode",
-                          "devin", "cursor", "copilot"] {
+                          "devin", "cursor", "mistral", "copilot"] {
             XCTAssertTrue(ids.contains(adapterID), adapterID)
         }
         XCTAssertFalse(ids.contains("claude"))

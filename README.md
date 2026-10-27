@@ -59,15 +59,18 @@ Each saved key/session has its own row. Other local providers discover their def
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
 | Grok | Local OAuth | Billing-period usage; named local accounts |
 | Cursor | Experimental, manual session token | Cursor Models / Other Models allowance and on-demand spend; internal dashboard with legacy RPC fallback |
+| Mistral | Experimental, manual web session | Pro/Team included monthly usage and separate Vibe allowance as used percentages; pay-as-you-go credits |
 | OpenRouter | API key | Remaining account credits and independent key usage/limit |
 | Requesty | Management API key | Organization balance |
 | Additional / custom providers | Specs and CLI adapters | See [provider details](docs/providers.md) |
 
-**Mistral personal Vibe allowance is not supported.** The legacy Admin-analytics
-connector measures workspace activity, not personal allowance. Do not create
-Studio or Admin keys for this purpose. Mistral is temporarily hidden from setup
-and usage, with no background polling. Saved accounts and Keychain entries are
-retained.
+**Mistral has no public API for Pro/Team subscription limits.** The Admin API
+is Enterprise-only and `api.mistral.ai` exposes no usage endpoint, so OpenQuota
+reads the signed-in web console session: you paste a `Cookie:` request header
+from admin.mistral.ai (the same manual, no-browser-import model as Cursor).
+These are unofficial endpoints, the session expires roughly monthly, and
+allowance figures are Mistral's own percentages. The legacy Admin-analytics
+connector is gone; do not create Studio or Admin keys for this purpose.
 
 Provider mappings are fixture-tested, **not a claim that every provider has been verified with a live paid account**. Other providers' endpoints may change; errors retain the last good reading and mark it outdated. Claude and Codex use the documented integration surfaces linked in [provider details](docs/providers.md); their fixture tests do not replace live paid-account validation.
 

@@ -24,7 +24,6 @@ and limits](estimated-spend.md).
 | Synthetic | bearer | `api.synthetic.new/v2/quotas` | unverified |
 | Kilo | bearer | `kilocode.ai/api/users/me/balance` | unverified |
 | Venice | bearer | `api.venice.ai/api/v1/apikeys` | unverified |
-| Mistral Vibe | Disabled | — | Temporarily hidden from setup and usage; no background requests. Saved accounts and keys are retained. No supported personal-allowance source confirmed. |
 | OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 | ClinePass | bearer | `api.cline.bot/api/v1/users/me/plan/usage-limits` | 5h/weekly/monthly % used + resets, unverified |
@@ -36,12 +35,12 @@ and limits](estimated-spend.md).
 | v0 | bearer | `api.v0.dev/v1/user/billing` + `/v1/rate-limits` | token or legacy billing branch + request limit; unverified |
 | Codebuff | bearer | `POST www.codebuff.com/api/v1/usage` | credits used/quota/remaining + reset; subscription metadata not fetched; unverified |
 
-Mistral's legacy mapping is not recommended for setup. It does not expose
-personal Vibe allowance; Studio keys cannot authenticate Admin analytics.
-The documented Admin API requires `x-api-key` and Enterprise Backoffice access,
-not the legacy connector's bearer authentication. The connector is hidden from
-setup and usage, and is not polled; saved metadata and keys are preserved. Do not use this table
-as a reason to create more Mistral keys.
+Mistral is **not** an API-key spec. The documented Admin API is
+Enterprise-only (standard API keys are refused), and `api.mistral.ai` exposes
+no usage or billing endpoint at all — every candidate path answers 404.
+Pro/Team subscription allowances are read through the web console session
+instead; see the [Mistral section](#mistral-experimental-explicit-opt-in).
+Do not create Studio or Admin keys to chase subscription limits.
 
 ## Next candidates (from the OpenUsage / CodexBar audit)
 
@@ -93,6 +92,54 @@ cancellation, and redirects stop requests rather than triggering fallback.
 Redirects are refused on all Cursor requests; credentials are sent only in
 headers to the two fixed HTTPS hosts. Known expired tokens fail locally and can
 be replaced through Add Account. Fixture coverage is not live account verification.
+
+## Mistral (experimental, explicit opt-in)
+
+Settings → Accounts → + → **Mistral (Experimental)** accepts the `Cookie:`
+request header from any signed-in `admin.mistral.ai` request (DevTools →
+Network → a request → Request Headers → Cookie). It must include an
+`ory_session_*` cookie; a `csrftoken` cookie enables the console fallback.
+Paste the header value only, and never share it: it is a sensitive web session,
+not a read-only API key.
+
+Why a session: Mistral's plans (Pro, Team) include monthly usage shared across
+Le Chat, Studio, the API and Vibe Code, but there is no public API for the
+remaining allowance. The Admin API is Enterprise-only and `api.mistral.ai` has
+no usage endpoint. The signed-in web console is the only remaining source.
+
+Per refresh (all GET, redirects refused, credentials only in Cookie headers to
+the two fixed HTTPS hosts):
+
+1. `GET https://admin.mistral.ai/subscription` — a Next.js page whose React
+   Flight (RSC) payload carries `budget.api_budget` / `budget.vibe_budget`:
+   `usage_percentage`, `initial_budget`, `currency`, `reset_at`. Mapped to the
+   **Included** (shared monthly usage) and **Vibe** (separate Vibe Code
+   allowance) consumption windows. Zero/malformed allowances are omitted
+   without discarding a valid sibling; two different budget objects under one
+   name are treated as absent rather than guessed.
+2. `GET https://admin.mistral.ai/api/billing/credits` — best-effort
+   pay-as-you-go balance: `wallet_amount + credit_notes_amount −
+   ongoing_usage_balance`, shown as a balance, never as an allowance.
+3. `GET https://console.mistral.ai/api-ui/trpc/billing.vibeUsage` — only when
+   the page has no Vibe allowance and a `csrftoken` cookie is available. Only
+   `ory_session_*` and `csrftoken` are forwarded (other admin cookies stay
+   origin-bound), and the token is also sent as `X-CSRFToken`.
+
+A redirect (Mistral's answer to a dead session is the Ory login flow), 401 or
+403 fails the refresh as *unauthorized*; Ory sessions expire roughly monthly,
+and the row shows a sign-in error until a fresh header is pasted. Sessions
+cannot be matched to an account offline, so replacement is not verified to be
+the same account (unlike Cursor) — use a header from the same Mistral account,
+or remove the row and add the other account separately. Rate limits honor
+`Retry-After`. Re-pasting the same session updates its account; a different
+session is a separate account.
+
+Evidence: endpoint shapes and the Flight-parser design are second-hand from
+CodexBar's MIT-licensed Mistral provider (docs and fixtures) and Pulse's
+published notes; `reset_at` has also been observed as a React `$D` epoch tag.
+No live paid Pro/Team account has verified this connector yet. Allowance
+percentages are Mistral's own; credits are arithmetic on three reported
+figures, not an estimate. Nothing here is relabeled as anything else.
 
 ## Subscription integrations (explicit opt-in)
 
@@ -207,6 +254,7 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 | Provider | Source | Endpoint(s) |
 |---|---|---|
 | Cursor (experimental) | pasted `WorkosCursorSessionToken` (`userID::jwt`) | `cursor.com/api/usage-summary`, with `api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo,GetCreditGrantsBalance}` fallback |
+| Mistral (experimental) | pasted `Cookie:` header from `admin.mistral.ai` (must include `ory_session_*`) | `admin.mistral.ai/subscription` (RSC budgets) + `/api/billing/credits`, with `console.mistral.ai/api-ui/trpc/billing.vibeUsage` fallback |
 
 Cookie-token spec providers (e.g. Perplexity) use `auth: "cookie"` — the
 pasted value is sent as a `Cookie:` header. Rot is explicit: the row shows an
@@ -256,8 +304,9 @@ fixture suite; both integrations still require Mac-session validation with
 user-controlled accounts.
 
 Mistral's [Vibe analytics documentation](https://docs.mistral.ai/api/endpoint/beta/admin/vibe-code-analytics)
-describes workspace activity; it does not expose personal subscription
-remaining percentages. Requesty's [management API](https://docs.requesty.ai/)
+describes Enterprise-admin workspace activity; it does not expose personal
+subscription remaining percentages, which is why the legacy connector was
+removed in favor of the web-session reading above. Requesty's [management API](https://docs.requesty.ai/)
 provides an organization balance. Neither is relabeled as a subscription quota.
 
 ## Deliberately not covered

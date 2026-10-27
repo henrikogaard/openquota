@@ -8,7 +8,7 @@ a read-only credential or guarantee secrecy on a compromised Mac.
 
 | Data | Storage/owner |
 |---|---|
-| Pasted API keys and Cursor sessions | macOS Keychain, device-only and non-synchronizable |
+| Pasted API keys and Cursor/Mistral sessions | macOS Keychain, device-only and non-synchronizable |
 | Claude login | Claude Code's own storage; the bridge does not copy credentials |
 | Codex login | Codex-managed files in an independent home per connection |
 | Other local sign-ins | Provider-owned files; some adapters write refreshed tokens back |
@@ -24,8 +24,8 @@ provider-owned files.
 ## Data access
 
 - Networking uses ephemeral sessions without retained cookies or response caches.
-- Cursor is explicitly opt-in, manually supplied, and unofficial. No automatic
-  browser import or session renewal occurs.
+- Cursor and Mistral web sessions are explicitly opt-in, manually supplied,
+  and unofficial. No automatic browser import or session renewal occurs.
 - The Claude bridge saves only allowlisted quota fields. When Claude Desktop
   runs it, the reading's file name carries a short hash of Desktop's account
   ids so another account gets its own card; the ids and email are not saved.

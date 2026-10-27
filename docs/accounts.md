@@ -114,6 +114,21 @@ screenshots, or bug reports.
 A new token for the same Cursor identity replaces its saved token. A different
 identity gets an independent entry. [Technical details](providers.md#cursor-experimental-explicit-opt-in).
 
+## Mistral: experimental
+
+Mistral has no public API for Pro/Team subscription limits, so OpenQuota reads
+the signed-in web console: paste the `Cookie:` request header from an
+admin.mistral.ai request (it must include an `ory_session_*` cookie). Like
+Cursor, this is an unofficial endpoint with a sensitive session cookie, **not a
+read-only key**; nothing is imported from your browser automatically and the
+header should never be shared.
+
+Sessions expire roughly monthly. When the card shows a sign-in error, sign in
+at admin.mistral.ai again and use **Replace Credential…** with a fresh header.
+Sessions cannot be matched to an account offline, so a replacement is not
+verified to be the same account; for a different Mistral account, add a second
+entry instead of replacing. [Technical details](providers.md#mistral-experimental-explicit-opt-in).
+
 ## Hide a detected provider
 
 Providers found from a CLI sign-in on this Mac (Amp, Grok, Devin and so on)
@@ -129,6 +144,8 @@ changed. Hidden providers are listed under **Hidden**; select one and press
   label stay intact. Use the same account/workspace: generic keys cannot be
   matched to a provider identity offline.
 - **Cursor:** replacement must resolve to the existing identity.
+- **Mistral:** replacement cannot be verified offline; use a header from the
+  same account, or remove the entry and add the other account separately.
 - **Claude:** use that CLI profile again; there is no separate token to reconnect.
 - **Local CLI:** sign in again through the CLI, then refresh.
 - **Legacy Claude/Codex file profile:** remove it and use the explicit connection.

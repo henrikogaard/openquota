@@ -28,7 +28,7 @@ final class CompletionRegressionTests: XCTestCase {
         XCTAssertEqual(snapshot.windows[0].percentRemaining, 70)
     }
 
-    func testRequestyBalanceAndMistralActivityNeverInventQuota() async throws {
+    func testRequestyBalanceNeverInventsQuota() async throws {
         let http = RecordingHTTP()
         http.defaultBody = #"{"name":"Example","balance":12.34}"#
         let p = provider(BuiltinProviders.requesty, http, directory: try directory())
@@ -37,19 +37,6 @@ final class CompletionRegressionTests: XCTestCase {
         let snapshot = try await p.refresh(account: accounts[0])
         XCTAssertEqual(snapshot.windows[0].remaining, 12.34)
         XCTAssertNil(snapshot.lowestPercentRemaining)
-
-        http.defaultBody = """
-        {"sessions":[{"nb_sessions":"12"},{"nb_sessions":"4"}],
-         "consumed_tokens":[{"input_tokens":"100","output_tokens":"20"}]}
-        """
-        let vibe = provider(SpecLibrary.mistral, http, directory: try directory())
-        _ = try vibe.addKey("fixture-admin-key", label: nil)
-        let vibeAccounts = try await vibe.accounts()
-        let activity = try await vibe.refresh(account: vibeAccounts[0])
-        XCTAssertEqual(activity.windows.map(\.used), [16, 100, 20])
-        XCTAssertNil(activity.lowestPercentRemaining)
-        XCTAssertEqual(http.requests.last?.headers["Authorization"], "Bearer fixture-admin-key")
-        XCTAssertFalse(http.requests.last!.url.absoluteString.contains("{"))
     }
 
     func testKeysAreIndependentDuplicateSafeRenameableAndRemovable() async throws {

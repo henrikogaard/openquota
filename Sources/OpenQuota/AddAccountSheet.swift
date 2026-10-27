@@ -6,7 +6,7 @@ import OpenQuotaCore
 /// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
-        case claude, codex, cursor, openCodeMethods
+        case claude, codex, cursor, mistral, openCodeMethods
         case apiKey(String)
         case profile(String)
 
@@ -14,7 +14,7 @@ struct AddAccountSheet: View {
         var ownsActions: Bool {
             switch self {
             case .openCodeMethods: false
-            case .claude, .codex, .cursor, .apiKey, .profile: true
+            case .claude, .codex, .cursor, .mistral, .apiKey, .profile: true
             }
         }
     }
@@ -40,6 +40,9 @@ struct AddAccountSheet: View {
             "cursor": Tile(
                 target: .cursor, providerID: "cursor",
                 name: L("Cursor · Experimental", "Cursor · Eksperimentell")),
+            "mistral": Tile(
+                target: .mistral, providerID: "mistral",
+                name: L("Mistral · Experimental", "Mistral · Eksperimentell")),
         ]
         for provider in model.specProviders() {
             let id = canonicalProviderID(provider.id)
@@ -82,6 +85,7 @@ struct AddAccountSheet: View {
         case .claude: "Claude Code"
         case .codex: "Codex / ChatGPT"
         case .cursor: "Cursor"
+        case .mistral: "Mistral"
         case .openCodeMethods: model.providerName("opencode-go")
         case .apiKey(let id), .profile(let id): model.providerName(id)
         }
@@ -91,6 +95,7 @@ struct AddAccountSheet: View {
         switch target {
         case nil: 470
         case .some(.cursor): 480
+        case .some(.mistral): 500
         case .some(.openCodeMethods): 300
         case .some(.profile(_)): 420
         case .some(.claude): 460
@@ -194,6 +199,8 @@ struct AddAccountSheet: View {
             SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone, onCancel: onDone)
         case .cursor:
             CursorSessionForm(model: model, onDone: onDone)
+        case .mistral:
+            MistralSessionForm(model: model, onDone: onDone)
         case .openCodeMethods:
             VStack(alignment: .leading, spacing: 12) {
                 Text(L(
@@ -249,8 +256,6 @@ private struct APIKeyForm: View {
 
     private var note: String {
         switch provider.id {
-        case "mistral": L("Needs an Admin API key. Shows 30-day workspace activity, not a personal allowance.",
-                           "Krever en admin-API-nøkkel. Viser aktivitet i arbeidsområdet siste 30 dager, ikke en personlig kvote.")
         case "requesty": L("Needs a management key. Balance is shared across the organization.",
                             "Krever en administrasjonsnøkkel. Saldoen deles i hele organisasjonen.")
         case "zenmux": L("Needs a Management API key.", "Krever en administrasjons-API-nøkkel.")
@@ -346,6 +351,62 @@ private struct CursorSessionForm: View {
             let message = (error as? ProviderError)?.userMessage
                 ?? L("The session token could not be saved.", "Øktnøkkelen kunne ikke lagres.")
             errorText = providerError(message, providerID: "cursor")
+        }
+    }
+}
+
+private struct MistralSessionForm: View {
+    var model: AppModel
+    var onDone: () -> Void
+    @State private var cookie = ""
+    @State private var label = ""
+    @State private var errorText: String?
+    @State private var consent = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    SecureField(L("Cookie Header", "Cookie-overskrift"), text: $cookie,
+                                prompt: Text("ory_session_…; csrftoken=…"))
+                    TextField(L("Label", "Navn"), text: $label, prompt: Text(L("Pro", "Pro")))
+                } header: {
+                    Text(L("Mistral · Experimental", "Mistral · Eksperimentell"))
+                } footer: {
+                    Text(errorText ?? L("Paste the Cookie header from a request to admin.mistral.ai while you are signed in. Re-pasting the same session updates this account.",
+                                        "Lim inn Cookie-overskriften fra en forespørsel til admin.mistral.ai mens du er logget inn. Å lime inn samme økt på nytt oppdaterer denne kontoen."))
+                        .foregroundStyle(errorText == nil ? Color.secondary : .red)
+                }
+                Section {
+                    Link(L("Open Mistral Subscription", "Åpne Mistral-abonnementet"),
+                         destination: URL(string: "https://admin.mistral.ai/subscription")!)
+                    Text(L("Mistral has no public API for Pro/Team subscription limits. In your signed-in browser, open Developer Tools → Network on admin.mistral.ai, pick a request, and copy the whole Cookie request header.",
+                           "Mistral har ikke noe offentlig API for Pro/Team-abonnementskvote. Åpne utviklerverktøy → Nettverk på admin.mistral.ai i nettleseren der du er logget inn, velg en forespørsel, og kopier hele Cookie-forespørselsoverskriften."))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle(L("Enable experimental access", "Aktiver eksperimentell tilgang"), isOn: $consent)
+                        .toggleStyle(.checkbox)
+                } footer: {
+                    Text(L("Uses the web console's unofficial endpoints, which may break. This is a sensitive session cookie, not a read-only API key. Stored in this Mac’s Keychain; no browser import or automatic renewal. Sessions expire roughly monthly — re-paste afterwards. Never share it in chat or screenshots.",
+                           "Bruker nettkonsollens uoffisielle endepunkter, som kan slutte å virke. Dette er en sensitiv øktcookie, ikke en skrivebeskyttet API-nøkkel. Lagres i nøkkelringen på denne Macen; ingen nettleserimport eller automatisk fornyelse. Økter utløper omtrent månedlig — lim inn på nytt etterpå. Del den aldri i chat eller skjermbilder."))
+                }
+            }
+            .formStyle(.grouped)
+            FormActions(primary: L("Save", "Lagre"),
+                        disabled: !consent || cookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        action: add, cancel: onDone)
+        }
+    }
+
+    private func add() {
+        guard consent else { return }
+        do {
+            try model.addMistralSession(cookie.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        label: label.isEmpty ? nil : label)
+            onDone()
+        } catch {
+            let message = (error as? ProviderError)?.userMessage
+                ?? L("The session cookie could not be saved.", "Øktcookien kunne ikke lagres.")
+            errorText = providerError(message, providerID: "mistral")
         }
     }
 }

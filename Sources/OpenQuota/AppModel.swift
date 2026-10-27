@@ -456,6 +456,12 @@ final class AppModel {
         refreshNow()
     }
 
+    func addMistralSession(_ raw: String, label: String?) throws {
+        guard !isDemo, let mistral = providers.compactMap({ $0 as? MistralProvider }).first else { return }
+        _ = try mistral.addCookieHeader(raw, label: label)
+        refreshNow()
+    }
+
     func replaceCredential(_ secret: String, for account: AccountDescriptor) async throws {
         guard !isDemo else { return }
         if let generic = specProviders().first(where: { $0.id == account.account.providerID }) {
@@ -463,6 +469,9 @@ final class AppModel {
         } else if account.account.providerID == "cursor",
                   let cursor = providers.compactMap({ $0 as? CursorProvider }).first {
             try cursor.replaceSessionToken(secret, accountID: account.id)
+        } else if account.account.providerID == "mistral",
+                  let mistral = providers.compactMap({ $0 as? MistralProvider }).first {
+            try mistral.replaceCookieHeader(secret, accountID: account.id)
         } else {
             throw ProviderError.notLoggedIn
         }
@@ -478,6 +487,9 @@ final class AppModel {
         } else if let cursor = providers.compactMap({ $0 as? CursorProvider }).first,
                   account.account.providerID == "cursor" {
             try cursor.removeSessionToken(accountID: account.id)
+        } else if let mistral = providers.compactMap({ $0 as? MistralProvider }).first,
+                  account.account.providerID == "mistral" {
+            try mistral.removeCookieHeader(accountID: account.id)
         }
         Task {
             await store.remove(accountID: account.id)
@@ -493,13 +505,17 @@ final class AppModel {
         } else if let cursor = providers.compactMap({ $0 as? CursorProvider }).first,
                   account.account.providerID == "cursor" {
             try cursor.renameSessionToken(accountID: account.id, label: label)
+        } else if let mistral = providers.compactMap({ $0 as? MistralProvider }).first,
+                  account.account.providerID == "mistral" {
+            try mistral.renameCookieHeader(accountID: account.id, label: label)
         }
         refreshNow()
     }
 
     func savedAccounts() async throws -> [AccountDescriptor] {
         var accounts: [AccountDescriptor] = []
-        for provider in providers where provider is GenericProvider || provider is CursorProvider {
+        for provider in providers where provider is GenericProvider || provider is CursorProvider
+            || provider is MistralProvider {
             accounts += try await provider.accounts()
         }
         return accounts.sorted { ($0.account.providerID, $0.account.label ?? "") < ($1.account.providerID, $1.account.label ?? "") }
@@ -514,6 +530,7 @@ final class AppModel {
     /// Providers found from a local CLI sign-in, as opposed to ones the user added.
     static func isDetectedLocal(_ provider: any UsageProvider) -> Bool {
         !(provider is GenericProvider) && !(provider is ProfiledProvider) && !(provider is CursorProvider)
+            && !(provider is MistralProvider)
             && provider.id != "claude" && provider.id != "codex"
     }
 
@@ -538,7 +555,7 @@ final class AppModel {
             ?? hiddenProviderNames[id]
             ?? ["opencode": "OpenCode Go", "opencode-go": "OpenCode Go", "openrouter": "OpenRouter",
                 "claude": "Claude Code", "codex": "Codex / ChatGPT",
-                "mistral": "Mistral Vibe"][id] ?? id.capitalized
+                "mistral": "Mistral"][id] ?? id.capitalized
     }
 
     func dashboardURL(_ id: String) -> URL? {
@@ -556,6 +573,9 @@ final class AppModel {
         case "cursor":
             L("Cursor's unofficial dashboard endpoint; not an official subscription API",
               "Uoffisielt Cursor-kontrollpanelendepunkt; ikke et offisielt abonnements-API")
+        case "mistral":
+            L("Mistral's web console session (admin.mistral.ai); unofficial endpoints, not a public API",
+              "Nettkonsolløkten til Mistral (admin.mistral.ai); uoffisielle endepunkter, ikke et offentlig API")
         case "opencode", "opencode-go":
             L("OpenCode Go workspace usage endpoint · one key per workspace subscription",
               "Bruksendepunkt for OpenCode Go-arbeidsområde · én nøkkel per arbeidsområdeabonnement")
@@ -566,7 +586,7 @@ final class AppModel {
     }
 
     func isExperimentalProvider(_ providerID: String) -> Bool {
-        if providerID == "cursor" { return true }
+        if providerID == "cursor" || providerID == "mistral" { return true }
         let canonicalID = providerID == "opencode" ? "opencode-go" : providerID
         return specProviders().contains { $0.id == canonicalID && $0.unverified }
     }
