@@ -6,7 +6,7 @@ import OpenQuotaCore
 /// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
-        case claude, codex, cursor, openCodeMethods
+        case claude, codex, cursor, mistral, openCodeMethods
         case apiKey(String)
         case profile(String)
 
@@ -14,7 +14,7 @@ struct AddAccountSheet: View {
         var ownsActions: Bool {
             switch self {
             case .openCodeMethods: false
-            case .claude, .codex, .cursor, .apiKey, .profile: true
+            case .claude, .codex, .cursor, .mistral, .apiKey, .profile: true
             }
         }
     }
@@ -40,6 +40,9 @@ struct AddAccountSheet: View {
             "cursor": Tile(
                 target: .cursor, providerID: "cursor",
                 name: L("Cursor · Experimental", "Cursor · Eksperimentell")),
+            "mistral": Tile(
+                target: .mistral, providerID: "mistral",
+                name: L("Mistral · Experimental", "Mistral · Eksperimentell")),
         ]
         for provider in model.specProviders() {
             let id = canonicalProviderID(provider.id)
@@ -82,6 +85,7 @@ struct AddAccountSheet: View {
         case .claude: "Claude Code"
         case .codex: "Codex / ChatGPT"
         case .cursor: "Cursor"
+        case .mistral: "Mistral"
         case .openCodeMethods: model.providerName("opencode-go")
         case .apiKey(let id), .profile(let id): model.providerName(id)
         }
@@ -91,6 +95,7 @@ struct AddAccountSheet: View {
         switch target {
         case nil: 470
         case .some(.cursor): 480
+        case .some(.mistral): 560
         case .some(.openCodeMethods): 300
         case .some(.profile(_)): 420
         case .some(.claude): 460
@@ -194,6 +199,8 @@ struct AddAccountSheet: View {
             SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone, onCancel: onDone)
         case .cursor:
             CursorSessionForm(model: model, onDone: onDone)
+        case .mistral:
+            MistralSessionWizard(model: model, onDone: onDone)
         case .openCodeMethods:
             VStack(alignment: .leading, spacing: 12) {
                 Text(L(
@@ -249,8 +256,6 @@ private struct APIKeyForm: View {
 
     private var note: String {
         switch provider.id {
-        case "mistral": L("Needs an Admin API key. Shows 30-day workspace activity, not a personal allowance.",
-                           "Krever en admin-API-nøkkel. Viser aktivitet i arbeidsområdet siste 30 dager, ikke en personlig kvote.")
         case "requesty": L("Needs a management key. Balance is shared across the organization.",
                             "Krever en administrasjonsnøkkel. Saldoen deles i hele organisasjonen.")
         case "zenmux": L("Needs a Management API key.", "Krever en administrasjons-API-nøkkel.")
@@ -346,6 +351,327 @@ private struct CursorSessionForm: View {
             let message = (error as? ProviderError)?.userMessage
                 ?? L("The session token could not be saved.", "Øktnøkkelen kunne ikke lagres.")
             errorText = providerError(message, providerID: "cursor")
+        }
+    }
+}
+
+/// Guided three-step setup for a Mistral web session: open the console,
+/// copy the Cookie header with per-browser instructions, then connect with a
+/// live check that verifies the session against Mistral before saving.
+private struct MistralSessionWizard: View {
+    private enum Step { case signIn, copyCookie, connect }
+
+    private enum Browser: String, CaseIterable, Identifiable {
+        case safari, chrome, firefox
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .safari: "Safari"
+            case .chrome: "Chrome/Edge"
+            case .firefox: "Firefox"
+            }
+        }
+
+        /// How to reach the Network tab in this browser.
+        var instructions: String {
+            switch self {
+            case .safari:
+                L("Safari → Settings → Advanced, turn on Show features for web developers. Then Develop → Show Web Inspector → Network.",
+                  "Safari → Innstillinger → Avansert, slå på Vis funksjoner for nettutviklere. Deretter Utvikle → Vis nettkonsoll → Nettverk.")
+            case .chrome:
+                L("View → Developer → Developer Tools (⌘⌥I), then the Network tab.",
+                  "Vis → Utvikler → Utviklerverktøy (⌘⌥I), deretter Nettverk-fanen.")
+            case .firefox:
+                L("Tools → Browser Tools → Web Developer Tools (⌘⌥I), then the Network tab.",
+                  "Verktøy → Nettleserverktøy → Nettkonsoll (⌘⌥I), deretter Nettverk-fanen.")
+            }
+        }
+    }
+
+    var model: AppModel
+    var onDone: () -> Void
+    @State private var step = Step.signIn
+    @State private var browser = Browser.safari
+    @State private var cookie = ""
+    @State private var label = ""
+    @State private var consent = false
+    @State private var connecting = false
+    @State private var preview: UsageSnapshot?
+    @State private var failure: ProviderError?
+    @State private var errorText: String?
+
+    private var pastedCookie: String {
+        cookie.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var check: MistralProvider.CookieCheck {
+        MistralProvider.checkCookieHeader(pastedCookie)
+    }
+
+    private var canConnect: Bool {
+        consent && check.hasSessionCookie && !connecting && !model.isDemo
+    }
+
+    /// A failed check that doesn't prove the cookie dead still allows saving
+    /// (the card retries later); an expired session or rate limit does not.
+    private var offerSaveWithoutReading: Bool {
+        switch failure {
+        case .badResponse, .serverError, .network: true
+        default: false
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    stepHeader
+                    switch step {
+                    case .signIn: signInStep
+                    case .copyCookie: copyCookieStep
+                    case .connect:
+                        if let preview {
+                            summaryStep(preview)
+                        } else {
+                            connectStep
+                        }
+                    }
+                    if let errorText {
+                        Text(errorText).font(.callout).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+            FormActions(
+                primary: primaryLabel,
+                disabled: primaryDisabled,
+                action: primaryAction,
+                cancel: onDone,
+                back: backAction)
+        }
+    }
+
+    // MARK: Steps
+
+    private var stepHeader: some View {
+        let number = switch step { case .signIn: 1; case .copyCookie: 2; case .connect: 3 }
+        return Text(L("Step \(number) of 3", "Steg \(number) av 3"))
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
+    private var signInStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Sign in to Mistral", "Logg inn i Mistral"))
+                .font(.headline)
+            Link(L("Open admin.mistral.ai", "Åpne admin.mistral.ai"),
+                 destination: URL(string: "https://admin.mistral.ai/subscription")!)
+            Text(L("Sign in with the Mistral account you want to track (for example your Pro or Team account). OpenQuota never reads your browser — you paste the session yourself in the next steps.",
+                   "Logg inn med Mistral-kontoen du vil følge (for eksempel Pro- eller Team-kontoen din). OpenQuota leser aldri nettleseren din — du limer inn økten selv i de neste stegene."))
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(L("Mistral has no public API for subscription limits, so OpenQuota reads the web console session you paste. The cookie is stored in this Mac's Keychain only.",
+                   "Mistral har ikke noe offentlig API for abonnementskvote, så OpenQuota leser nettkonsolløkten du limer inn. Cookien lagres bare i nøkkelringen på denne Macen."))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var copyCookieStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Copy your session cookie", "Kopier øktcookien din"))
+                .font(.headline)
+            Picker(L("Browser", "Nettleser"), selection: $browser) {
+                ForEach(Browser.allCases) { browser in
+                    Text(browser.title).tag(browser)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text(browser.instructions)
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            numbered(1, L("Open the Network tab as described above.", "Åpne Nettverk-fanen som beskrevet over."))
+            numbered(2, L("Reload the admin.mistral.ai page, then click the first request in the list.", "Last inn admin.mistral.ai-siden på nytt, og klikk den første forespørselen i listen."))
+            numbered(3, L("Under Request Headers, find the cookie header and copy its entire value.", "Under Request Headers finner du cookie-overskriften. Kopier hele verdien."))
+            Text(L("It must contain an ory_session_… cookie. The value is long — that's fine. Treat it like a password: never share it.",
+                   "Den må inneholde en ory_session_-cookie. Verdien er lang — det er greit. Behandle den som et passord: del den aldri."))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var connectStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Paste and connect", "Lim inn og koble til"))
+                .font(.headline)
+            SecureField(L("Cookie Header", "Cookie-overskrift"), text: $cookie,
+                        prompt: Text("ory_session_…; csrftoken=…"))
+            validationRows
+            HStack {
+                Text(L("Label", "Navn")).frame(width: 64, alignment: .leading)
+                TextField(L("Label", "Navn"), text: $label, prompt: Text(L("Pro", "Pro")))
+                    .labelsHidden().textFieldStyle(.roundedBorder)
+            }
+            Toggle(L("Enable experimental access", "Aktiver eksperimentell tilgang"), isOn: $consent)
+                .toggleStyle(.checkbox)
+            if model.isDemo {
+                Text(L("Demo mode: adding accounts is disabled.", "Demomodus: å legge til kontoer er avslått."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text(L("Uses the web console's unofficial endpoints, which may break. This is a sensitive session cookie, not a read-only API key. Stored in this Mac's Keychain; no browser import or automatic renewal. Sessions expire roughly monthly — use Replace Credential when the card shows a sign-in error.",
+                   "Bruker nettkonsollens uoffisielle endepunkter, som kan slutte å virke. Dette er en sensitiv øktcookie, ikke en skrivebeskyttet API-nøkkel. Lagres i nøkkelringen på denne Macen; ingen nettleserimport eller automatisk fornyelse. Økter utløper omtrent månedlig — bruk Bytt påloggingsinformasjon når kortet viser en innloggingsfeil."))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if connecting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(L("Contacting Mistral…", "Kontakter Mistral …"))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if offerSaveWithoutReading {
+                Divider()
+                Text(L("The check couldn't read allowances, but the session may still be valid. The card retries on every refresh.",
+                       "Sjekken kunne ikke lese kvoter, men økten kan fortsatt være gyldig. Kortet prøver på nytt ved hver oppdatering."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(L("Save without checking", "Lagre uten sjekk")) { save() }
+                    .buttonStyle(.glass)
+            }
+        }
+        .onChange(of: cookie) { _, _ in
+            // A re-paste after a failure starts a clean slate.
+            failure = nil
+            errorText = nil
+        }
+    }
+
+    @ViewBuilder private var validationRows: some View {
+        Label(
+            check.hasSessionCookie
+                ? L("Session cookie found", "Fant øktcookie")
+                : L("Missing ory_session_ cookie — paste the whole Cookie header", "Mangler ory_session_-cookie — lim inn hele Cookie-overskriften"),
+            systemImage: check.hasSessionCookie ? "checkmark.circle.fill" : "circle.dashed")
+            .foregroundStyle(check.hasSessionCookie ? Color.green : .secondary)
+        if check.hasSessionCookie {
+            Label(
+                check.hasCsrfToken
+                    ? L("csrftoken found — the Vibe fallback is available", "Fant csrftoken — Vibe-reserven er tilgjengelig")
+                    : L("No csrftoken — the Vibe fallback will be skipped", "Ingen csrftoken — Vibe-reserven hoppes over"),
+                systemImage: check.hasCsrfToken ? "checkmark.circle.fill" : "minus.circle")
+                .foregroundStyle(check.hasCsrfToken ? Color.green : .secondary)
+        }
+    }
+
+    private func summaryStep(_ snapshot: UsageSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Connected — check what Mistral reports", "Koblet til — se hva Mistral rapporterer"))
+                .font(.headline)
+            ForEach(snapshot.windows) { window in
+                HStack {
+                    Text(window.label)
+                    Spacer()
+                    Text(windowSummary(window))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let credits = snapshot.creditsRemaining {
+                HStack {
+                    Text(L("Credits", "Kreditter"))
+                    Spacer()
+                    Text(Format.amount(credits, unit: snapshot.creditsUnit))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(L("Nothing is saved yet. Press Save to add this account.", "Ingenting er lagret ennå. Trykk Lagre for å legge til denne kontoen."))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func windowSummary(_ window: UsageWindow) -> String {
+        var parts: [String] = []
+        if let remaining = window.percentRemaining {
+            parts.append("\(Int(remaining.rounded()))% \(L("left", "igjen"))")
+        }
+        if let resetsAt = window.resetsAt {
+            parts.append("\(L("resets", "nullstilles")) \(resetsAt.formatted(.dateTime.month(.abbreviated).day().locale(Localized.appLocale)))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Actions
+
+    private var primaryLabel: String {
+        switch step {
+        case .signIn, .copyCookie: L("Continue", "Fortsett")
+        case .connect: preview == nil ? L("Connect", "Koble til") : L("Save", "Lagre")
+        }
+    }
+
+    private var primaryDisabled: Bool {
+        step == .connect && preview == nil && !canConnect
+    }
+
+    private func primaryAction() {
+        errorText = nil
+        switch step {
+        case .signIn: step = .copyCookie
+        case .copyCookie: step = .connect
+        case .connect:
+            if preview == nil { connect() } else { save() }
+        }
+    }
+
+    private var backAction: (() -> Void)? {
+        switch step {
+        case .signIn: nil
+        case .copyCookie: { step = .signIn }
+        case .connect: { preview = nil; failure = nil; step = .copyCookie }
+        }
+    }
+
+    private func numbered(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number).").monospacedDigit().foregroundStyle(.secondary)
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func connect() {
+        guard canConnect else { return }
+        connecting = true
+        failure = nil
+        errorText = nil
+        Task {
+            do {
+                let snapshot = try await model.previewMistralSession(pastedCookie)
+                preview = snapshot
+                connecting = false
+            } catch is CancellationError {
+                connecting = false
+            } catch {
+                connecting = false
+                failure = error as? ProviderError
+                let message = (error as? ProviderError)?.userMessage ?? error.localizedDescription
+                errorText = providerError(message, providerID: "mistral")
+            }
+        }
+    }
+
+    private func save() {
+        do {
+            // An empty label falls back to the placeholder the field shows.
+            try model.addMistralSession(pastedCookie, label: SubscriptionConnectForm.resolvedLabel(label, fallback: "Pro"))
+            onDone()
+        } catch {
+            errorText = providerError(
+                (error as? ProviderError)?.userMessage
+                    ?? L("The session cookie could not be saved.", "Øktcookien kunne ikke lagres."),
+                providerID: "mistral")
         }
     }
 }

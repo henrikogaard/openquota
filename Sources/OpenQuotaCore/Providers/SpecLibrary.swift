@@ -197,26 +197,6 @@ public enum SpecLibrary {
         ]
     )
 
-    /// Vibe Code activity. Mistral does not expose a personal remaining allowance here.
-    public static let mistral = ProviderSpec(
-        id: "mistral",
-        displayName: "Mistral Vibe",
-        url: "https://api.mistral.ai/v1/admin/analytics/vibe/code/usage/by_workspace?start_time={d30}&end_time={now}",
-        auth: .bearer,
-        dashboardURL: "https://admin.mistral.ai/plateforme/billing",
-        unverified: true,
-        windows: [
-            .init(
-                label: "Sessions (30d)", kind: .requests,
-                used: "sum:$.sessions[*].nb_sessions", unit: "sessions"
-            ),
-            .init(label: "Input (30d)", kind: .requests,
-                  used: "sum:$.consumed_tokens[*].input_tokens", unit: "tokens"),
-            .init(label: "Output (30d)", kind: .requests,
-                  used: "sum:$.consumed_tokens[*].output_tokens", unit: "tokens")
-        ]
-    )
-
     /// OpenAI Admin API — organization costs rolled up over 30 days. Requires
     /// an org admin key. Sums amount.value across buckets — the `sum:` path
     /// exists for exactly this. Unverified.

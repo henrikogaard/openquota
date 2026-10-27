@@ -12,8 +12,8 @@ func providerError(_ message: String, providerID: String) -> String {
         return L("Cursor session expired or rejected. Add a new Cursor session token in Settings to reconnect.",
                  "Cursor-økten er utløpt eller avvist. Legg til en ny Cursor-øktnøkkel i Innstillinger for å koble til igjen.")
     case "mistral":
-        return L("Key rejected. Mistral needs an Admin API key from admin.mistral.ai; a regular API key won't work.",
-                 "Nøkkelen ble avvist. Mistral krever en admin-API-nøkkel fra admin.mistral.ai; en vanlig API-nøkkel fungerer ikke.")
+        return L("The Mistral session expired or was rejected. Sign in at admin.mistral.ai and paste a fresh Cookie header in Settings to reconnect.",
+                 "Mistral-økten er utløpt eller avvist. Logg inn på admin.mistral.ai og lim inn en fersk Cookie-overskrift i Innstillinger for å koble til igjen.")
     case "opencode":
         return L("Sign-in rejected. Run opencode auth login again, or paste a key under Add Account.",
                  "Påloggingen ble avvist. Kjør opencode auth login på nytt, eller lim inn en nøkkel under Legg til konto.")
