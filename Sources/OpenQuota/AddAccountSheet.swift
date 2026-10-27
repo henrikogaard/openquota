@@ -495,7 +495,7 @@ private struct MistralSessionWizard: View {
                 .fixedSize(horizontal: false, vertical: true)
             numbered(1, L("Open the Network tab as described above.", "Åpne Nettverk-fanen som beskrevet over."))
             numbered(2, L("Reload the admin.mistral.ai page, then click the first request in the list.", "Last inn admin.mistral.ai-siden på nytt, og klikk den første forespørselen i listen."))
-            numbered(3, L("Under Request Headers find cookie:. Copy its entire value.", "Under Request Headers finner du cookie:. Kopier hele verdien."))
+            numbered(3, L("Under Request Headers, find the cookie header and copy its entire value.", "Under Request Headers finner du cookie-overskriften. Kopier hele verdien."))
             Text(L("It must contain an ory_session_… cookie. The value is long — that's fine. Treat it like a password: never share it.",
                    "Den må inneholde en ory_session_-cookie. Verdien er lang — det er greit. Behandle den som et passord: del den aldri."))
                 .font(.caption).foregroundStyle(.secondary)
@@ -664,7 +664,8 @@ private struct MistralSessionWizard: View {
 
     private func save() {
         do {
-            try model.addMistralSession(pastedCookie, label: label.isEmpty ? nil : label)
+            // An empty label falls back to the placeholder the field shows.
+            try model.addMistralSession(pastedCookie, label: SubscriptionConnectForm.resolvedLabel(label, fallback: "Pro"))
             onDone()
         } catch {
             errorText = providerError(
