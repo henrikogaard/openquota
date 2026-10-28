@@ -155,7 +155,7 @@ private final class CLIProcessRun: @unchecked Sendable {
     private static let readChunkBytes = 64 * 1024
 
     private let lock = NSLock()
-    /// Serializes reads with pipe teardown; handlers can race termination.
+    /// Serializes reads with pipe teardown; the reader can race termination.
     private let readLock = NSLock()
     private let binary: URL
     private let args: [String]
@@ -166,7 +166,6 @@ private final class CLIProcessRun: @unchecked Sendable {
     private var process: Process?
     private var stdout: Pipe?
     private var readHandle: FileHandle?
-    private var readSource: DispatchSourceRead?
     private var readFD: Int32 = -1
     private var output = Data()
     private var watchdog: DispatchSourceTimer?
@@ -197,29 +196,17 @@ private final class CLIProcessRun: @unchecked Sendable {
         if flags >= 0 {
             _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
         }
-        let readSource = DispatchSource.makeReadSource(
-            fileDescriptor: fd,
-            queue: .global(qos: .utility))
-        readSource.setEventHandler { [weak self] in
-            self?.readAvailable()
-        }
 
         lock.lock()
         guard !finished else {
             lock.unlock()
-            readSource.setEventHandler {}
-            readSource.setCancelHandler {
-                readHandle.closeFile()
-            }
-            readSource.resume()
-            readSource.cancel()
+            readHandle.closeFile()
             stdout.fileHandleForWriting.closeFile()
             return
         }
         self.process = process
         self.stdout = stdout
         self.readHandle = readHandle
-        self.readSource = readSource
         self.readFD = fd
         process.executableURL = binary
         process.arguments = args
@@ -241,13 +228,13 @@ private final class CLIProcessRun: @unchecked Sendable {
         }
         watchdog = timer
         timer.resume()
-        readSource.resume()
 
         do {
             try process.run()
         } catch {
             stdout.fileHandleForWriting.closeFile()
             lock.unlock()
+            closeReader()
             finish(error: ProviderError.notLoggedIn)
             return
         }
@@ -255,6 +242,11 @@ private final class CLIProcessRun: @unchecked Sendable {
         // writer so EOF is observable once the process (and descendants) exit.
         stdout.fileHandleForWriting.closeFile()
         lock.unlock()
+        // A plain thread, not a DispatchSourceRead: on Linux, libdispatch's
+        // epoll backend intermittently crashed (SIGSEGV in its event loop)
+        // with read sources on these short-lived pipes, even when the
+        // descriptor was never closed. The thread owns the descriptor.
+        Thread { self.readLoop() }.start()
     }
 
     func cancel() {
@@ -265,14 +257,30 @@ private final class CLIProcessRun: @unchecked Sendable {
         finish(error: ProviderError.timedOut)
     }
 
-    private func readAvailable() {
+    /// Polls with a short timeout so the loop notices `finish()` even while
+    /// a descendant still holds the pipe's write end open.
+    private func readLoop() {
+        while true {
+            lock.lock()
+            let fd = finished ? -1 : readFD
+            lock.unlock()
+            guard fd >= 0 else { break }
+            var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            if poll(&descriptor, 1, 100) > 0, !readAvailable() { break }
+        }
+        closeReader()
+    }
+
+    /// Returns false once there is nothing more to read.
+    @discardableResult
+    private func readAvailable() -> Bool {
         readLock.lock()
 
         lock.lock()
         guard !finished, readFD >= 0 else {
             lock.unlock()
             readLock.unlock()
-            return
+            return false
         }
         let fd = readFD
         lock.unlock()
@@ -289,7 +297,7 @@ private final class CLIProcessRun: @unchecked Sendable {
                 if finished {
                     lock.unlock()
                     readLock.unlock()
-                    return
+                    return false
                 }
                 if output.count + count > Self.maxOutputBytes {
                     failure = ProviderError.badResponse(Localized.text("CLI output too large", "Utdata fra CLI er for store"))
@@ -311,10 +319,9 @@ private final class CLIProcessRun: @unchecked Sendable {
         readLock.unlock()
         if let failure {
             finish(error: failure)
+            return false
         }
-        if reachedEOF {
-            closeReader()
-        }
+        return !reachedEOF
     }
 
     private func terminated(status: Int32) {
@@ -344,30 +351,12 @@ private final class CLIProcessRun: @unchecked Sendable {
         let process = self.process
         self.process = nil
         self.stdout = nil
-        let readHandle = self.readHandle
-        self.readHandle = nil
-        let readSource = self.readSource
-        self.readSource = nil
-        self.readFD = -1
         let watchdog = self.watchdog
         self.watchdog = nil
         lock.unlock()
 
         watchdog?.setEventHandler {}
         watchdog?.cancel()
-        readSource?.setEventHandler {}
-
-        // Invalidate the descriptor before allowing the source to close it.
-        readLock.lock()
-        readLock.unlock()
-        if let readSource {
-            if let readHandle {
-                readSource.setCancelHandler {
-                    readHandle.closeFile()
-                }
-            }
-            readSource.cancel()
-        }
         process?.terminationHandler = nil
         if let process, process.isRunning {
             process.terminate()
@@ -385,24 +374,15 @@ private final class CLIProcessRun: @unchecked Sendable {
 
     private func closeReader() {
         lock.lock()
-        let readSource = self.readSource
-        self.readSource = nil
         let readHandle = self.readHandle
         self.readHandle = nil
         self.readFD = -1
         lock.unlock()
 
-        readSource?.setEventHandler {}
+        // Invalidate the descriptor, then wait out any read still using it.
         readLock.lock()
         readLock.unlock()
-        if let readSource {
-            if let readHandle {
-                readSource.setCancelHandler {
-                    readHandle.closeFile()
-                }
-            }
-            readSource.cancel()
-        }
+        readHandle?.closeFile()
     }
 }
 
