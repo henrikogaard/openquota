@@ -1,6 +1,7 @@
 import Foundation
 
-/// Reads local Claude and Codex logs into a small SQLite database:
+/// Reads local usage logs (Claude, Codex, Copilot CLI, Mistral Vibe session
+/// files and OpenCode's database) into a small SQLite database:
 /// which files were read (so unchanged files are never read again), recent
 /// per-request token counts (to drop duplicates across files), and daily
 /// totals per source and model (the history). One worker, bounded passes, no
@@ -31,8 +32,15 @@ public actor LocalSpendScanner {
 
     private struct Parsed {
         var events: [SpendEvent]
-        /// Bytes read through the last complete line.
+        /// Bytes read through the last complete line; for OpenCode, the
+        /// `time_updated` of the last message read.
         var endOffset: Int
+        /// Bytes this read used of the pass budget.
+        var bytes: Int
+        /// For a database: its size and time once everything written up to
+        /// then was read. Saved in place of what discovery saw, so the side
+        /// files SQLite creates while reading aren't taken for a change.
+        var signature: (size: Int, modified: Date)?
         /// Lines read so far, for line-based request identities.
         var lines: Int
         /// The pass ran out of time, bytes or event budget before the end.
@@ -131,8 +139,13 @@ public actor LocalSpendScanner {
             // other change (shrunk, or rewritten at the same size) is read
             // again from the start.
             let resumable = (unchanged && saved.state == "partial") || saved.size < file.size
-            if resumable, saved.offset > 0, saved.offset <= file.size,
+            if file.provider == .opencode, saved.offset > 0 {
+                // Its database is read on from the last message seen, whatever its size did.
+                pending.append(Work(file: file, offset: saved.offset, parserState: saved.parserState,
+                                    hadUnreadable: saved.hadUnreadable))
+            } else if resumable, saved.offset > 0, saved.offset <= file.size,
                file.provider == .claude || saved.parserState != nil {
+                // Codex and Copilot also need the parser's saved state to read on.
                 pending.append(Work(file: file, offset: saved.offset, firstLine: saved.lines,
                                     parserState: saved.parserState,
                                     hadUnreadable: saved.hadUnreadable))
@@ -147,7 +160,7 @@ public actor LocalSpendScanner {
         var affectedDays = Set<String>()
         var processed = 0
         for work in ordered {
-            let file = work.file
+            var file = work.file
             guard !Task.isCancelled, start.duration(to: .now) < .seconds(limits.seconds), remainingBytes > 0 else { break }
             if file.size > limits.fileBytes {
                 try? Self.saveFile(database, file, state: "skipped", offset: 0, lines: 0, parserState: nil)
@@ -164,7 +177,11 @@ public actor LocalSpendScanner {
                 processed += 1
                 continue
             }
-            remainingBytes -= parsed.endOffset - work.offset
+            remainingBytes -= parsed.bytes
+            if let signature = parsed.signature {
+                file.size = signature.size
+                file.modified = signature.modified
+            }
             result.isPartial = result.isPartial || parsed.malformed
             // A file is read once, so keep requests stamped slightly ahead of
             // this Mac's clock too; they count on their own day.
@@ -180,7 +197,8 @@ public actor LocalSpendScanner {
                         state: parsed.interrupted ? "partial" : "read",
                         unreadable: parsed.malformed || work.hadUnreadable,
                         offset: parsed.endOffset, lines: parsed.lines,
-                        parserState: file.provider == .codex ? parsed.parserState : nil, calendar: calendar)
+                        parserState: file.provider == .claude || file.provider == .vibe ? nil : parsed.parserState,
+                        calendar: calendar)
                 }
                 affectedDays.formUnion(days)
                 if !parsed.interrupted { result.filesRead += 1 }
@@ -431,6 +449,20 @@ public actor LocalSpendScanner {
         return ordered
     }
 
+    /// Size and modification time of OpenCode's database together with its
+    /// write-ahead log, where recent writes sit until OpenCode folds them in.
+    private static func openCodeStat(_ url: URL) -> (size: Int, modified: Date)? {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        // Fresh values each time: a URL caches the ones it was asked for before.
+        func values(_ path: String) -> URLResourceValues? {
+            try? URL(fileURLWithPath: path).resourceValues(forKeys: keys)
+        }
+        guard let main = values(url.path), main.isRegularFile == true,
+              let size = main.fileSize, let modified = main.contentModificationDate else { return nil }
+        let wal = values(url.path + "-wal")
+        return (size + (wal?.fileSize ?? 0), max(modified, wal?.contentModificationDate ?? modified))
+    }
+
     private func discover(
         _ sources: [SpendLogSource], start: ContinuousClock.Instant, partial: inout Bool
     ) -> [LogFile] {
@@ -443,12 +475,21 @@ public actor LocalSpendScanner {
         // folder can't hide the Codex one.
         for source in sources {
             guard fm.fileExists(atPath: source.directory.path) else { continue }
+            if source.provider == .opencode {
+                // One database, found by name: its folder holds far too much to walk.
+                let url = source.directory.appendingPathComponent(OpenCodeUsage.databaseName)
+                guard let stat = Self.openCodeStat(url) else { continue }
+                let file = LogFile(url: url, provider: .opencode, folder: source.folder,
+                                   size: stat.size, modified: stat.modified)
+                if paths.insert(file.key).inserted { files.append(file) }
+                continue
+            }
             guard let enumerator = fm.enumerator(
                 at: source.directory, includingPropertiesForKeys: keys,
                 options: [.skipsHiddenFiles, .skipsPackageDescendants],
                 errorHandler: { _, _ in readError = true; return true }
             ) else { partial = true; continue }
-            let folder = source.directory.deletingLastPathComponent().path
+            let folder = source.folder
             var visited = 0
             var found = 0
             for case let url as URL in enumerator {
@@ -463,7 +504,13 @@ public actor LocalSpendScanner {
                     continue
                 }
                 if values.isSymbolicLink == true { enumerator.skipDescendants(); continue }
-                guard values.isRegularFile == true, url.pathExtension == "jsonl",
+                let wanted = switch source.provider {
+                case .claude, .codex: url.pathExtension == "jsonl"
+                case .copilot: url.lastPathComponent == "events.jsonl"
+                case .vibe: url.lastPathComponent == "meta.json"
+                case .opencode: false
+                }
+                guard values.isRegularFile == true, wanted,
                       let size = values.fileSize, let modified = values.contentModificationDate else { continue }
                 let file = LogFile(url: url, provider: source.provider, folder: folder, size: size, modified: modified)
                 guard paths.insert(file.key).inserted else { continue }
@@ -486,6 +533,41 @@ public actor LocalSpendScanner {
         _ file: LogFile, from offset: Int, firstLine: Int, parserState: SpendLogParser.State?,
         byteBudget: Int, start: ContinuousClock.Instant
     ) throws -> Parsed {
+        switch file.provider {
+        case .opencode:
+            // A database that can't be read right now (busy, locked, damaged)
+            // throws: nothing is saved, the total is marked partial, and it
+            // is tried again next pass.
+            let page = try OpenCodeUsage.read(
+                databaseURL: file.url, after: offset, afterID: parserState?.cursorID ?? "",
+                limit: limits.events)
+            var state = SpendLogParser.State()
+            state.cursorID = page.cursorID
+            var parsed = Parsed(events: page.events, endOffset: page.cursor, bytes: page.events.count * 256,
+                                lines: 0, interrupted: page.more, malformed: false, parserState: state)
+            // The size and time taken now cover a write that landed during the
+            // read above, which that read may not have seen. Only when a second
+            // look finds nothing more are they safe to save as "read".
+            if !page.more, let stat = Self.openCodeStat(file.url),
+               let probe = try? OpenCodeUsage.read(
+                   databaseURL: file.url, after: page.cursor, afterID: page.cursorID, limit: 1),
+               probe.cursor == page.cursor, probe.cursorID == page.cursorID {
+                parsed.signature = stat
+            }
+            return parsed
+        case .vibe:
+            // One small JSON document per session, read whole each time it changes.
+            guard file.size <= 16 * 1_048_576 else {
+                return Parsed(events: [], endOffset: 0, bytes: 0, lines: 0, interrupted: false,
+                              malformed: true, parserState: SpendLogParser.State())
+            }
+            let data = try Data(contentsOf: file.url)
+            return Parsed(events: VibeUsage.event(from: data).map { [$0] } ?? [], endOffset: 0,
+                          bytes: data.count, lines: 0, interrupted: false, malformed: false,
+                          parserState: SpendLogParser.State())
+        case .claude, .codex, .copilot:
+            break
+        }
         let handle = try FileHandle(forReadingFrom: file.url)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(offset))
@@ -534,7 +616,7 @@ public actor LocalSpendScanner {
             }
             if chunk.isEmpty { break }
         }
-        return Parsed(events: events, endOffset: bufferStart, lines: lineNumber, interrupted: interrupted,
+        return Parsed(events: events, endOffset: bufferStart, bytes: bufferStart - offset, lines: lineNumber, interrupted: interrupted,
                       malformed: malformed || parser.incomplete, parserState: parser.state)
     }
 
@@ -602,7 +684,10 @@ public actor LocalSpendScanner {
                     let resolved: ModelRates?
                     if let cached = rates[event.model] { resolved = cached }
                     else {
+                        // Other tools write "claude-sonnet-4.6" where price lists say "4-6".
                         resolved = pricing.resolve(model: event.model)
+                            ?? (event.provider == .claude ? nil
+                                : pricing.resolve(model: event.model.replacingOccurrences(of: ".", with: "-")))
                         if rates.count < 2_000 { rates[event.model] = .some(resolved) }
                     }
                     cost = resolved?.costDollars(for: event.tokens)

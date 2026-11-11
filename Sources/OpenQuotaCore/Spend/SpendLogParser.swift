@@ -13,14 +13,18 @@ struct SpendLogParser {
     private var fast = false
     private var ultrafast = false
     private(set) var incomplete = false
+    /// Copilot totals already counted in this file, as `model|tokens…`.
+    private var copilotSeen = Set<String>()
 
     init(provider: SpendProvider, fileIdentity: String) {
         self.provider = provider
         self.fileIdentity = fileIdentity
     }
 
-    /// What a Codex parser carries from line to line, saved so a file can be
-    /// read on from where the last pass stopped.
+    /// What a parser carries from line to line (Codex's running totals,
+    /// Copilot's totals already counted), saved so a file can be read on from
+    /// where the last pass stopped. For OpenCode's database it holds the id of
+    /// the last message read.
     struct State: Codable, Equatable {
         var model = ""
         var sessionID = ""
@@ -29,13 +33,16 @@ struct SpendLogParser {
         var childGate: Date?
         var fast = false
         var ultrafast = false
+        var copilotSeen: [String]?
+        var cursorID: String?
     }
 
     var state: State {
         get {
             State(model: model, sessionID: sessionID,
                   previous: previous.map { [$0.input, $0.cached, $0.output, $0.reasoning] },
-                  sawMeta: sawMeta, childGate: childGate, fast: fast, ultrafast: ultrafast)
+                  sawMeta: sawMeta, childGate: childGate, fast: fast, ultrafast: ultrafast,
+                  copilotSeen: provider == .copilot ? copilotSeen.sorted() : nil)
         }
         set {
             model = newValue.model
@@ -45,6 +52,7 @@ struct SpendLogParser {
             childGate = newValue.childGate
             fast = newValue.fast
             ultrafast = newValue.ultrafast
+            copilotSeen = Set(newValue.copilotSeen ?? [])
         }
     }
 
@@ -56,6 +64,7 @@ struct SpendLogParser {
             return []
         }
         if provider == .codex { return codex(object).map { [$0] } ?? [] }
+        if provider == .copilot { return copilot(object, lineNumber: lineNumber) }
         guard object["isApiErrorMessage"] as? Bool != true,
               let message = object["message"] as? [String: Any],
               let usage = message["usage"] as? [String: Any] else { return [] }
@@ -85,6 +94,33 @@ struct SpendLogParser {
             advisor.tokens = tokens
             advisor.recordedUSD = nil
             events.append(advisor)
+        }
+        return events
+    }
+
+    /// Copilot CLI writes per-model totals when a session shuts down. A
+    /// resumed session that did nothing repeats the same totals, so identical
+    /// ones count once; usage of a session still running is not there yet.
+    private mutating func copilot(_ object: [String: Any], lineNumber: Int) -> [SpendEvent] {
+        guard object["type"] as? String == "session.shutdown",
+              let data = object["data"] as? [String: Any],
+              let metrics = data["modelMetrics"] as? [String: Any], !metrics.isEmpty else { return [] }
+        guard let timestamp = Self.date(object["timestamp"]) else { incomplete = true; return [] }
+        var events: [SpendEvent] = []
+        for (model, value) in metrics.sorted(by: { $0.key < $1.key }) {
+            guard model.utf8.count <= 512,
+                  let usage = (value as? [String: Any])?["usage"] as? [String: Any] else { continue }
+            let input = Self.integer(usage["inputTokens"]) ?? 0
+            let output = Self.integer(usage["outputTokens"]) ?? 0
+            let cacheWrite = Self.integer(usage["cacheWriteTokens"]) ?? 0
+            // Input tokens include the ones read from cache.
+            let cacheRead = min(Self.integer(usage["cacheReadTokens"]) ?? 0, input)
+            guard input + output + cacheWrite > 0,
+                  copilotSeen.insert("\(model)|\(input)|\(output)|\(cacheRead)|\(cacheWrite)").inserted else { continue }
+            events.append(SpendEvent(
+                timestamp: timestamp, provider: .copilot, model: model,
+                tokens: TokenBreakdown(input: input - cacheRead, cacheWrite5m: cacheWrite, cacheRead: cacheRead, output: output),
+                recordedUSD: nil, identity: "\(fileIdentity):\(lineNumber):\(model)"))
         }
         return events
     }

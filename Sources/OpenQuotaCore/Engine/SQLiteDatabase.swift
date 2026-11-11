@@ -30,12 +30,25 @@ final class SQLiteDatabase: @unchecked Sendable {
         guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
             sqlite3_close(handle)
+            handle = nil
             throw Failure(description: message)
         }
         if let url {
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
         try execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+    }
+
+    /// Opens another program's database for reading only; nothing in it is
+    /// created or changed, and a busy database fails fast instead of waiting.
+    init(readOnly url: URL) throws {
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
+            sqlite3_close(handle)
+            handle = nil
+            throw Failure(description: message)
+        }
+        sqlite3_busy_timeout(handle, 250)
     }
 
     deinit { sqlite3_close(handle) }

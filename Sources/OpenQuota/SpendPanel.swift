@@ -35,9 +35,9 @@ struct SpendPanel: View {
                 }
                 if hasReading {
                     splitBar
-                    HStack(spacing: 16) {
-                        provider(.claude, name: "Claude", color: .orange)
-                        provider(.codex, name: "Codex", color: .green)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), alignment: .leading)],
+                              alignment: .leading, spacing: 3) {
+                        ForEach(shownProviders, id: \.self) { provider($0) }
                     }
                     .font(.caption)
                     if total.recordedUSD > 0 {
@@ -74,16 +74,27 @@ struct SpendPanel: View {
         }
     }
 
-    /// Claude's and Codex's share of the total, in the same colors as the legend.
+    /// Claude and Codex always; other tools once they have usage in the period.
+    private var shownProviders: [SpendProvider] {
+        SpendProvider.allCases.filter {
+            $0 == .claude || $0 == .codex || model.spend.total(provider: $0, period: period).events > 0
+        }
+    }
+
+    /// Each tool's share of the total, in the same colors as the legend.
     @ViewBuilder private var splitBar: some View {
-        let claude = model.spend.total(provider: .claude, period: period).dollars
-        let codex = model.spend.total(provider: .codex, period: period).dollars
-        if claude + codex > 0 {
+        let shares = shownProviders
+            .map { ($0, model.spend.total(provider: $0, period: period).dollars) }
+            .filter { $0.1 > 0 }
+        let sum = shares.reduce(0) { $0 + $1.1 }
+        if sum > 0 {
             GeometryReader { proxy in
-                HStack(spacing: claude > 0 && codex > 0 ? 2 : 0) {
-                    Capsule().fill(.orange)
-                        .frame(width: codex > 0 ? proxy.size.width * claude / (claude + codex) : proxy.size.width)
-                    if codex > 0 { Capsule().fill(.green) }
+                let width = proxy.size.width - CGFloat(shares.count - 1) * 2
+                HStack(spacing: 2) {
+                    ForEach(shares, id: \.0) { provider, dollars in
+                        Capsule().fill(HistoryPane.color(provider))
+                            .frame(width: max(width * dollars / sum, 0))
+                    }
                 }
             }
             .frame(height: 4)
@@ -91,13 +102,14 @@ struct SpendPanel: View {
         }
     }
 
-    private func provider(_ provider: SpendProvider, name: String, color: Color) -> some View {
+    private func provider(_ provider: SpendProvider) -> some View {
         let value = model.spend.total(provider: provider, period: period)
         return HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 5, height: 5).accessibilityHidden(true)
-            Text(name).foregroundStyle(.secondary)
+            Circle().fill(HistoryPane.color(provider)).frame(width: 5, height: 5).accessibilityHidden(true)
+            Text(HistoryPane.name(provider)).foregroundStyle(.secondary)
             Text(value.unpricedEvents > 0 && value.pricedEvents == 0 ? "—" : money(value.dollars)).monospacedDigit()
         }
+        .lineLimit(1)
     }
 
     private var warning: String? {
@@ -119,19 +131,19 @@ enum SpendCopy {
     private static func text(_ en: String, _ nb: String) -> String { Localized.text(en, nb) }
     static var title: String { text("Estimated Spend", "Estimert forbruk") }
     static var thisMac: String { text("This Mac", "Denne Macen") }
-    static var enable: String { text("Read Local Claude & Codex Usage Logs", "Les lokale brukslogger for Claude og Codex") }
+    static var enable: String { text("Read Local AI Tool Usage Logs", "Les lokale brukslogger for AI-verktøy") }
     static var enableShort: String { text("Enable…", "Aktiver…") }
     static var cancel: String { text("Cancel", "Avbryt") }
-    static var intro: String { text("See the API-rate value of your local Claude and Codex activity.", "Se API-verdien av lokal Claude- og Codex-aktivitet.") }
+    static var intro: String { text("See the API-rate value of your local Claude, Codex and other AI tool activity.", "Se API-verdien av lokal aktivitet i Claude, Codex og andre AI-verktøy.") }
     static var privacy: String {
-        text("Opt in to read token counts, model names, timestamps and recorded costs from local Claude/Codex session logs. Nothing is uploaded. Prompts are not retained. Turning this off clears the in-memory usage cache.",
-             "Aktiver for å lese tokenantall, modellnavn, tidspunkt og registrerte kostnader fra lokale Claude-/Codex-logger. Ingenting lastes opp. Ledetekster lagres ikke. Deaktivering tømmer bruksmellomlageret.")
+        text("Opt in to read token counts, model names, timestamps and recorded costs from local session data of Claude, Codex, OpenCode, Mistral Vibe and Copilot CLI. Nothing is uploaded. Prompts are not retained. Turning this off clears the in-memory usage cache.",
+             "Aktiver for å lese tokenantall, modellnavn, tidspunkt og registrerte kostnader fra lokale øktdata for Claude, Codex, OpenCode, Mistral Vibe og Copilot CLI. Ingenting lastes opp. Ledetekster lagres ikke. Deaktivering tømmer bruksmellomlageret.")
     }
     static var scope: String {
         text("Includes default CLI homes and connected configurations, not other devices. Shared histories cannot be attributed to a subscription. Prices are bundled snapshots, updated with the app—not your invoice.",
              "Inkluderer standard CLI-mapper og tilkoblede konfigurasjoner, ikke andre enheter. Delt historikk kan ikke knyttes til et abonnement. Prisene følger appoppdateringer – dette er ikke fakturaen din.")
     }
-    static var settingsToggle: String { text("Read local Claude and Codex logs", "Les lokale Claude- og Codex-logger") }
+    static var settingsToggle: String { text("Read local AI tool usage logs", "Les lokale brukslogger for AI-verktøy") }
     static var settingsFooter: String {
         text("Estimates API-rate value from token counts on this Mac. Nothing is uploaded, and it isn't your bill.",
              "Anslår API-verdi fra tokenantall på denne Macen. Ingenting lastes opp, og det er ikke fakturaen din.")

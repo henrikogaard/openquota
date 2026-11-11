@@ -1,7 +1,7 @@
 # Estimated Spend · This Mac
 
 Enable **Estimated Spend** in the popover (with confirmation), or turn on
-**Read Local Claude & Codex Usage Logs** under Settings → General.
+**Read local AI tool usage logs** under Settings → General.
 It is off by default. Disable it there to stop scanning and clear the memory cache.
 
 This is the **API-rate value of locally recorded activity**, not the price of
@@ -14,15 +14,31 @@ invoice or convert subscription percentages into dollars.
 - Codex JSONL rollouts under `~/.codex/sessions` and `archived_sessions`, or
   `CODEX_HOME`.
 - The corresponding directories of explicitly connected Claude/Codex profiles.
+- OpenCode: assistant messages in `~/.local/share/opencode/opencode.db` (or
+  under `XDG_DATA_HOME`), opened read-only. Each message has its own token
+  counts and cost.
+- Mistral Vibe: the `meta.json` of each session under `~/.vibe/logs/session`
+  (or `VIBE_HOME`). A session is one entry, on the day it started.
+- GitHub Copilot CLI: `session.shutdown` events in
+  `~/.copilot/session-state/*/events.jsonl` (or `COPILOT_HOME`). Usage shows
+  up when a session shuts down, on that day; a session still running is not
+  counted yet.
 - Today, Yesterday, or 30 calendar days including today, in the Mac's time zone,
   in the popover; 30 days, 90 days, 1 year or all saved history under
   **Settings → History**.
-- Separate Claude and Codex totals, in USD.
+- Separate totals per tool, in USD. Claude and Codex are always listed; the
+  others appear once they have usage in the period.
 
 No browser, private usage endpoint, or subscription-token access is involved.
 The opt-in concerns **local logs only**. Nothing is uploaded or sent to a pricing
 service. The scanner reads JSONL lines transiently but retains only token counts,
 model IDs, timestamps, request identities and costs—not prompts or responses.
+From OpenCode's database it selects only the message id, timestamps, model,
+cost and token counts; message text is in other tables and is never queried.
+The database is opened read-only and never changed; SQLite may create
+its own `-shm`/`-wal` side files next to it if they are missing.
+A database that is locked or can't be read is not remembered as read: the
+total is marked partial and it is tried again on the next pass.
 
 ## Saved history
 
@@ -34,6 +50,8 @@ keeps what it reads in a small SQLite database,
   file is read once, including across launches. When a Claude log grows, only
   the new lines are read; a large one is read across several passes. A Codex
   log is reread in full when it changes, because its totals are cumulative.
+  A Copilot log is read on from where it stopped, with the totals already
+  counted remembered; a Vibe session file is reread in full.
 - **Requests:** per-request token counts, model, timestamp, request identity
   and source for the last 40 days, used to drop duplicates across files (a
   resumed Claude session copies earlier messages into a new file). Older
@@ -91,10 +109,27 @@ They represent the bundled API rates, even for older requests.
    cache-read and output buckets. Request-wide long-context and supported
    fast/priority rates are included. Codex does not assume an unpublished cache
    discount. Reasoning tokens are not added to Codex output a second time.
+   For OpenCode, Vibe and Copilot, a model written with dots
+   (`claude-sonnet-4.6`) is also tried with hyphens (`claude-sonnet-4-6`).
+   OpenCode's per-message `cost` and Vibe's `session_cost` win when above
+   zero, as **Log-reported**; a zero is treated as "not recorded" and the
+   API rate is estimated instead, because subscription and free models
+   record zero. Copilot records no dollar cost. OpenCode reasoning tokens
+   count as output. Vibe and Copilot prompt/input counts include cached
+   tokens, which are split out as cache reads.
 4. Unknown models are **excluded and counted as unpriced**, never priced using
    an invented default. There is no automatic reference-model fallback.
 5. Repeated Claude message/request IDs are deduplicated; parent records win
    over sidechain replays, followed by richer token/speed records.
+   OpenCode messages are read in order of update time and id, a page at a
+   time. A message updated after it was first read (it finished later)
+   is read again and the larger record wins. A Copilot session that is
+   resumed and shut down again without new work repeats its totals; identical
+   totals in one file count once. Whether a later, larger total in a resumed
+   Copilot session is cumulative is **not confirmed**: both shapes were seen,
+   and each differing total is counted, so such a session may be overcounted.
+   A Vibe session resumed more than 40 days after it started keeps the total
+   it had then; the later usage is not added.
 6. Codex uses per-turn counts where supplied, otherwise differences between
    cumulative snapshots. Repeated snapshots are ignored. Child-session replay
    seeds the cumulative baseline but is not charged again; a live task-start
@@ -150,8 +185,11 @@ per-model rows.
 - Files already read are recognised by path, size and modification time and
   skipped. Changed files are reread from their start so cumulative baselines
   stay valid.
-- Only regular `.jsonl` files under the selected log roots are read; symlinks
-  inside them are skipped. Credentials, settings and other files are ignored.
+- Only regular `.jsonl` files under the selected Claude and Codex log roots,
+  `events.jsonl` under Copilot's, `meta.json` under Vibe's (16 MiB at most),
+  and OpenCode's one database are read; symlinks inside them are skipped.
+  OpenCode's folder is never walked. Credentials, settings and other files
+  are ignored.
 - Each pass is bounded to 20,000 directory entries and 2,000 files per source
   folder, 64 MiB per Codex file, 256 MiB of new reads, 1 MiB per line, 100,000
   events per file read, and a 10-second discovery/read budget. Daily totals are
@@ -162,6 +200,10 @@ per-model rows.
 The demo displays fixed synthetic values and does not read local logs.
 
 ## Verification
+
+`swift test --filter ToolUsageTests` covers the OpenCode, Vibe and Copilot
+readers, their token splits, the read-only database open, re-reading a grown
+session or updated message without double counting, and default locations.
 
 `swift test --filter SpendTests` covers token arithmetic, cache bucket splitting,
 long-context and fast multipliers, bundled model resolution, unknown models,

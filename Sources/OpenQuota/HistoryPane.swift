@@ -42,8 +42,8 @@ struct HistoryPane: View {
             Button(L("Cancel", "Avbryt"), role: .cancel) {}
             Button(L("Delete", "Slett"), role: .destructive) { model.deleteSpendHistory() }
         } message: {
-            Text(L("Saved daily totals are deleted. OpenQuota rebuilds what your Claude and Codex logs still hold; older days are gone for good.",
-                   "Lagrede dagstotaler slettes. OpenQuota bygger opp igjen det loggene til Claude og Codex fortsatt har; eldre dager er borte for godt."))
+            Text(L("Saved daily totals are deleted. OpenQuota rebuilds what your local AI tool logs still hold; older days are gone for good.",
+                   "Lagrede dagstotaler slettes. OpenQuota bygger opp igjen det loggene til AI-verktøyene dine fortsatt har; eldre dager er borte for godt."))
         }
         .alert(SpendCopy.enable, isPresented: $showingConsent) {
             Button(SpendCopy.enableShort) { model.setSpendEnabled(true) }
@@ -58,10 +58,10 @@ struct HistoryPane: View {
             Label(L("No History Yet", "Ingen historikk ennå"), systemImage: "chart.bar.xaxis")
         } description: {
             Text(model.spendEnabled
-                 ? L("History builds as OpenQuota reads your local Claude and Codex logs.",
-                     "Historikken bygges når OpenQuota leser de lokale loggene til Claude og Codex.")
-                 : L("Turn on reading local Claude and Codex logs to start saving daily token and cost totals.",
-                     "Slå på lesing av lokale Claude- og Codex-logger for å begynne å lagre daglige token- og kostnadstall."))
+                 ? L("History builds as OpenQuota reads your local AI tool logs.",
+                     "Historikken bygges når OpenQuota leser de lokale loggene til AI-verktøyene dine.")
+                 : L("Turn on reading local AI tool logs to start saving daily token and cost totals.",
+                     "Slå på lesing av lokale brukslogger for AI-verktøy for å begynne å lagre daglige token- og kostnadstall."))
         } actions: {
             if !model.spendEnabled && !model.isDemo {
                 Button(SpendCopy.enableShort) { showingConsent = true }
@@ -120,14 +120,19 @@ struct HistoryPane: View {
         }
     }
 
-    /// Oranges for Claude sources, greens for Codex, in order of size.
+    /// Oranges for Claude sources, greens for Codex, in order of size; the
+    /// other tools have one source each and keep their own color.
     private var sourceColors: [String: Color] {
         let claude: [Color] = [.orange, .red, .yellow, .brown, .pink]
-        let codex: [Color] = [.green, .teal, .mint, .cyan, .blue]
+        let codex: [Color] = [.green, .teal, .mint, .cyan, .indigo]
         var colors: [String: Color] = [:]
         var used: [SpendProvider: Int] = [:]
         for row in history.sources(.all) {
-            let palette = row.provider == .claude ? claude : codex
+            let palette = switch row.provider {
+            case .claude: claude
+            case .codex: codex
+            case .opencode, .vibe, .copilot: [Self.color(row.provider)]
+            }
             let index = used[row.provider, default: 0]
             colors[row.source] = palette[index % palette.count]
             used[row.provider] = index + 1
@@ -240,6 +245,9 @@ struct HistoryPane: View {
         switch provider {
         case .claude: "Claude"
         case .codex: "Codex"
+        case .opencode: "OpenCode"
+        case .vibe: "Vibe"
+        case .copilot: "Copilot"
         }
     }
 
@@ -247,6 +255,9 @@ struct HistoryPane: View {
         switch provider {
         case .claude: .orange
         case .codex: .green
+        case .opencode: .blue
+        case .vibe: .purple
+        case .copilot: .gray
         }
     }
 }

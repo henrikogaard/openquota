@@ -268,6 +268,9 @@ final class AppModel {
         case .codex:
             if source.folder == home + "/.codex" { return ("Codex", nil) }
             return ("Codex · \(connection?.label ?? (source.folder as NSString).lastPathComponent)", email)
+        case .opencode: return ("OpenCode", nil)
+        case .vibe: return ("Mistral Vibe", nil)
+        case .copilot: return ("Copilot CLI", nil)
         }
     }
 
