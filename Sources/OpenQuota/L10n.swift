@@ -20,6 +20,12 @@ func providerError(_ message: String, providerID: String) -> String {
     case "opencode":
         return L("Sign-in rejected. Run opencode auth login again, or paste a key under Add Account.",
                  "Påloggingen ble avvist. Kjør opencode auth login på nytt, eller lim inn en nøkkel under Legg til konto.")
+    case "anthropic":
+        return L("Anthropic rejected this key for spend data. It needs an Admin key (sk-ant-admin…), which only an organization admin can create in the Claude Console; a normal API key can't read spend. Replace the key in Settings.",
+                 "Anthropic avviste denne nøkkelen for forbruksdata. Det kreves en Admin-nøkkel (sk-ant-admin…), som bare en organisasjonsadministrator kan opprette i Claude Console; en vanlig API-nøkkel kan ikke lese forbruk. Bytt nøkkelen i Innstillinger.")
+    case "openai":
+        return L("OpenAI rejected this key for spend data. It needs an Admin key (sk-admin-…) from the organization's Admin keys page; a project or user key (sk-proj-…) can't read spend. Replace the key in Settings.",
+                 "OpenAI avviste denne nøkkelen for forbruksdata. Det kreves en Admin-nøkkel (sk-admin-…) fra organisasjonens side for Admin-nøkler; en prosjekt- eller brukernøkkel (sk-proj-…) kan ikke lese forbruk. Bytt nøkkelen i Innstillinger.")
     case "devin":
         return L("Sign-in rejected. Run devin auth login again.",
                  "Påloggingen ble avvist. Kjør devin auth login på nytt.")
