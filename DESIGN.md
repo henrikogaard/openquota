@@ -4,30 +4,32 @@ Goal: looks like Apple made it. Quiet, monochrome, one glance.
 
 ## Platform
 
-macOS 26 Tahoe and later. Real Liquid Glass (`glassEffect`, `.glass` buttons) — no hand-made blur or opaque fills.
+macOS 26 Tahoe and later. The popover window keeps the system material; its cards are flat fills, not glass.
 
-## Popover (Control Center style)
+## Popover (compact flat cards)
 
-- No title bar or oversized headline ring. Optional local-spend summary at the top.
-- One **always-expanded glass module per provider** (one `GlassEffectContainer`
-  inside the scroll view, separate from the fixed footer).
-  Provider name, account subtitle, and experimental badge have separate lines
-  rather than competing in a single crowded row.
-- Every window remains visible: label, reset time, meter, percentage left.
-  A provider with one account uses two-line rows (label and reset above, meter
-  and value below; the value column is 72pt wide so meters align). A provider
-  with several accounts uses one line per percentage window: label, meter,
-  percent, short reset. Absolute values keep the two-line row.
+- Title row: app name and account count. Optional local-spend tile below it:
+  big total, period picker, and a thin bar splitting Claude and Codex.
+- A small-caps "Plans" heading, then one **always-expanded flat card per
+  provider** (quiet fill, hairline edge, no glass). The header is one line:
+  glyph, name, experimental badge, account subtitle (truncated, full text in
+  help), usage-page arrow.
+- Every window remains visible on one line: small ring, label, short reset
+  ("3d 8h · Sun"), percentage left. The percentage column is 38pt wide so
+  values align. Windows without a meter keep the two-line row. A provider
+  with several accounts adds a one-line account header above each group.
+- Rings and percentages are grey until usage gets tight: orange at 80% used,
+  red at 90%.
 - Balances and errors stay visible; error text wraps in full. Last successful
   reading and source appear only for a saved (stale) reading or an error. The
   footer carries the overall update time.
 - Accounts sharing one sign-in show a one-line "Shared with …" note; the full
   explanation is in its help text and the Settings detail.
-- Bottom: freshness text, circular Refresh button, and Options menu containing
+- Bottom: freshness text, borderless Refresh button, and Options menu containing
   Add Account, Settings, Check for Updates, and Quit.
 - Height follows content up to the screen height minus 140pt (never below
   600pt), then scrolls with no visible scrollbar and a soft edge fade.
-- Meters show what's **left**: system accent normally, orange at 80% used, red at 90%.
+- Settings meters show what's **left**: system accent normally, orange at 80% used, red at 90%.
 - Menu bar (General → Menu Bar): icon only, percentage only, icon + percentage, or provider + percentage. Default is the lowest remaining percentage across all accounts; an account and optionally a specific window can be pinned. Never switch away from an unavailable pinned source. Hover/accessibility text identifies provider, account, window, timestamp, and cached state. Cached readings are dimmed; unavailable percentages show an em dash. Existing icon-only preferences are preserved.
 
 ## Settings (native toolbar tabs)
@@ -62,10 +64,10 @@ Monochrome SF Symbols per provider, monogram fallback. Never provider logos.
   --oq-popover-max-content-height: 600px;
   --oq-inset: 12px;
   --oq-module-spacing: 8px;
-  --oq-module-radius: 16px;
-  --oq-module-padding: 12px;
+  --oq-module-radius: 10px;
+  --oq-module-padding: 10px;
   --oq-meter-height: 6px;
-  --oq-quota-value-width: 72px;
+  --oq-quota-value-width: 38px;
   --oq-meter-fill: AccentColor;
   --oq-meter-track: color-mix(in srgb, currentColor 10%, transparent);
   --oq-meter-warn: #ff9500;      /* >= 80% used */
@@ -82,10 +84,10 @@ export const tokens = {
   popoverMaxContentHeight: 600,
   inset: 12,
   moduleSpacing: 8,
-  moduleRadius: 16,
-  modulePadding: 12,
+  moduleRadius: 10,
+  modulePadding: 10,
   meterHeight: 6,
-  quotaValueWidth: 72,
+  quotaValueWidth: 38,
   meterFill: "AccentColor",
   meterTrackOpacity: 0.1,
   warnThreshold: 0.8,
@@ -95,7 +97,7 @@ export const tokens = {
 
 ```json
 {"popoverWidth": 340, "popoverMaxContentHeight": 600, "inset": 12, "moduleSpacing": 8,
- "moduleRadius": 16, "modulePadding": 12, "meterHeight": 6, "quotaValueWidth": 72,
+ "moduleRadius": 10, "modulePadding": 10, "meterHeight": 6, "quotaValueWidth": 38,
  "meterFill": "AccentColor", "meterTrackOpacity": 0.1, "warnThreshold": 0.8, "criticalThreshold": 0.9}
 ```
 
@@ -105,5 +107,5 @@ Swift source of truth: `Tokens` in `Sources/OpenQuota/Components.swift`.
 
 - Numbers are monospaced and short ("62% left", "$18.75 left", "2h 14m").
 - Color only carries meaning. No custom focus highlighters; retain native keyboard
-  focus and accessibility behavior. No custom fills behind system glass. SF Symbols only.
+  focus and accessibility behavior. SF Symbols only.
 - Never invent a percentage: balances and activity show as amounts.
