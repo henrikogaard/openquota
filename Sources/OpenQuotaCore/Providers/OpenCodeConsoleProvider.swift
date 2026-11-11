@@ -74,7 +74,7 @@ public struct OpenCodeConsoleProvider: UsageProvider {
     /// One card per workspace of each saved sign-in. Local only.
     public func accounts() async throws -> [AccountDescriptor] {
         try storage.configuredKeys().flatMap { entry -> [AccountDescriptor] in
-            guard let session = try session(entry.id) else {
+            guard let session = try storedSession(entry.id) else {
                 // A saved sign-in that can no longer be read still gets a
                 // card, so it can be seen and removed.
                 return [AccountDescriptor(
@@ -95,7 +95,7 @@ public struct OpenCodeConsoleProvider: UsageProvider {
     public func remove(accountID: String) throws {
         guard let (entryID, workspaceID) = Self.split(accountID) else { return }
         try sessionLock.withLock {
-            var session = try session(entryID)
+            var session = try storedSession(entryID)
             session?.workspaces.removeAll { $0.id == workspaceID }
             if let session, !session.workspaces.isEmpty {
                 try save(session, entryID: entryID)
@@ -110,7 +110,7 @@ public struct OpenCodeConsoleProvider: UsageProvider {
         guard let (entryID, workspaceID) = Self.split(accountID) else { return }
         let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
         try sessionLock.withLock {
-            guard var session = try session(entryID),
+            guard var session = try storedSession(entryID),
                   let index = session.workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
             session.workspaces[index].label = trimmed?.isEmpty == false ? trimmed : nil
             try save(session, entryID: entryID)
@@ -213,10 +213,10 @@ public struct OpenCodeConsoleProvider: UsageProvider {
         let (entryID, saved): (String, [Workspace]) = try sessionLock.withLock {
             var workspaces = found
             let previous = try storage.configuredKeys().first { entry in
-                guard let old = try? session(entry.id) else { return false }
+                guard let old = try? storedSession(entry.id) else { return false }
                 return old.userID == userID && old.scopedWorkspaceID == token.workspaceID
             }
-            if let previous, let old = try session(previous.id) {
+            if let previous, let old = try storedSession(previous.id) {
                 for index in workspaces.indices {
                     workspaces[index].label = old.workspaces.first { $0.id == workspaces[index].id }?.label
                 }
@@ -242,15 +242,15 @@ public struct OpenCodeConsoleProvider: UsageProvider {
         guard account.account.providerID == id, let (entryID, workspaceID) = Self.split(account.account.id) else {
             throw ProviderError.notLoggedIn
         }
-        guard try self.session(entryID) != nil else { throw ProviderError.unauthorized }
+        guard try storedSession(entryID) != nil else { throw ProviderError.unauthorized }
         let session = try await validSession(entryID)
         guard let workspace = session.workspaces.first(where: { $0.id == workspaceID }) else {
             throw ProviderError.notLoggedIn
         }
-        async let goWindows = goWindows(session, workspaceID: workspaceID)
-        async let budgetWindows = budgetWindows(session, workspaceID: workspaceID)
-        let go = try await goWindows
-        let windows = try await go + budgetWindows
+        async let goResult = goWindows(session, workspaceID: workspaceID)
+        async let budgetResult = budgetWindows(session, workspaceID: workspaceID)
+        let go = try await goResult
+        let windows = try await go + budgetResult
         guard !windows.isEmpty else {
             throw ProviderError.badResponse(Localized.text(
                 "No Go subscription or budget in this workspace.",
@@ -321,7 +321,7 @@ public struct OpenCodeConsoleProvider: UsageProvider {
 
     // MARK: Session
 
-    private func session(_ entryID: String) throws -> Session? {
+    private func storedSession(_ entryID: String) throws -> Session? {
         guard let raw = try credentials.secret(for: storage.credentialKey(entryID)) else { return nil }
         return try? JSONDecoder().decode(Session.self, from: Data(raw.utf8))
     }
@@ -341,7 +341,7 @@ public struct OpenCodeConsoleProvider: UsageProvider {
     /// of one sign-in share a single request.
     private func validSession(_ entryID: String, now: Date = Date()) async throws -> Session {
         try await gate.run(entryID) {
-            guard let session = try session(entryID) else { throw ProviderError.notLoggedIn }
+            guard let session = try storedSession(entryID) else { throw ProviderError.notLoggedIn }
             guard session.expiresAt - 60 <= now.timeIntervalSince1970 else { return session }
             let (status, json) = try await post(
                 "\(Self.server)/auth/device/token",
@@ -356,7 +356,7 @@ public struct OpenCodeConsoleProvider: UsageProvider {
             return try sessionLock.withLock {
                 // Read again: a card may have been renamed or removed, or the
                 // account signed in again, while the request was out.
-                guard var fresh = try self.session(entryID) else { throw ProviderError.notLoggedIn }
+                guard var fresh = try storedSession(entryID) else { throw ProviderError.notLoggedIn }
                 guard fresh.refresh == session.refresh else { return fresh }
                 fresh.access = token.access
                 fresh.refresh = token.refresh
