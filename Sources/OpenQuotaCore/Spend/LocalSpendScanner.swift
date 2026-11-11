@@ -137,9 +137,11 @@ public actor LocalSpendScanner {
             let resumable = (unchanged && saved.state == "partial") || saved.size < file.size
             if file.provider == .opencode, saved.offset > 0 {
                 // Its database is read on from the last message seen, whatever its size did.
-                pending.append(Work(file: file, offset: saved.offset, hadUnreadable: saved.hadUnreadable))
+                pending.append(Work(file: file, offset: saved.offset, parserState: saved.parserState,
+                                    hadUnreadable: saved.hadUnreadable))
             } else if resumable, saved.offset > 0, saved.offset <= file.size,
                file.provider == .claude || saved.parserState != nil {
+                // Codex and Copilot also need the parser's saved state to read on.
                 pending.append(Work(file: file, offset: saved.offset, firstLine: saved.lines,
                                     parserState: saved.parserState,
                                     hadUnreadable: saved.hadUnreadable))
@@ -154,7 +156,7 @@ public actor LocalSpendScanner {
         var affectedDays = Set<String>()
         var processed = 0
         for work in ordered {
-            let file = work.file
+            var file = work.file
             guard !Task.isCancelled, start.duration(to: .now) < .seconds(limits.seconds), remainingBytes > 0 else { break }
             if file.size > limits.fileBytes {
                 try? Self.saveFile(database, file, state: "skipped", offset: 0, lines: 0, parserState: nil)
@@ -172,6 +174,12 @@ public actor LocalSpendScanner {
                 continue
             }
             remainingBytes -= parsed.bytes
+            // Reading can make SQLite create the database's side files; note
+            // its state after the read, so that alone isn't seen as a change.
+            if file.provider == .opencode, let stat = Self.openCodeStat(file.url) {
+                file.size = stat.size
+                file.modified = stat.modified
+            }
             result.isPartial = result.isPartial || parsed.malformed
             // A file is read once, so keep requests stamped slightly ahead of
             // this Mac's clock too; they count on their own day.
@@ -187,7 +195,8 @@ public actor LocalSpendScanner {
                         state: parsed.interrupted ? "partial" : "read",
                         unreadable: parsed.malformed || work.hadUnreadable,
                         offset: parsed.endOffset, lines: parsed.lines,
-                        parserState: file.provider == .codex ? parsed.parserState : nil, calendar: calendar)
+                        parserState: file.provider == .claude || file.provider == .vibe ? nil : parsed.parserState,
+                        calendar: calendar)
                 }
                 affectedDays.formUnion(days)
                 if !parsed.interrupted { result.filesRead += 1 }
@@ -438,6 +447,20 @@ public actor LocalSpendScanner {
         return ordered
     }
 
+    /// Size and modification time of OpenCode's database together with its
+    /// write-ahead log, where recent writes sit until OpenCode folds them in.
+    private static func openCodeStat(_ url: URL) -> (size: Int, modified: Date)? {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        // Fresh values each time: a URL caches the ones it was asked for before.
+        func values(_ path: String) -> URLResourceValues? {
+            try? URL(fileURLWithPath: path).resourceValues(forKeys: keys)
+        }
+        guard let main = values(url.path), main.isRegularFile == true,
+              let size = main.fileSize, let modified = main.contentModificationDate else { return nil }
+        let wal = values(url.path + "-wal")
+        return (size + (wal?.fileSize ?? 0), max(modified, wal?.contentModificationDate ?? modified))
+    }
+
     private func discover(
         _ sources: [SpendLogSource], start: ContinuousClock.Instant, partial: inout Bool
     ) -> [LogFile] {
@@ -453,15 +476,9 @@ public actor LocalSpendScanner {
             if source.provider == .opencode {
                 // One database, found by name: its folder holds far too much to walk.
                 let url = source.directory.appendingPathComponent(OpenCodeUsage.databaseName)
-                let wal = URL(fileURLWithPath: url.path + "-wal")
-                guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
-                      let size = values.fileSize, let modified = values.contentModificationDate else { continue }
-                // Recent writes sit in the write-ahead log until OpenCode folds them in.
-                let walValues = try? wal.resourceValues(forKeys: Set(keys))
-                let file = LogFile(
-                    url: url, provider: .opencode, folder: source.folder,
-                    size: size + (walValues?.fileSize ?? 0),
-                    modified: max(modified, walValues?.contentModificationDate ?? modified))
+                guard let stat = Self.openCodeStat(url) else { continue }
+                let file = LogFile(url: url, provider: .opencode, folder: source.folder,
+                                   size: stat.size, modified: stat.modified)
                 if paths.insert(file.key).inserted { files.append(file) }
                 continue
             }
@@ -519,13 +536,15 @@ public actor LocalSpendScanner {
             // A database that can't be read right now (busy, or a layout this
             // version doesn't know) is tried again when it changes.
             guard let page = try? OpenCodeUsage.read(
-                databaseURL: file.url, after: offset, limit: limits.events) else {
+                databaseURL: file.url, after: offset, afterID: parserState?.cursorID ?? "",
+                limit: limits.events) else {
                 return Parsed(events: [], endOffset: offset, bytes: 0, lines: 0, interrupted: false,
-                              malformed: false, parserState: SpendLogParser.State())
+                              malformed: false, parserState: parserState ?? SpendLogParser.State())
             }
+            var state = SpendLogParser.State()
+            state.cursorID = page.cursorID
             return Parsed(events: page.events, endOffset: page.cursor, bytes: page.events.count * 256,
-                          lines: 0, interrupted: page.more, malformed: false,
-                          parserState: SpendLogParser.State())
+                          lines: 0, interrupted: page.more, malformed: false, parserState: state)
         case .vibe:
             // One small JSON document per session, read whole each time it changes.
             guard file.size <= 16 * 1_048_576 else {

@@ -21,8 +21,10 @@ struct SpendLogParser {
         self.fileIdentity = fileIdentity
     }
 
-    /// What a Codex parser carries from line to line, saved so a file can be
-    /// read on from where the last pass stopped.
+    /// What a parser carries from line to line (Codex's running totals,
+    /// Copilot's totals already counted), saved so a file can be read on from
+    /// where the last pass stopped. For OpenCode's database it holds the id of
+    /// the last message read.
     struct State: Codable, Equatable {
         var model = ""
         var sessionID = ""
@@ -31,13 +33,16 @@ struct SpendLogParser {
         var childGate: Date?
         var fast = false
         var ultrafast = false
+        var copilotSeen: [String]?
+        var cursorID: String?
     }
 
     var state: State {
         get {
             State(model: model, sessionID: sessionID,
                   previous: previous.map { [$0.input, $0.cached, $0.output, $0.reasoning] },
-                  sawMeta: sawMeta, childGate: childGate, fast: fast, ultrafast: ultrafast)
+                  sawMeta: sawMeta, childGate: childGate, fast: fast, ultrafast: ultrafast,
+                  copilotSeen: provider == .copilot ? copilotSeen.sorted() : nil)
         }
         set {
             model = newValue.model
@@ -47,6 +52,7 @@ struct SpendLogParser {
             childGate = newValue.childGate
             fast = newValue.fast
             ultrafast = newValue.ultrafast
+            copilotSeen = Set(newValue.copilotSeen ?? [])
         }
     }
 

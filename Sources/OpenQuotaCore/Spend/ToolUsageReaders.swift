@@ -29,17 +29,20 @@ enum VibeUsage {
 enum OpenCodeUsage {
     struct Page {
         var events: [SpendEvent]
-        /// `time_updated` of the last row read; pass it back to read on.
+        /// `time_updated` and id of the last row read; pass them back to read on.
         var cursor: Int
+        var cursorID: String
         /// The row limit was reached; more rows are waiting.
         var more: Bool
     }
 
     static let databaseName = "opencode.db"
 
-    /// Assistant messages updated after `cursor`, oldest first. A message
-    /// updated again later is returned again; the scanner keeps the larger.
-    static func read(databaseURL: URL, after cursor: Int, limit: Int) throws -> Page {
+    /// Assistant messages after the cursor, in `(time_updated, id)` order, so
+    /// any number of messages sharing one timestamp page through without a
+    /// gap. A message updated again later is returned again; the scanner
+    /// keeps the larger.
+    static func read(databaseURL: URL, after cursor: Int, afterID: String = "", limit: Int) throws -> Page {
         let database = try SQLiteDatabase(readOnly: databaseURL)
         let statement = try database.prepare("""
             SELECT id, time_updated,
@@ -47,16 +50,25 @@ enum OpenCodeUsage {
                 json_extract(data, '$.cost'),
                 json_extract(data, '$.tokens.input'), json_extract(data, '$.tokens.output'),
                 json_extract(data, '$.tokens.reasoning'),
-                json_extract(data, '$.tokens.cache.read'), json_extract(data, '$.tokens.cache.write')
-            FROM message
-            WHERE time_updated > ?1 AND json_valid(data) AND json_extract(data, '$.role') = 'assistant'
-            ORDER BY time_updated LIMIT ?2
+                json_extract(data, '$.tokens.cache.read'), json_extract(data, '$.tokens.cache.write'),
+                json_extract(data, '$.role') = 'assistant'
+            FROM (
+                -- A row whose data isn't valid JSON is passed over, not an error.
+                SELECT id, time_updated, CASE WHEN json_valid(data) THEN data END AS data
+                FROM message
+                WHERE time_updated > ?1 OR (time_updated = ?1 AND id > ?2)
+                ORDER BY time_updated, id LIMIT ?3
+            )
+            ORDER BY time_updated, id
             """)
-        var page = Page(events: [], cursor: cursor, more: false)
+        var page = Page(events: [], cursor: cursor, cursorID: afterID, more: false)
         var rows = 0
-        try statement.forEach([cursor, limit]) { row in
+        try statement.forEach([cursor, afterID, limit]) { row in
             rows += 1
-            page.cursor = max(page.cursor, row.int(1))
+            page.cursor = row.int(1)
+            page.cursorID = row.string(0)
+            // Every row moves the cursor; only assistant messages are usage.
+            guard row.int(10) != 0 else { return }
             func count(_ column: Int32) -> Int { max(0, row.int(column)) }
             let tokens = TokenBreakdown(
                 input: count(5), cacheWrite5m: count(9), cacheRead: count(8),
@@ -71,12 +83,7 @@ enum OpenCodeUsage {
                 model: row.isNull(3) ? "" : String(row.string(3).prefix(512)), tokens: tokens,
                 recordedUSD: cost > 0 && cost.isFinite ? cost : nil, identity: row.string(0)))
         }
-        if rows >= limit {
-            page.more = true
-            // Rows sharing the last timestamp may have been cut off; read them
-            // again, unless the whole page shared it and that would never end.
-            if page.cursor - 1 > cursor { page.cursor -= 1 }
-        }
+        page.more = rows >= limit
         return page
     }
 }

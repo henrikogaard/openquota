@@ -149,6 +149,7 @@ final class ToolUsageTests: XCTestCase {
         let all = try OpenCodeUsage.read(databaseURL: url, after: 0, limit: 100)
         XCTAssertEqual(all.events.map(\.identity), ["m1", "m4"])
         XCTAssertEqual(all.cursor, 40)
+        XCTAssertEqual(all.cursorID, "m4")
         XCTAssertFalse(all.more)
         let first = all.events[0]
         XCTAssertEqual(first.provider, .opencode)
@@ -161,26 +162,53 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertNil(all.events[1].recordedUSD)
         XCTAssertEqual(first.timestamp.timeIntervalSince1970, now.timeIntervalSince1970, accuracy: 1)
 
-        XCTAssertEqual(try OpenCodeUsage.read(databaseURL: url, after: 10, limit: 100).events.map(\.identity), ["m4"])
-        XCTAssertTrue(try OpenCodeUsage.read(databaseURL: url, after: 40, limit: 100).events.isEmpty)
+        XCTAssertEqual(try OpenCodeUsage.read(databaseURL: url, after: 10, afterID: "m1", limit: 100).events.map(\.identity), ["m4"])
+        XCTAssertTrue(try OpenCodeUsage.read(databaseURL: url, after: 40, afterID: "m4", limit: 100).events.isEmpty)
+        // Without the id, messages at the cursor's timestamp are read again rather than skipped.
+        XCTAssertEqual(try OpenCodeUsage.read(databaseURL: url, after: 40, limit: 100).events.map(\.identity), ["m4"])
     }
 
-    func testOpenCodeRowLimitReportsMoreAndRereadsTheLastTimestamp() throws {
+    func testOpenCodePagesThroughMessagesSharingOneTimestamp() throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }
         let url = root.appendingPathComponent("opencode.db")
         try openCodeDatabase(at: url, rows: [
             ("m1", 10, assistant(created: noonMillis)), ("m2", 20, assistant(created: noonMillis)),
-            ("m3", 20, assistant(created: noonMillis)),
+            ("m3", 20, assistant(created: noonMillis)), ("m4", 20, assistant(created: noonMillis)),
+            ("m5", 20, ["role": "user", "time": ["created": noonMillis]]),
+            ("m6", 20, assistant(created: noonMillis)),
         ])
-        let page = try OpenCodeUsage.read(databaseURL: url, after: 0, limit: 2)
-        XCTAssertTrue(page.more)
-        XCTAssertEqual(page.cursor, 19)
-        // A full page of one timestamp still moves on.
-        XCTAssertEqual(try OpenCodeUsage.read(databaseURL: url, after: 19, limit: 2).cursor, 20)
-        let rest = try OpenCodeUsage.read(databaseURL: url, after: page.cursor, limit: 10)
-        XCTAssertEqual(Set(rest.events.map(\.identity)), ["m2", "m3"])
-        XCTAssertFalse(rest.more)
+        var seen: [String] = []
+        var cursor = 0
+        var cursorID = ""
+        var pages = 0
+        while true {
+            let page = try OpenCodeUsage.read(databaseURL: url, after: cursor, afterID: cursorID, limit: 2)
+            seen += page.events.map(\.identity)
+            (cursor, cursorID) = (page.cursor, page.cursorID)
+            pages += 1
+            if !page.more || pages > 10 { break }
+        }
+        // Every message once, though four of them share a timestamp and a page holds two.
+        XCTAssertEqual(seen, ["m1", "m2", "m3", "m4", "m6"])
+        XCTAssertEqual(cursor, 20)
+        XCTAssertEqual(cursorID, "m6")
+        XCTAssertTrue(try OpenCodeUsage.read(databaseURL: url, after: cursor, afterID: cursorID, limit: 2).events.isEmpty)
+    }
+
+    func testCopilotStateCarriesCountedTotalsAcrossAResumedRead() throws {
+        var parser = SpendLogParser(provider: .copilot, fileIdentity: "file")
+        let usage = ["inputTokens": 1_000, "outputTokens": 40]
+        XCTAssertEqual(parser.parse(try json(shutdown(["m": usage])), lineNumber: 1).count, 1)
+        // The saved state survives being written to and read from the database.
+        let saved = try JSONDecoder().decode(SpendLogParser.State.self, from: JSONEncoder().encode(parser.state))
+        var resumed = SpendLogParser(provider: .copilot, fileIdentity: "file")
+        resumed.state = saved
+        XCTAssertTrue(resumed.parse(try json(shutdown(["m": usage])), lineNumber: 2).isEmpty)
+        XCTAssertEqual(resumed.parse(try json(shutdown(["m": ["inputTokens": 7, "outputTokens": 1]])), lineNumber: 3).count, 1)
+        // States saved before this field existed still load.
+        let old = try JSONDecoder().decode(SpendLogParser.State.self, from: Data(#"{"model":"","sessionID":"","sawMeta":false,"fast":false,"ultrafast":false}"#.utf8))
+        XCTAssertNil(old.copilotSeen)
     }
 
     func testOpenCodeMissingDatabaseOrTableThrowsWithoutCreatingAFile() throws {
@@ -253,6 +281,14 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertEqual(second.filesRead, 0)
         XCTAssertEqual(second.filesReused, 3)
 
+        // A Copilot log that grows is read on from where it stopped: the
+        // repeated totals of a resumed session are skipped, new ones count.
+        let events = copilot.appendingPathComponent("abc/events.jsonl")
+        let more = try json(shutdown(["known-4.6": ["inputTokens": 10, "outputTokens": 5]]))
+        try (line + Data("\n".utf8) + line + Data("\n".utf8) + more + Data("\n".utf8)).write(to: events)
+        let appended = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertEqual(appended.total(provider: .copilot, period: .today, now: now, calendar: calendar).tokens, 1_055)
+
         // The Vibe session grows, and OpenCode gets a new message and finishes an old one.
         try json(vibeSession(prompt: 2_000, cached: 400, completion: 100)).write(to: meta)
         try fm.setAttributes([.modificationDate: now.addingTimeInterval(60)], ofItemAtPath: meta.path)
@@ -267,7 +303,7 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertEqual(grown.events, 2)
         XCTAssertEqual(grown.recordedUSD, 0.75)
         XCTAssertEqual(grown.outputTokens, 125 + 25)
-        XCTAssertEqual(third.total(provider: .copilot, period: .today, now: now, calendar: calendar).tokens, 1_040)
+        XCTAssertEqual(third.total(provider: .copilot, period: .today, now: now, calendar: calendar).tokens, 1_055)
     }
 
     func testDefaultSourcesIncludeTheThreeToolHomes() {

@@ -48,6 +48,8 @@ keeps what it reads in a small SQLite database,
   file is read once, including across launches. When a Claude log grows, only
   the new lines are read; a large one is read across several passes. A Codex
   log is reread in full when it changes, because its totals are cumulative.
+  A Copilot log is read on from where it stopped, with the totals already
+  counted remembered; a Vibe session file is reread in full.
 - **Requests:** per-request token counts, model, timestamp, request identity
   and source for the last 40 days, used to drop duplicates across files (a
   resumed Claude session copies earlier messages into a new file). Older
@@ -117,7 +119,8 @@ They represent the bundled API rates, even for older requests.
    an invented default. There is no automatic reference-model fallback.
 5. Repeated Claude message/request IDs are deduplicated; parent records win
    over sidechain replays, followed by richer token/speed records.
-   An OpenCode message updated after it was first read (it finished later)
+   OpenCode messages are read in order of update time and id, a page at a
+   time. A message updated after it was first read (it finished later)
    is read again and the larger record wins. A Copilot session that is
    resumed and shut down again without new work repeats its totals; identical
    totals in one file count once. Whether a later, larger total in a resumed
