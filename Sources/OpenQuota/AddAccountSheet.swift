@@ -43,6 +43,10 @@ struct AddAccountSheet: View {
             "mistral": Tile(
                 target: .mistral, providerID: "mistral",
                 name: L("Mistral · Experimental", "Mistral · Eksperimentell")),
+            // Also reachable through the OpenCode Go tile; its own tile makes it findable.
+            "opencode-signin": Tile(
+                target: .openCodeSignIn, providerID: "opencode-go",
+                name: L("OpenCode sign-in · Experimental", "OpenCode-pålogging · Eksperimentell")),
         ]
         for provider in model.specProviders() {
             let id = canonicalProviderID(provider.id)
