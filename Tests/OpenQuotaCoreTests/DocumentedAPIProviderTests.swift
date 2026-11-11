@@ -166,7 +166,13 @@ final class DocumentedAPIProviderTests: XCTestCase {
         func rewrite(_ text: String) -> String {
             String(decoding: LenientJSON.rewritingZeroExponents(Data(text.utf8)), as: UTF8.self)
         }
-        XCTAssertEqual(rewrite(#"{"a":0E-6176,"b":-0.000e+400,"c":[0e9,00E1]}"#), #"{"a":0,"b":0,"c":[0,0]}"#)
+        XCTAssertEqual(rewrite(#"{"a":0E-6176,"b":-0.000e+400,"c":[0e9,0.0E1]}"#), #"{"a":0,"b":0,"c":[0,0]}"#)
+        // Malformed numbers are not tidied into a zero: they stay as they are and stay refused.
+        for bad in [#"{"used":0e+12-7}"#, #"{"used":0e}"#, #"{"used":0.0.0e1}"#, #"{"used":00E1}"#,
+                    #"{"used":0.e1}"#, #"{"used":0e+}"#, #"{"used":-e1}"#, #"{"used":0E1E2}"#] {
+            XCTAssertEqual(rewrite(bad), bad)
+            XCTAssertNil(LenientJSON.object(with: Data(bad.utf8)), bad)
+        }
         // Real numbers, plain zeros, and anything inside a string stay as they are.
         let untouched = #"{"a":1E-6176,"b":0,"c":0.0,"d":-12.5e3,"e":"0E-6176 \" 0E5","f":10E2,"g":true,"h":null}"#
         XCTAssertEqual(rewrite(untouched), untouched)

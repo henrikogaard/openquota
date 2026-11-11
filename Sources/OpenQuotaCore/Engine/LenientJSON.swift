@@ -9,8 +9,8 @@ enum LenientJSON {
         return try? JSONSerialization.jsonObject(with: rewritingZeroExponents(data))
     }
 
-    /// Rewrites number tokens whose digits are all zero and that carry an
-    /// exponent (`0E-6176`, `-0.00e+400`) as `0`. Strings are left alone.
+    /// Rewrites well-formed zero numbers that carry an exponent (`0E-6176`,
+    /// `-0.00e+400`) as `0`. Strings and every other token are left alone.
     static func rewritingZeroExponents(_ data: Data) -> Data {
         let bytes = [UInt8](data)
         var output = Data()
@@ -59,13 +59,24 @@ enum LenientJSON {
             || byte == UInt8(ascii: "e") || byte == UInt8(ascii: "E")
     }
 
+    /// A complete, well-formed JSON number whose value is zero and that has
+    /// an exponent: `-?0(\.0+)?[eE][+-]?digits`. Anything else, including a
+    /// malformed token that merely starts like one, is left for the parser
+    /// to refuse.
     private static func isZeroWithExponent(_ token: ArraySlice<UInt8>) -> Bool {
-        guard let exponent = token.firstIndex(where: { $0 == UInt8(ascii: "e") || $0 == UInt8(ascii: "E") }) else {
-            return false
+        var rest = token
+        if rest.first == UInt8(ascii: "-") { rest = rest.dropFirst() }
+        guard rest.first == UInt8(ascii: "0") else { return false }
+        rest = rest.dropFirst()
+        if rest.first == UInt8(ascii: ".") {
+            rest = rest.dropFirst()
+            let zeros = rest.prefix { $0 == UInt8(ascii: "0") }
+            guard !zeros.isEmpty else { return false }
+            rest = rest.dropFirst(zeros.count)
         }
-        var mantissa = token[token.startIndex..<exponent]
-        if mantissa.first == UInt8(ascii: "-") { mantissa = mantissa.dropFirst() }
-        return mantissa.contains(UInt8(ascii: "0"))
-            && mantissa.allSatisfy { $0 == UInt8(ascii: "0") || $0 == UInt8(ascii: ".") }
+        guard rest.first == UInt8(ascii: "e") || rest.first == UInt8(ascii: "E") else { return false }
+        rest = rest.dropFirst()
+        if rest.first == UInt8(ascii: "+") || rest.first == UInt8(ascii: "-") { rest = rest.dropFirst() }
+        return !rest.isEmpty && rest.allSatisfy(isDigit)
     }
 }
