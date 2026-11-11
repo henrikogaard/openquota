@@ -8,7 +8,11 @@ on:
 jobs:
   core:
     runs-on: ubuntu-latest
-    container: swift:6.1
+    container:
+      image: swift:6.1
+      # Names stopped resolving inside the job container on runner image
+      # 20261101; give Docker's resolver public upstreams.
+      options: --dns 1.1.1.1 --dns 8.8.8.8
     steps:
       - uses: actions/checkout@v4
       - name: Install SQLite headers
