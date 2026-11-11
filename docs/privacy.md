@@ -39,7 +39,7 @@ provider-owned files.
 - The opt-in Claude CLI check runs your own `claude` with your folder's login.
   OpenQuota never reads the token and keeps only the 5-hour and weekly
   percentages and reset times. Each check is one tiny request to Anthropic.
-- Optional spend scanning reads local logs (Claude, Codex, Copilot CLI, Mistral Vibe session files, and OpenCode's database, read-only) transiently, retaining parsed usage
+- Optional spend scanning reads local logs (Claude, Codex, Copilot CLI, Mistral Vibe session files, and OpenCode's and Antigravity's databases, read-only) transiently, retaining parsed usage
   rather than prompts/responses. Daily totals (tokens, cost, model, date) are
   saved on this Mac for History and can be deleted there. No pricing request
   uploads your logs.

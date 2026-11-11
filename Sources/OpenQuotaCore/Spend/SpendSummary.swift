@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SpendProvider: String, CaseIterable, Sendable, Codable {
-    case claude, codex, opencode, vibe, copilot
+    case claude, codex, opencode, vibe, copilot, antigravity
 }
 
 public enum SpendPeriod: String, CaseIterable, Sendable {
@@ -158,7 +158,7 @@ public struct SpendLogSource: Sendable, Hashable {
     /// The tool's home folder, used to name the source.
     var folder: String {
         switch provider {
-        case .claude, .codex, .copilot: directory.deletingLastPathComponent().path
+        case .claude, .codex, .copilot, .antigravity: directory.deletingLastPathComponent().path
         case .vibe: directory.deletingLastPathComponent().deletingLastPathComponent().path
         case .opencode: directory.path
         }
@@ -191,6 +191,7 @@ public struct SpendLogSource: Sendable, Hashable {
             SpendLogSource(provider: .opencode, directory: dataHome.appendingPathComponent("opencode")),
             SpendLogSource(provider: .vibe, directory: homeFor("VIBE_HOME", fallback: ".vibe").appendingPathComponent("logs/session")),
             SpendLogSource(provider: .copilot, directory: homeFor("COPILOT_HOME", fallback: ".copilot").appendingPathComponent("session-state")),
+            SpendLogSource(provider: .antigravity, directory: home.appendingPathComponent(".gemini/antigravity/conversations")),
         ]
         return (logs + tools).filter { seen.insert($0).inserted }
     }

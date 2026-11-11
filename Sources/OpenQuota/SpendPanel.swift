@@ -136,8 +136,8 @@ enum SpendCopy {
     static var cancel: String { text("Cancel", "Avbryt") }
     static var intro: String { text("See the API-rate value of your local Claude, Codex and other AI tool activity.", "Se API-verdien av lokal aktivitet i Claude, Codex og andre AI-verktøy.") }
     static var privacy: String {
-        text("Opt in to read token counts, model names, timestamps and recorded costs from local session data of Claude, Codex, OpenCode, Mistral Vibe and Copilot CLI. Nothing is uploaded. Prompts are not retained. Turning this off clears the in-memory usage cache.",
-             "Aktiver for å lese tokenantall, modellnavn, tidspunkt og registrerte kostnader fra lokale øktdata for Claude, Codex, OpenCode, Mistral Vibe og Copilot CLI. Ingenting lastes opp. Ledetekster lagres ikke. Deaktivering tømmer bruksmellomlageret.")
+        text("Opt in to read token counts, model names, timestamps and recorded costs from local session data of Claude, Codex, OpenCode, Mistral Vibe, Copilot CLI and Antigravity (experimental). Nothing is uploaded. Prompts are not retained. Turning this off clears the in-memory usage cache.",
+             "Aktiver for å lese tokenantall, modellnavn, tidspunkt og registrerte kostnader fra lokale øktdata for Claude, Codex, OpenCode, Mistral Vibe, Copilot CLI og Antigravity (eksperimentell). Ingenting lastes opp. Ledetekster lagres ikke. Deaktivering tømmer bruksmellomlageret.")
     }
     static var scope: String {
         text("Includes default CLI homes and connected configurations, not other devices. Shared histories cannot be attributed to a subscription. Prices are bundled snapshots, updated with the app—not your invoice.",

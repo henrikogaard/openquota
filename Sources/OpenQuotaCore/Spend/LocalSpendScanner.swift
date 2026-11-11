@@ -1,7 +1,8 @@
 import Foundation
 
 /// Reads local usage logs (Claude, Codex, Copilot CLI, Mistral Vibe session
-/// files and OpenCode's database) into a small SQLite database:
+/// files, OpenCode's database and Antigravity's conversation databases) into
+/// a small SQLite database:
 /// which files were read (so unchanged files are never read again), recent
 /// per-request token counts (to drop duplicates across files), and daily
 /// totals per source and model (the history). One worker, bounded passes, no
@@ -212,7 +213,7 @@ public actor LocalSpendScanner {
                         state: parsed.interrupted ? "partial" : "read",
                         unreadable: parsed.malformed || work.hadUnreadable,
                         offset: parsed.endOffset, lines: parsed.lines,
-                        parserState: file.provider == .claude || file.provider == .vibe || file.compressed
+                        parserState: [.claude, .vibe, .antigravity].contains(file.provider) || file.compressed
                             ? nil : parsed.parserState,
                         calendar: calendar)
                 }
@@ -465,8 +466,8 @@ public actor LocalSpendScanner {
         return ordered
     }
 
-    /// Size and modification time of OpenCode's database together with its
-    /// write-ahead log, where recent writes sit until OpenCode folds them in.
+    /// Size and modification time of a tool's database together with its
+    /// write-ahead log, where recent writes sit until the tool folds them in.
     private static func openCodeStat(_ url: URL) -> (size: Int, modified: Date)? {
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
         // Fresh values each time: a URL caches the ones it was asked for before.
@@ -533,10 +534,13 @@ public actor LocalSpendScanner {
                 case .codex: url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst")
                 case .copilot: url.lastPathComponent == "events.jsonl"
                 case .vibe: url.lastPathComponent == "meta.json"
+                case .antigravity: url.pathExtension == "db"
                 case .opencode: false
                 }
                 guard values.isRegularFile == true, wanted,
-                      let size = values.fileSize, let modified = values.contentModificationDate else { continue }
+                      var size = values.fileSize, var modified = values.contentModificationDate else { continue }
+                // A conversation still open keeps its newest rows in the write-ahead log.
+                if source.provider == .antigravity, let stat = Self.openCodeStat(url) { (size, modified) = stat }
                 let file = LogFile(url: url, provider: source.provider, folder: folder, size: size, modified: modified)
                 guard paths.insert(file.key).inserted else { continue }
                 // Files already read cost nothing and don't use up the pass.
@@ -593,6 +597,20 @@ public actor LocalSpendScanner {
             let data = try Data(contentsOf: file.url)
             return Parsed(events: VibeUsage.event(from: data).map { [$0] } ?? [], endOffset: 0,
                           bytes: data.count, lines: 0, interrupted: false, malformed: false,
+                          parserState: SpendLogParser.State())
+        case .antigravity:
+            // One conversation per database, read whole each time it changes.
+            // A database that is busy throws: what was read before is kept,
+            // and it is tried again next pass.
+            let seconds = limits.seconds
+            let usage = try AntigravityUsage.read(
+                databaseURL: file.url, limit: limits.events, byteBudget: byteBudget,
+                shouldStop: { Task.isCancelled || start.duration(to: .now) >= .seconds(seconds) })
+            // Cut short by what other files used of this pass: read again
+            // next pass. Too large even for a whole pass: a partial total.
+            let again = usage.exhausted && byteBudget < limits.scanBytes
+            return Parsed(events: usage.events, endOffset: 0, bytes: usage.bytes, lines: 0, interrupted: again,
+                          malformed: usage.truncated || (usage.exhausted && !again),
                           parserState: SpendLogParser.State())
         case .claude, .codex, .copilot:
             break
