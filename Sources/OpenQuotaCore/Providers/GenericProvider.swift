@@ -76,13 +76,15 @@ public struct GenericProvider: UsageProvider {
                 } else {
                     body = root
                 }
+                let scale = windowSpec.scale ?? 1
+                func scaled(_ path: String?) -> Double? { numeric(body, at: path).map { $0 * scale } }
                 windows.append(UsageWindow(
                     id: "\(spec.id).\(windowSpec.label.lowercased())",
                     label: windowSpec.label,
                     kind: windowSpec.kind ?? .consumption,
-                    used: numeric(body, at: windowSpec.used),
-                    limit: numeric(body, at: windowSpec.limit) ?? (windowSpec.unit == "%" ? 100 : nil),
-                    remaining: numeric(body, at: windowSpec.remaining),
+                    used: scaled(windowSpec.used),
+                    limit: scaled(windowSpec.limit) ?? (windowSpec.unit == "%" ? 100 : nil),
+                    remaining: scaled(windowSpec.remaining),
                     unit: windowSpec.unit,
                     resetsAt: JSONPath.date(body, at: windowSpec.resetsAt,
                                             format: windowSpec.resetsAtFormat)
@@ -229,19 +231,23 @@ public struct GenericProvider: UsageProvider {
         return JSONPath.double(root, at: path)
     }
 
-    /// Substitutes {now}, {today}, {d7}, {d30} epoch-seconds templates in URLs.
+    /// Substitutes {now}, {today}, {d7}, {d30} epoch-seconds templates in URLs,
+    /// and {d30iso}: the start of the UTC day 30 days ago, RFC 3339.
     private func resolveURL(_ template: String) -> String {
         let now = Date()
         var url = template
             .replacingOccurrences(of: "{now}", with: String(Int(now.timeIntervalSince1970)))
             .replacingOccurrences(of: "{d7}", with: String(Int(now.timeIntervalSince1970) - 7 * 86400))
             .replacingOccurrences(of: "{d30}", with: String(Int(now.timeIntervalSince1970) - 30 * 86400))
-        if url.contains("{today}") {
+        if url.contains("{today}") || url.contains("{d30iso}") {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "UTC")!
             let start = calendar.startOfDay(for: now)
+            let formatter = ISO8601DateFormatter()
             url = url.replacingOccurrences(
                 of: "{today}", with: String(Int(start.timeIntervalSince1970)))
+                .replacingOccurrences(
+                    of: "{d30iso}", with: formatter.string(from: start.addingTimeInterval(-30 * 86400)))
         }
         return url
     }

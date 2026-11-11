@@ -24,7 +24,8 @@ and limits](estimated-spend.md).
 | Synthetic | bearer | `api.synthetic.new/v2/quotas` | unverified |
 | Kilo | bearer | `kilocode.ai/api/users/me/balance` | unverified |
 | Venice | bearer | `api.venice.ai/api/v1/apikeys` | unverified |
-| OpenAI | bearer (admin key) | `api.openai.com/v1/organization/costs` | sums 30d buckets, unverified |
+| OpenAI API | bearer (Admin key `sk-admin-…`) | `api.openai.com/v1/organization/costs` | spend over the last 30 days plus today (up to 31 daily buckets) in USD; no balance, unverified |
+| Anthropic API | `x-api-key` (Admin key `sk-ant-admin…`) | `api.anthropic.com/v1/organizations/cost_report` | spend over the last 30 days plus today (up to 31 daily buckets), cents converted to USD; no balance, unverified |
 | Warp | bearer | `app.warp.dev/graphql` | POST GraphQL, unverified |
 | ClinePass | bearer | `api.cline.bot/api/v1/users/me/plan/usage-limits` | 5h/weekly/monthly % used + resets, unverified |
 | Vercel AI Gateway | bearer | `ai-gateway.vercel.sh/v1/credits` | team USD balance + lifetime spend, unverified |
@@ -34,6 +35,20 @@ and limits](estimated-spend.md).
 | DevPass | bearer | `api.llmgateway.io/v1/key` | plan credits, premium weekly, key spend; unverified |
 | v0 | bearer | `api.v0.dev/v1/user/billing` + `/v1/rate-limits` | token or legacy billing branch + request limit; unverified |
 | Codebuff | bearer | `POST www.codebuff.com/api/v1/usage` | credits used/quota/remaining + reset; subscription metadata not fetched; unverified |
+
+**Anthropic and OpenAI API platforms show spend, not what is left.** Neither
+documents an endpoint for the remaining prepaid credit balance, the monthly
+spend cap or the usage tier, so the card shows **Spend 30d** as an amount and
+never a percentage. Both need an organization Admin key; a normal API key can
+read no usage or billing data. Anthropic's Admin API is unavailable for
+individual accounts. Both requests ask for 31 daily buckets (the default is
+7). Anthropic's `amount` is a decimal string in cents and is divided by 100;
+its report can lag, and the newer `analytics/cost` beta endpoint is not used.
+Days with no cost count as zero. An Admin key can read organization usage and
+manage keys and members, so it is stored like every other key in the
+device-only Keychain and sent only to the provider's API host.
+Docs: [Anthropic cost report](https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-cost-report),
+[OpenAI costs](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs).
 
 Mistral is **not** an API-key spec. The documented Admin API is
 Enterprise-only (standard API keys are refused), and `api.mistral.ai` exposes
@@ -350,4 +365,7 @@ first-match filter, and a `sum:` prefix that totals numeric leaves
 `{today}`, `{d7}`, `{d30}` = epoch seconds. Auth: `bearer`, `apiKeyHeader`
 (`x-api-key`), `header` (+`authHeader`/`authPrefix`, e.g. xi-api-key),
 `cookie` (manual session cookie — never auto-imported). Requests default to
-GET; set `method`/`body`/`headers` for POST/GraphQL endpoints.
+GET; set `method`/`body`/`headers` for POST/GraphQL endpoints. `{d30iso}` is
+the start of the UTC day 30 days ago as RFC 3339. A window's `scale`
+multiplies its numbers (`0.01` for amounts in cents). A `sum:` over an array
+that resolves but is empty is zero.

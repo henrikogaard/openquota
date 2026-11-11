@@ -259,6 +259,10 @@ private struct APIKeyForm: View {
         case "requesty": L("Needs a management key. Balance is shared across the organization.",
                             "Krever en administrasjonsnøkkel. Saldoen deles i hele organisasjonen.")
         case "zenmux": L("Needs a Management API key.", "Krever en administrasjons-API-nøkkel.")
+        case "openai": L("Needs an Admin key (sk-admin-…), not a normal API key. Shows what the organization spent over the last 30 days. OpenAI has no API for the remaining credit balance. An Admin key can also manage the organization, so keep it safe. Experimental.",
+                          "Krever en Admin-nøkkel (sk-admin-…), ikke en vanlig API-nøkkel. Viser hva organisasjonen har brukt de siste 30 dagene. OpenAI har ikke noe API for gjenstående kredittsaldo. En Admin-nøkkel kan også administrere organisasjonen, så pass godt på den. Eksperimentell.")
+        case "anthropic": L("Needs an Admin key (sk-ant-admin…), not a normal API key. Only organizations can create one. Shows what the organization spent over the last 30 days. Anthropic has no API for the remaining credit balance. An Admin key can also manage the organization, so keep it safe. Experimental.",
+                             "Krever en Admin-nøkkel (sk-ant-admin…), ikke en vanlig API-nøkkel. Bare organisasjoner kan opprette en. Viser hva organisasjonen har brukt de siste 30 dagene. Anthropic har ikke noe API for gjenstående kredittsaldo. En Admin-nøkkel kan også administrere organisasjonen, så pass godt på den. Eksperimentell.")
         case "atlascloud": L("Needs a key with account balance permission.", "Krever en nøkkel med tilgang til kontosaldo.")
         case "opencode-go": L("Paste the OpenCode Go key from opencode.ai/zen. Add one per subscription.",
                                "Lim inn OpenCode Go-nøkkelen fra opencode.ai/zen. Legg til én per abonnement.")
