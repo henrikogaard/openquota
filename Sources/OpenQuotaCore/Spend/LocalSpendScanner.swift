@@ -8,8 +8,14 @@ import Foundation
 /// credential reads or network requests.
 public actor LocalSpendScanner {
     struct Limits: Sendable {
+        /// Files not read yet that one pass takes on per source folder; files
+        /// already read don't count, so a large folder is worked through
+        /// over several passes instead of being cut off for good.
         var files = 2_000
-        var directoryEntries = 20_000
+        var directoryEntries = 200_000
+        /// Most a compressed log may decompress to, and most requests it may hold.
+        var decompressedBytes = 4 * 1_024 * 1_024 * 1_024
+        var compressedEvents = 1_000_000
         /// Sanity cap; files are read in pieces, so size alone rarely matters.
         var fileBytes = 8 * 1_024 * 1_024 * 1_024
         var scanBytes = 256 * 1_024 * 1_024
@@ -28,6 +34,8 @@ public actor LocalSpendScanner {
         var size: Int
         var modified: Date
         var key: String { "\(provider.rawValue):\(url.path)" }
+        /// Codex compresses older rollouts to `.jsonl.zst`.
+        var compressed: Bool { url.pathExtension == "zst" }
     }
 
     private struct Parsed {
@@ -123,13 +131,19 @@ public actor LocalSpendScanner {
             result.isPartial = true
             return result
         }
-        let files = discover(sources, start: start, partial: &result.isPartial)
         let known = (try? Self.loadFiles(database)) ?? [:]
+        var deferred = 0
+        // Set when part of the logs went unseen this pass (discovery cut
+        // short, or a read cancelled). Old requests are then kept, because a
+        // log read later must still find them to be counted once.
+        var incomplete = false
+        let files = discover(sources, known: known, start: start, partial: &result.isPartial,
+                             deferred: &deferred, cutShort: &incomplete)
         var pending: [Work] = []
         for file in files {
             guard let saved = known[file.key] else { pending.append(Work(file: file)); continue }
+            if Self.alreadyRead(file, saved) { continue }
             let unchanged = saved.size == file.size && saved.modified == file.modified.timeIntervalSince1970
-            if unchanged && saved.state != "partial" { continue }
             // A grown or half-read file is read on from where the last pass
             // stopped, with the Codex parser's running totals restored. Any
             // other change (shrunk, or rewritten at the same size) is read
@@ -139,7 +153,7 @@ public actor LocalSpendScanner {
                 // Its database is read on from the last message seen, whatever its size did.
                 pending.append(Work(file: file, offset: saved.offset, parserState: saved.parserState,
                                     hadUnreadable: saved.hadUnreadable))
-            } else if resumable, saved.offset > 0, saved.offset <= file.size,
+            } else if resumable, saved.offset > 0, !file.compressed, saved.offset <= file.size,
                file.provider == .claude || saved.parserState != nil {
                 // Codex and Copilot also need the parser's saved state to read on.
                 pending.append(Work(file: file, offset: saved.offset, firstLine: saved.lines,
@@ -170,6 +184,7 @@ public actor LocalSpendScanner {
                                    parserState: work.parserState, byteBudget: remainingBytes, start: start)
             } catch {
                 result.isPartial = true
+                if error is CancellationError { incomplete = true }
                 processed += 1
                 continue
             }
@@ -195,7 +210,8 @@ public actor LocalSpendScanner {
                         state: parsed.interrupted ? "partial" : "read",
                         unreadable: parsed.malformed || work.hadUnreadable,
                         offset: parsed.endOffset, lines: parsed.lines,
-                        parserState: file.provider == .claude || file.provider == .vibe ? nil : parsed.parserState,
+                        parserState: file.provider == .claude || file.provider == .vibe || file.compressed
+                            ? nil : parsed.parserState,
                         calendar: calendar)
                 }
                 affectedDays.formUnion(days)
@@ -207,11 +223,11 @@ public actor LocalSpendScanner {
             if parsed.interrupted { break }
             processed += 1
         }
-        result.pendingFiles = ordered.count - processed
+        result.pendingFiles = ordered.count - processed + deferred
         do {
             try database.transaction {
                 try Self.recompute(database, days: affectedDays, pricing: pricing, calendar: calendar)
-                if result.pendingFiles == 0 {
+                if result.pendingFiles == 0, !incomplete, !Task.isCancelled {
                     try Self.prune(database, now: now, keepDays: limits.eventDays, calendar: calendar)
                 }
             }
@@ -461,8 +477,15 @@ public actor LocalSpendScanner {
         return (size + (wal?.fileSize ?? 0), max(modified, wal?.contentModificationDate ?? modified))
     }
 
+    /// Read to the end already, and unchanged since.
+    private static func alreadyRead(_ file: LogFile, _ saved: SavedFile) -> Bool {
+        saved.size == file.size && saved.modified == file.modified.timeIntervalSince1970
+            && saved.state != "partial"
+    }
+
     private func discover(
-        _ sources: [SpendLogSource], start: ContinuousClock.Instant, partial: inout Bool
+        _ sources: [SpendLogSource], known: [String: SavedFile], start: ContinuousClock.Instant,
+        partial: inout Bool, deferred: inout Int, cutShort: inout Bool
     ) -> [LogFile] {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
@@ -495,6 +518,7 @@ public actor LocalSpendScanner {
                 guard visited <= limits.directoryEntries, !Task.isCancelled,
                       start.duration(to: .now) < .seconds(limits.seconds) else {
                     partial = true
+                    cutShort = true
                     break
                 }
                 guard let values = try? url.resourceValues(forKeys: Set(keys)) else {
@@ -503,7 +527,8 @@ public actor LocalSpendScanner {
                 }
                 if values.isSymbolicLink == true { enumerator.skipDescendants(); continue }
                 let wanted = switch source.provider {
-                case .claude, .codex: url.pathExtension == "jsonl"
+                case .claude: url.pathExtension == "jsonl"
+                case .codex: url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst")
                 case .copilot: url.lastPathComponent == "events.jsonl"
                 case .vibe: url.lastPathComponent == "meta.json"
                 case .opencode: false
@@ -512,11 +537,15 @@ public actor LocalSpendScanner {
                       let size = values.fileSize, let modified = values.contentModificationDate else { continue }
                 let file = LogFile(url: url, provider: source.provider, folder: folder, size: size, modified: modified)
                 guard paths.insert(file.key).inserted else { continue }
-                if found < limits.files {
+                // Files already read cost nothing and don't use up the pass.
+                if let saved = known[file.key], Self.alreadyRead(file, saved) {
+                    files.append(file)
+                } else if found < limits.files {
                     files.append(file)
                     found += 1
                 } else {
-                    partial = true
+                    // Left for a later pass, once these have been read.
+                    deferred += 1
                 }
             }
         }
@@ -558,6 +587,7 @@ public actor LocalSpendScanner {
         case .claude, .codex, .copilot:
             break
         }
+        if file.compressed { return try parseCompressed(file) }
         let handle = try FileHandle(forReadingFrom: file.url)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(offset))
@@ -589,7 +619,9 @@ public actor LocalSpendScanner {
                 let length = buffer.distance(from: buffer.startIndex, to: newline)
                 if !oversized && length <= limits.lineBytes {
                     events.append(contentsOf: parser.parse(Data(buffer[..<newline]), lineNumber: lineNumber))
-                } else { malformed = true }
+                } else if !oversized && Self.oversizedLineMatters(file.provider, head: buffer) {
+                    malformed = true
+                }
                 buffer.removeSubrange(...newline)
                 bufferStart += length + 1
                 oversized = false
@@ -599,14 +631,68 @@ public actor LocalSpendScanner {
                 }
             }
             if buffer.count > limits.lineBytes {
+                // Judged once, by how the line starts; the rest is skipped.
+                if !oversized && Self.oversizedLineMatters(file.provider, head: buffer) { malformed = true }
                 bufferStart += buffer.count
                 buffer.removeAll(keepingCapacity: false)
                 oversized = true
-                malformed = true
             }
             if chunk.isEmpty { break }
         }
         return Parsed(events: events, endOffset: bufferStart, bytes: bufferStart - offset, lines: lineNumber, interrupted: interrupted,
+                      malformed: malformed || parser.incomplete, parserState: parser.state)
+    }
+
+    /// Whether a line too long to read could have held usage. Codex writes
+    /// whole tool outputs as `response_item` lines, which never carry token
+    /// counts, so skipping one loses nothing; any other long line is unknown.
+    static func oversizedLineMatters(_ provider: SpendProvider, head: Data) -> Bool {
+        guard provider == .codex else { return true }
+        return head.prefix(512).range(of: Data(#""type":"response_item""#.utf8)) == nil
+    }
+
+    /// Reads a compressed log from start to end in one go: a compressed
+    /// stream can't be picked up half-way, and these archives don't change.
+    /// A file that is damaged or cut off keeps what was read and is marked
+    /// as having unusable lines.
+    private func parseCompressed(_ file: LogFile) throws -> Parsed {
+        // The same identity as the plain log it was compressed from.
+        var parser = SpendLogParser(provider: file.provider, fileIdentity: file.url.deletingPathExtension().path)
+        var buffer = Data()
+        var events: [SpendEvent] = []
+        var lineNumber = 0
+        var malformed = false
+        var oversized = false
+        let lineBytes = limits.lineBytes
+        let eventLimit = limits.compressedEvents
+        do {
+            try ZstdFile.read(file.url, maxOutput: limits.decompressedBytes) { chunk in
+                try Task.checkCancellation()
+                buffer.append(chunk)
+                while let newline = buffer.firstIndex(of: 0x0A) {
+                    lineNumber += 1
+                    let length = buffer.distance(from: buffer.startIndex, to: newline)
+                    if !oversized && length <= lineBytes {
+                        events.append(contentsOf: parser.parse(Data(buffer[..<newline]), lineNumber: lineNumber))
+                        guard events.count <= eventLimit else { throw ZstdFile.Failure(description: "too many requests") }
+                    } else if !oversized && Self.oversizedLineMatters(file.provider, head: buffer) {
+                        malformed = true
+                    }
+                    buffer.removeSubrange(...newline)
+                    oversized = false
+                }
+                if buffer.count > lineBytes {
+                    if !oversized && Self.oversizedLineMatters(file.provider, head: buffer) { malformed = true }
+                    buffer.removeAll(keepingCapacity: false)
+                    oversized = true
+                }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch is ZstdFile.Failure {
+            malformed = true
+        }
+        return Parsed(events: events, endOffset: file.size, bytes: file.size, lines: lineNumber, interrupted: false,
                       malformed: malformed || parser.incomplete, parserState: parser.state)
     }
 

@@ -200,8 +200,9 @@ final class SpendTests: XCTestCase {
         // Later passes continue where the last one stopped.
         var pass = first
         while pass.pendingFiles > 0 { pass = await scanner.scan(sources: sources, now: now, calendar: calendar) }
-        XCTAssertEqual(pass.total(provider: .claude, period: .today, now: now, calendar: calendar).pricedEvents, 3,
-                       "Per-folder file limit")
+        XCTAssertEqual(pass.total(provider: .claude, period: .today, now: now, calendar: calendar).pricedEvents, 5,
+                       "A folder with more files than one pass takes is worked through over several passes")
+        XCTAssertFalse(pass.isPartial)
     }
 
     func testClaudeUsageIsSplitByAppAndResumedCopiesCountOnce() async throws {
