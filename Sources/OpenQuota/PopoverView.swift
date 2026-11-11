@@ -3,8 +3,8 @@ import SwiftUI
 import AppKit
 import OpenQuotaCore
 
-/// The popover: one Liquid Glass section per provider, every usage window
-/// visible as a labelled bar with what's left and when it resets.
+/// The popover: a title, the spend tile, then one flat card per provider with
+/// every usage window on its own line: ring, label, reset and what's left.
 struct PopoverView: View {
     var model: AppModel
     @Environment(\.openSettings) private var openSettings
@@ -26,28 +26,28 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(spacing: Tokens.moduleSpacing) {
+            header
             if model.snapshots.isEmpty {
                 SpendPanel(model: model)
                 emptyState
             } else {
                 ScrollView {
-                    GlassEffectContainer(spacing: Tokens.moduleSpacing) {
-                        VStack(spacing: Tokens.moduleSpacing) {
-                            SpendPanel(model: model)
-                            ForEach(groups, id: \.providerID) { group in
-                                ProviderSection(
-                                    model: model,
-                                    providerID: group.providerID,
-                                    name: model.providerName(group.providerID),
-                                    dashboardURL: model.dashboardURL(group.providerID),
-                                    snapshots: group.snapshots,
-                                    isExperimental: group.snapshots.contains {
-                                        model.isExperimentalProvider($0.providerID)
-                                    })
-                            }
+                    VStack(spacing: Tokens.moduleSpacing) {
+                        SpendPanel(model: model)
+                        SectionHeader(title: L("Plans", "Abonnementer"))
+                        ForEach(groups, id: \.providerID) { group in
+                            ProviderSection(
+                                model: model,
+                                providerID: group.providerID,
+                                name: model.providerName(group.providerID),
+                                dashboardURL: model.dashboardURL(group.providerID),
+                                snapshots: group.snapshots,
+                                isExperimental: group.snapshots.contains {
+                                    model.isExperimentalProvider($0.providerID)
+                                })
                         }
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                     }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
                 }
                 .scrollIndicators(.never)
                 .scrollEdgeEffectStyle(.soft, for: .vertical)
@@ -84,6 +84,21 @@ struct PopoverView: View {
 
     private var lastUpdated: Date? {
         model.snapshots.compactMap(\.lastSuccessfulAt).max()
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("OpenQuota").font(.system(size: 14, weight: .semibold))
+            Spacer()
+            if !model.snapshots.isEmpty {
+                let count = model.snapshots.count
+                Text(count == 1 ? L("1 account", "1 konto") : L("\(count) accounts", "\(count) kontoer"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
     }
 
     private var footer: some View {
@@ -125,8 +140,9 @@ struct PopoverView: View {
             .fixedSize()
         }
         .labelStyle(.iconOnly)
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .padding(.trailing, 4)
     }
 
     private var emptyState: some View {
@@ -144,12 +160,12 @@ struct PopoverView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 240)
             Button(L("Add Account…", "Legg til konto…")) { showSettings(addingAccount: true) }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.borderedProminent)
                 .padding(.top, 4)
         }
-        .padding(.vertical, 24)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
-        .glassEffect(.regular, in: .rect(cornerRadius: Tokens.moduleRadius))
+        .card()
     }
 }
 
@@ -174,31 +190,30 @@ struct ProviderSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                ProviderGlyph(providerID: providerID, name: name, size: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(name).font(.system(size: 13, weight: .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .help(subtitle)
-                    }
-                    if isExperimental { ExperimentalBadge() }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                ProviderGlyph(providerID: providerID, name: name, size: 18)
+                Text(name).font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+                if isExperimental { ExperimentalBadge() }
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(subtitle)
                 }
                 Spacer(minLength: 4)
                 if let dashboardURL {
                     Link(destination: dashboardURL) {
                         Image(systemName: "arrow.up.right")
                             .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 20, height: 20)
+                            .frame(width: 18, height: 18)
                             .contentShape(.rect)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
                     .help(L("Open Usage Page", "Åpne bruksside"))
                     .accessibilityLabel(L("Open \(name) Usage Page", "Åpne bruksside for \(name)"))
                 }
@@ -216,8 +231,7 @@ struct ProviderSection: View {
                     })
             }
         }
-        .padding(Tokens.modulePadding)
-        .glassEffect(.regular, in: .rect(cornerRadius: Tokens.moduleRadius))
+        .card()
     }
 
 }
@@ -255,7 +269,7 @@ struct AccountUsage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: showsHeader ? 6 : 9) {
+        VStack(alignment: .leading, spacing: 7) {
             if showsHeader {
                 HStack(spacing: 6) {
                     Text(snapshot.account.label ?? L("Default", "Standard"))
@@ -274,7 +288,7 @@ struct AccountUsage: View {
                 .foregroundStyle(.secondary)
             }
             ForEach(snapshot.windows) { window in
-                if showsHeader && CompactQuotaRow.fits(window) {
+                if CompactQuotaRow.fits(window) {
                     CompactQuotaRow(window: window)
                 } else {
                     QuotaRow(window: window)
