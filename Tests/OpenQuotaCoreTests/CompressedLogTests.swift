@@ -74,6 +74,23 @@ final class CompressedLogTests: XCTestCase {
         XCTAssertEqual(try decompress(url), original)
     }
 
+    func testFrameEndingExactlyOnTheOutputBufferEdgeIsComplete() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let edge = ZSTD_DStreamOutSize()
+        for (name, count) in [("one", edge), ("two", edge * 2), ("under", edge - 1), ("over", edge + 1)] {
+            let original = Data((0..<count).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 / 7) })
+            let url = root.appendingPathComponent("\(name).zst")
+            try compress(original).write(to: url)
+            XCTAssertEqual(try decompress(url), original, name)
+        }
+        // Two frames, the first ending on the edge.
+        let first = Data(repeating: 0x61, count: edge)
+        let two = root.appendingPathComponent("frames.zst")
+        try (compress(first) + compress(Data("tail\n".utf8))).write(to: two)
+        XCTAssertEqual(try decompress(two), first + Data("tail\n".utf8))
+    }
+
     func testEmptyFrameAndSeveralFramesInOneFile() throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }

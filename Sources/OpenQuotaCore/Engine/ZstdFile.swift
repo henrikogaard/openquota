@@ -37,7 +37,10 @@ enum ZstdFile {
                         pending = result
                         return out.pos
                     }
-                    filled = produced == output.count
+                    // A full buffer means more may be waiting, unless the frame
+                    // just ended: asking again then would start a new frame and
+                    // make a complete file look cut off.
+                    filled = produced == output.count && pending != 0
                     total += produced
                     guard total <= maxOutput else { throw Failure(description: "too large") }
                     if produced > 0 { try body(Data(output[0..<produced])) }
