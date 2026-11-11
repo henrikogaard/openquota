@@ -145,6 +145,39 @@ final class DocumentedAPIProviderTests: XCTestCase {
         XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer sk-test")
     }
 
+    func test_openAIAdminCostsAcceptDecimalZeroWithHugeExponent() async throws {
+        // The shape OpenAI returns: a 128-bit decimal zero and long decimals,
+        // which Foundation's JSON reader rejects outright.
+        let (snapshot, _) = try await refresh(SpecLibrary.openAIAdmin, body: """
+            {"object":"page","data":[
+              {"object":"bucket","start_time":1893456000,"end_time":1893542400,"results":[]},
+              {"object":"bucket","start_time":1893542400,"end_time":1893628800,
+               "results":[{"object":"organization.costs.result","amount":{"value":0E-6176,"currency":"usd"},
+                           "project_name":"0E-6176"},
+                          {"object":"organization.costs.result","amount":{"value":37.34029000000000000000000000,"currency":"usd"}}]},
+              {"object":"bucket","start_time":1893628800,"end_time":1893715200,
+               "results":[{"object":"organization.costs.result","amount":{"value":22.89820500000000000000000000,"currency":"usd"}}]}],
+             "has_more":false,"next_page":null}
+            """)
+        XCTAssertEqual(try XCTUnwrap(snapshot.windows.first?.used), 60.238495, accuracy: 1e-6)
+    }
+
+    func test_lenientJSONRewritesOnlyZeroNumbersWithAnExponent() throws {
+        func rewrite(_ text: String) -> String {
+            String(decoding: LenientJSON.rewritingZeroExponents(Data(text.utf8)), as: UTF8.self)
+        }
+        XCTAssertEqual(rewrite(#"{"a":0E-6176,"b":-0.000e+400,"c":[0e9,00E1]}"#), #"{"a":0,"b":0,"c":[0,0]}"#)
+        // Real numbers, plain zeros, and anything inside a string stay as they are.
+        let untouched = #"{"a":1E-6176,"b":0,"c":0.0,"d":-12.5e3,"e":"0E-6176 \" 0E5","f":10E2,"g":true,"h":null}"#
+        XCTAssertEqual(rewrite(untouched), untouched)
+        XCTAssertEqual(rewrite(""), "")
+        // Valid JSON is returned by the normal reader; broken JSON is still refused.
+        XCTAssertNotNil(LenientJSON.object(with: Data(#"{"a":1}"#.utf8)))
+        XCTAssertNotNil(LenientJSON.object(with: Data(#"{"a":0E-6176}"#.utf8)))
+        XCTAssertNil(LenientJSON.object(with: Data("not json".utf8)))
+        XCTAssertNil(LenientJSON.object(with: Data(#"{"a":0E-6176"#.utf8)))
+    }
+
     func test_opencodeGoPastedKeyMapsWindowsAndBalance() async throws {
         let (snapshot, http) = try await refresh(SpecLibrary.opencodeGo, body: """
             {"usage":{"rolling":{"percent":25,"resetsAt":"2030-01-01T00:00:00Z"},
