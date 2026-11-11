@@ -36,7 +36,6 @@ struct HistoryPane: View {
                 }
             }
         }
-        .frame(width: SettingsView.paneWidth, height: SettingsView.paneHeight)
         .environment(\.locale, Localized.appLocale)
         .alert(L("Delete usage history?", "Slette brukshistorikken?"), isPresented: $confirmingDelete) {
             Button(L("Cancel", "Avbryt"), role: .cancel) {}

@@ -5,10 +5,12 @@ import OpenQuotaCore
 @main
 struct OpenQuotaApp: App {
     @State private var model = AppModel()
+    @AppStorage(Localized.languageKey) private var language = ""
 
     var body: some Scene {
         MenuBarExtra {
             PopoverView(model: model)
+                .id(language)
         } label: {
             MenuBarLabel(model: model)
         }
@@ -17,6 +19,8 @@ struct OpenQuotaApp: App {
         Settings {
             SettingsView(model: model)
         }
+        // The panes' minimum size is the window's minimum; see SettingsWindowSizing.
+        .windowResizability(.contentMinSize)
     }
 }
 #else
