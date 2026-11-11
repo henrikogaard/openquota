@@ -21,13 +21,15 @@ public enum Localized {
     /// Provider-supplied window labels are English; translate the common ones.
     public static func windowLabel(_ label: String) -> String {
         guard norwegian else { return label }
+        // "Budget 2": several budgets in one workspace are numbered.
+        if label.hasPrefix("Budget ") { return "Budsjett " + label.dropFirst(7) }
         return windowLabels[label] ?? label
     }
 
     static let windowLabels: [String: String] = [
         "Week": "Uke", "Weekly": "Ukentlig", "Month": "Måned", "Monthly": "Månedlig",
         "Session": "Økt", "5 hours": "5 timer", "Balance": "Saldo", "Credits": "Kreditter",
-        "Plan": "Plan", "Requests": "Forespørsler", "Search": "Søk", "Characters": "Tegn",
+        "Plan": "Plan", "Budget": "Budsjett", "Requests": "Forespørsler", "Search": "Søk", "Characters": "Tegn",
         "Subscription": "Abonnement", "Points": "Poeng", "Billing": "Fakturering",
         "Allowance": "Kvote", "Lifetime spend": "Totalt forbruk", "Key spend": "Nøkkelforbruk",
         "Spend 30d": "Forbruk 30d", "Plan credits": "Plankreditter", "Premium week": "Premium-uke",

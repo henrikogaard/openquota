@@ -471,6 +471,25 @@ final class AppModel {
         return try await mistral.preview(raw)
     }
 
+    private var openCodeConsole: OpenCodeConsoleProvider? {
+        providers.compactMap { $0 as? OpenCodeConsoleProvider }.first
+    }
+
+    /// Asks OpenCode for a sign-in code to show; nothing is saved yet.
+    func beginOpenCodeSignIn() async throws -> OpenCodeConsoleProvider.DeviceLogin {
+        guard !isDemo, let console = openCodeConsole else { throw ProviderError.notLoggedIn }
+        return try await console.beginSignIn()
+    }
+
+    /// Waits for the code to be approved in the browser, then saves the
+    /// sign-in. Returns the workspaces it added.
+    func completeOpenCodeSignIn(_ login: OpenCodeConsoleProvider.DeviceLogin) async throws -> [AccountIdentity] {
+        guard !isDemo, let console = openCodeConsole else { throw ProviderError.notLoggedIn }
+        let accounts = try await console.completeSignIn(login)
+        refreshNow()
+        return accounts
+    }
+
     func replaceCredential(_ secret: String, for account: AccountDescriptor) async throws {
         guard !isDemo else { return }
         if let generic = specProviders().first(where: { $0.id == account.account.providerID }) {
@@ -499,6 +518,8 @@ final class AppModel {
         } else if let mistral = providers.compactMap({ $0 as? MistralProvider }).first,
                   account.account.providerID == "mistral" {
             try mistral.removeCookieHeader(accountID: account.id)
+        } else if account.account.providerID == "opencode-console" {
+            try openCodeConsole?.remove(accountID: account.id)
         }
         Task {
             await store.remove(accountID: account.id)
@@ -517,6 +538,8 @@ final class AppModel {
         } else if let mistral = providers.compactMap({ $0 as? MistralProvider }).first,
                   account.account.providerID == "mistral" {
             try mistral.renameCookieHeader(accountID: account.id, label: label)
+        } else if account.account.providerID == "opencode-console" {
+            try openCodeConsole?.rename(accountID: account.id, label: label)
         }
         refreshNow()
     }
@@ -524,7 +547,7 @@ final class AppModel {
     func savedAccounts() async throws -> [AccountDescriptor] {
         var accounts: [AccountDescriptor] = []
         for provider in providers where provider is GenericProvider || provider is CursorProvider
-            || provider is MistralProvider {
+            || provider is MistralProvider || provider is OpenCodeConsoleProvider {
             accounts += try await provider.accounts()
         }
         return accounts.sorted { ($0.account.providerID, $0.account.label ?? "") < ($1.account.providerID, $1.account.label ?? "") }
@@ -539,7 +562,7 @@ final class AppModel {
     /// Providers found from a local CLI sign-in, as opposed to ones the user added.
     static func isDetectedLocal(_ provider: any UsageProvider) -> Bool {
         !(provider is GenericProvider) && !(provider is ProfiledProvider) && !(provider is CursorProvider)
-            && !(provider is MistralProvider)
+            && !(provider is MistralProvider) && !(provider is OpenCodeConsoleProvider)
             && provider.id != "claude" && provider.id != "codex"
     }
 
@@ -585,6 +608,9 @@ final class AppModel {
         case "mistral":
             L("Mistral's web console session (admin.mistral.ai); unofficial endpoints, not a public API",
               "Nettkonsolløkten til Mistral (admin.mistral.ai); uoffisielle endepunkter, ikke et offentlig API")
+        case "opencode-console":
+            L("OpenCode console sign-in · the routes OpenCode's own CLI uses; not a documented public API",
+              "OpenCode-konsollpålogging · rutene OpenCodes egen CLI bruker; ikke et dokumentert offentlig API")
         case "opencode", "opencode-go":
             L("OpenCode Go workspace usage endpoint · one key per workspace subscription",
               "Bruksendepunkt for OpenCode Go-arbeidsområde · én nøkkel per arbeidsområdeabonnement")
@@ -595,7 +621,7 @@ final class AppModel {
     }
 
     func isExperimentalProvider(_ providerID: String) -> Bool {
-        if providerID == "cursor" || providerID == "mistral" { return true }
+        if providerID == "cursor" || providerID == "mistral" || providerID == "opencode-console" { return true }
         let canonicalID = providerID == "opencode" ? "opencode-go" : providerID
         return specProviders().contains { $0.id == canonicalID && $0.unverified }
     }

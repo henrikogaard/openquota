@@ -20,6 +20,7 @@ public enum Adapters {
             DevinProvider(http: http, files: files),
             CursorProvider(http: http, credentials: credentials),
             MistralProvider(http: http, credentials: credentials),
+            OpenCodeConsoleProvider(http: http, credentials: credentials),
             CopilotProvider(http: http, files: files),
         ]
     }
