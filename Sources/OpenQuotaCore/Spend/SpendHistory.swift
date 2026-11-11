@@ -83,7 +83,7 @@ public struct SpendHistory: Sendable, Equatable {
         }.prefix(limit))
     }
 
-    private func rows(in range: SpendHistoryRange, now: Date, calendar: Calendar) -> [Row] {
+    func rows(in range: SpendHistoryRange, now: Date, calendar: Calendar) -> [Row] {
         guard let start = range.start(now: now, firstDay: firstDay, calendar: calendar) else { return [] }
         let first = Self.dayKey(start, calendar: calendar)
         let last = Self.dayKey(now, calendar: calendar)

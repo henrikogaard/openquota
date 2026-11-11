@@ -5,7 +5,7 @@ import OpenQuotaCore
 
 /// Saved daily token and cost totals over time, by provider and model.
 struct HistoryPane: View {
-    enum Metric: Hashable { case cost, tokens }
+    enum Metric: Hashable { case cost, tokens, footprint }
 
     var model: AppModel
     @State private var range = SpendHistoryRange.days30
@@ -23,9 +23,13 @@ struct HistoryPane: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         controls
-                        summary
-                        chart
-                        models
+                        if metric == .footprint {
+                            FootprintView(history: history, range: range)
+                        } else {
+                            summary
+                            chart
+                            models
+                        }
                         footer
                     }
                     .padding(20)
@@ -78,6 +82,7 @@ struct HistoryPane: View {
             Picker(L("Show", "Vis"), selection: $metric) {
                 Text(L("Cost", "Kostnad")).tag(Metric.cost)
                 Text(L("Tokens", "Tokens")).tag(Metric.tokens)
+                Text(L("Footprint", "Fotavtrykk")).tag(Metric.footprint)
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
         }
