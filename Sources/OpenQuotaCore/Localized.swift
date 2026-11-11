@@ -3,8 +3,24 @@ import Foundation
 /// English/Norwegian copy. Every user-facing string goes through here so the
 /// UI never mixes languages.
 public enum Localized {
+    /// UserDefaults key for the language chosen in Settings: "en", "nb", or
+    /// empty/missing to follow the system.
+    public static let languageKey = "appLanguage"
+
+    /// The language the UI uses: the Settings choice when it is one we
+    /// support, else the first system language.
+    static func language(override: String?, preferred: [String]) -> String {
+        if let override, ["en", "nb"].contains(override) { return override }
+        return preferred.first ?? "en"
+    }
+
+    private static var language: String {
+        language(override: UserDefaults.standard.string(forKey: languageKey),
+                 preferred: Locale.preferredLanguages)
+    }
+
     public static var norwegian: Bool {
-        guard let code = Locale.preferredLanguages.first?.split(separator: "-").first else { return false }
+        guard let code = language.split(separator: "-").first else { return false }
         return ["nb", "nn", "no"].contains(code)
     }
 
@@ -13,9 +29,10 @@ public enum Localized {
     }
 
     /// Locale for user-facing date/relative-time formatting; follows the app's
-    /// resolved language (`-AppleLanguages`-aware), not the region locale.
+    /// resolved language (the Settings choice, else `-AppleLanguages`-aware
+    /// system language), not the region locale.
     public static var appLocale: Locale {
-        Locale(identifier: Locale.preferredLanguages.first ?? "en")
+        Locale(identifier: language)
     }
 
     /// Provider-supplied window labels are English; translate the common ones.

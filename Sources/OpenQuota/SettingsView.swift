@@ -11,19 +11,28 @@ struct SettingsView: View {
     var model: AppModel
     @State private var tab = Tab.accounts
     @State private var adding = false
+    /// Read here so tab titles follow a language change at once; each pane
+    /// is re-made (`.id`) for the same reason.
+    @AppStorage(Localized.languageKey) private var language = ""
 
     var body: some View {
         TabView(selection: $tab) {
             AccountsPane(model: model, adding: $adding)
+                .settingsPane()
+                .id(language)
                 .tabItem { Label(L("Accounts", "Kontoer"), systemImage: "person.crop.circle") }
                 .tag(Tab.accounts)
             HistoryPane(model: model)
+                .settingsPane()
+                .id(language)
                 .tabItem { Label(L("History", "Historikk"), systemImage: "chart.bar.xaxis") }
                 .tag(Tab.history)
             GeneralPane(model: model)
+                .settingsPane()
                 .tabItem { Label(L("General", "Generelt"), systemImage: "gearshape") }
                 .tag(Tab.general)
         }
+        .background(SettingsWindowSizing())
         .onAppear(perform: consumeAddRequest)
         .onChange(of: model.requestsAddAccount) { _, _ in consumeAddRequest() }
     }
@@ -33,6 +42,72 @@ struct SettingsView: View {
         model.requestsAddAccount = false
         tab = .accounts
         if !model.isDemo { adding = true }
+    }
+}
+
+/// Makes the Settings window resizable and remembers the size the user picks.
+/// SwiftUI's Settings scene gives a fixed-size window and only restores its
+/// position, so this is done on the NSWindow.
+struct SettingsWindowSizing: NSViewRepresentable {
+    static let sizeKey = "settingsWindowSize"
+    /// Window size (with title bar) until the user picks one.
+    static let defaultSize = NSSize(width: 900, height: 760)
+    /// Smallest content size; every pane uses it as its minimum.
+    static let minContentSize = NSSize(width: 680, height: 520)
+
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    final class Probe: NSView {
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            guard let window else { return }
+            // After SwiftUI's own first layout, which clears the resizable flag
+            // and would undo an earlier resize.
+            DispatchQueue.main.async { [weak window] in
+                guard let window else { return }
+                window.styleMask.insert(.resizable)
+                // A saved size that is unreadable or below the minimum is ignored.
+                let minimum = window.frameRect(
+                    forContentRect: NSRect(origin: .zero, size: SettingsWindowSizing.minContentSize)).size
+                var size = SettingsWindowSizing.defaultSize
+                if let saved = UserDefaults.standard.string(forKey: SettingsWindowSizing.sizeKey).map(NSSizeFromString),
+                   saved.width.isFinite, saved.height.isFinite,
+                   saved.width >= minimum.width, saved.height >= minimum.height {
+                    size = saved
+                }
+                // Never larger than the screen it is on (e.g. saved on a bigger display).
+                if let visible = window.screen?.visibleFrame.size {
+                    size.width = min(size.width, visible.width)
+                    size.height = min(size.height, visible.height)
+                }
+                // Keep the top-left corner where it is, then keep it on screen.
+                var frame = window.frame
+                frame.origin.y += frame.height - size.height
+                frame.size = size
+                frame = window.constrainFrameRect(frame, to: window.screen)
+                window.setFrame(frame, display: true)
+            }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didEndLiveResizeNotification, object: window, queue: .main
+            ) { note in
+                guard let window = note.object as? NSWindow else { return }
+                UserDefaults.standard.set(NSStringFromSize(window.frame.size), forKey: SettingsWindowSizing.sizeKey)
+            }
+        }
+    }
+}
+
+extension View {
+    /// Every tab shares one flexible size, so switching tabs never resizes
+    /// the window; `SettingsWindowSizing` sets and remembers the window size.
+    func settingsPane() -> some View {
+        frame(minWidth: SettingsWindowSizing.minContentSize.width, maxWidth: .infinity,
+              minHeight: SettingsWindowSizing.minContentSize.height, maxHeight: .infinity)
     }
 }
 
@@ -137,7 +212,6 @@ struct AccountsPane: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(20)
-        .frame(width: 680, height: 440)
         .overlay(alignment: .bottomTrailing) {
             if let errorText {
                 Text(errorText).font(.caption).foregroundStyle(.red).padding(8)
@@ -722,6 +796,7 @@ struct GeneralPane: View {
     @AppStorage("menuBarDisplayStyle") private var storedStyle = ""
     @AppStorage("menuBarAccountID") private var accountID = ""
     @AppStorage("menuBarWindowID") private var windowID = ""
+    @AppStorage(Localized.languageKey) private var language = ""
 
     private var selectedSnapshot: UsageSnapshot? {
         model.snapshots.first { $0.account.id == accountID }
@@ -787,6 +862,18 @@ struct GeneralPane: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Section {
+                Picker(L("Language", "Språk"), selection: $language) {
+                    Text(L("Same as system", "Samme som systemet")).tag("")
+                    Text(verbatim: "English").tag("en")
+                    Text(verbatim: "Norsk bokmål").tag("nb")
+                }
+            } footer: {
+                Text(L("System dialogs, such as the update window, keep the system language.",
+                       "Systemdialoger, som oppdateringsvinduet, beholder systemspråket."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section(L("Updates", "Oppdateringer")) {
                 Toggle(L("Check for updates automatically", "Se etter oppdateringer automatisk"), isOn: $automaticallyChecks)
                     .onChange(of: automaticallyChecks) { _, value in
@@ -799,9 +886,7 @@ struct GeneralPane: View {
             }
         }
         .formStyle(.grouped)
-        .scrollDisabled(true)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
+        .scrollBounceBehavior(.basedOnSize)
         .onAppear { loginItem.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginItem.refresh()

@@ -164,6 +164,18 @@ final class AwaitingReadingTests: XCTestCase {
         XCTAssertFalse(ProviderError.badResponse("billing payload").userMessage.hasPrefix("Bad response"))
     }
 
+    func test_languageOverrideWinsOverSystemLanguage() {
+        XCTAssertEqual(Localized.language(override: "en", preferred: ["nb-NO", "en-US"]), "en")
+        XCTAssertEqual(Localized.language(override: "nb", preferred: ["en-US"]), "nb")
+    }
+
+    func test_languageFollowsSystemWithoutAValidOverride() {
+        XCTAssertEqual(Localized.language(override: nil, preferred: ["nb-NO", "en-US"]), "nb-NO")
+        XCTAssertEqual(Localized.language(override: "", preferred: ["en-GB"]), "en-GB")
+        XCTAssertEqual(Localized.language(override: "fr", preferred: ["nb-NO"]), "nb-NO")
+        XCTAssertEqual(Localized.language(override: nil, preferred: []), "en")
+    }
+
     func test_windowLabelsPassThroughInEnglish() {
         if !Localized.norwegian { XCTAssertEqual(Localized.windowLabel("Week"), "Week") }
         XCTAssertEqual(Localized.windowLabels["Week"], "Uke")
