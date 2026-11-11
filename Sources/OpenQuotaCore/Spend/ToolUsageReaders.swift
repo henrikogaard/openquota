@@ -44,6 +44,11 @@ enum OpenCodeUsage {
     /// keeps the larger.
     static func read(databaseURL: URL, after cursor: Int, afterID: String = "", limit: Int) throws -> Page {
         let database = try SQLiteDatabase(readOnly: databaseURL)
+        // A database without the table (an OpenCode version that keeps messages
+        // elsewhere) has nothing to read; that is not a failure.
+        let hasMessages = try database.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message'").first { $0.int(0) } != nil
+        guard hasMessages else { return Page(events: [], cursor: cursor, cursorID: afterID, more: false) }
         let statement = try database.prepare("""
             SELECT id, time_updated,
                 json_extract(data, '$.time.created'), json_extract(data, '$.modelID'),
