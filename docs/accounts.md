@@ -80,6 +80,18 @@ If Codex is not found, choose the CLI executable, not a credential file.
 OpenAI API keys have separate billing and do not provide ChatGPT subscription
 allowance. Removing a connection retains its Codex-managed home.
 
+## Anthropic API and OpenAI API: spend only
+
+**Anthropic API** and **OpenAI API** are the pay-as-you-go developer
+platforms, separate from Claude and ChatGPT subscriptions. Paste an
+organization **Admin key** (`sk-ant-admin…` or `sk-admin-…`); a normal API key
+is refused by both. The card shows what the organization spent over the last
+30 days. Neither platform has an API for the remaining credit balance, so
+check that on the provider's billing page. Anthropic Admin keys exist only for
+organizations, not individual accounts. An Admin key can also manage the
+organization: create one just for this, and revoke it at the provider if you
+remove the account here. [Technical details](providers.md#api-key-specs-settings--accounts--).
+
 ## OpenCode Go workspace subscriptions
 
 One login can own several workspace subscriptions. Choose **OpenCode Go →

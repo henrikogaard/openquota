@@ -82,6 +82,69 @@ final class DocumentedAPIProviderTests: XCTestCase {
         XCTAssertEqual(devpass.windows[0].percentRemaining, 75)
     }
 
+    func test_anthropicAdminCostReportSumsCentsAsDollars() async throws {
+        let (snapshot, http) = try await refresh(SpecLibrary.anthropicAdmin, body: """
+            {"data":[
+              {"starting_at":"2030-01-01T00:00:00Z","ending_at":"2030-01-02T00:00:00Z",
+               "results":[{"amount":"123.45","currency":"USD"},{"amount":"76.55","currency":"USD"}]},
+              {"starting_at":"2030-01-02T00:00:00Z","ending_at":"2030-01-03T00:00:00Z","results":[]},
+              {"starting_at":"2030-01-03T00:00:00Z","ending_at":"2030-01-04T00:00:00Z",
+               "results":[{"amount":"1000","currency":"USD"}]}],
+             "has_more":false,"next_page":null}
+            """)
+        let window = try XCTUnwrap(snapshot.windows.first)
+        XCTAssertEqual(window.label, "Spend 30d")
+        XCTAssertEqual(try XCTUnwrap(window.used), 12.0, accuracy: 1e-9, "1,200 cents")
+        XCTAssertNil(window.limit, "No cap or balance is reported, so no percentage")
+        XCTAssertNil(window.percentRemaining)
+        XCTAssertNil(snapshot.creditsRemaining)
+        let request = http.requests[0]
+        XCTAssertEqual(request.headers["x-api-key"], "sk-test")
+        XCTAssertNil(request.headers["Authorization"])
+        XCTAssertEqual(request.headers["anthropic-version"], "2026-10-21")
+        let url = request.url.absoluteString
+        XCTAssertTrue(url.hasPrefix("https://api.anthropic.com/v1/organizations/cost_report?"), url)
+        XCTAssertTrue(url.contains("bucket_width=1d") && url.contains("limit=31"), url)
+        XCTAssertNotNil(url.range(of: #"starting_at=\d{4}-\d{2}-\d{2}T00:00:00Z"#, options: .regularExpression), url)
+    }
+
+    func test_anthropicAdminZeroSpendAndRejectedKey() async throws {
+        let (zero, _) = try await refresh(SpecLibrary.anthropicAdmin, body: """
+            {"data":[{"starting_at":"2030-01-01T00:00:00Z","ending_at":"2030-01-02T00:00:00Z",
+                      "results":[{"amount":"0","currency":"USD"}]}],"has_more":false}
+            """)
+        XCTAssertEqual(zero.windows.first?.used, 0)
+        let (empty, _) = try await refresh(SpecLibrary.anthropicAdmin, body: """
+            {"data":[{"starting_at":"2030-01-01T00:00:00Z","ending_at":"2030-01-02T00:00:00Z","results":[]}],
+             "has_more":false}
+            """)
+        XCTAssertEqual(empty.windows.first?.used, 0, "Days with no cost are zero spend, not an error")
+        for body in [#"{"type":"something_else"}"#, #"{"data":[{"type":"not_a_cost_report"}]}"#,
+                     #"{"data":[{"results":[{"currency":"USD"}]}]}"#] {
+            do {
+                _ = try await refresh(SpecLibrary.anthropicAdmin, body: body)
+                XCTFail("Not a cost report, so no amount to show: \(body)")
+            } catch {}
+        }
+    }
+
+    func test_openAIAdminCostsCoverThirtyDailyBuckets() async throws {
+        let (snapshot, http) = try await refresh(SpecLibrary.openAIAdmin, body: """
+            {"object":"page","data":[
+              {"object":"bucket","start_time":1893456000,"end_time":1893542400,
+               "results":[{"object":"organization.costs.result","amount":{"value":0.06,"currency":"usd"}}]},
+              {"object":"bucket","start_time":1893542400,"end_time":1893628800,
+               "results":[{"object":"organization.costs.result","amount":{"value":1.44,"currency":"usd"}}]}],
+             "has_more":false,"next_page":null}
+            """)
+        XCTAssertEqual(try XCTUnwrap(snapshot.windows.first?.used), 1.5, accuracy: 1e-9)
+        XCTAssertNil(snapshot.windows.first?.percentRemaining)
+        let url = http.requests[0].url.absoluteString
+        XCTAssertTrue(url.contains("bucket_width=1d") && url.contains("limit=31"), "The default is 7 buckets: \(url)")
+        XCTAssertNotNil(url.range(of: #"start_time=\d{9,}"#, options: .regularExpression), url)
+        XCTAssertEqual(http.requests[0].headers["Authorization"], "Bearer sk-test")
+    }
+
     func test_opencodeGoPastedKeyMapsWindowsAndBalance() async throws {
         let (snapshot, http) = try await refresh(SpecLibrary.opencodeGo, body: """
             {"usage":{"rolling":{"percent":25,"resetsAt":"2030-01-01T00:00:00Z"},
