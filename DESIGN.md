@@ -34,6 +34,8 @@ macOS 26 Tahoe and later. The popover window keeps the system material; its card
 
 ## Settings (native toolbar tabs)
 
+- All three tabs share one size (680 × 520pt), so switching tabs never resizes
+  the window. General scrolls if its content grows past that.
 - `TabView` toolbar tabs: Accounts, History and General. History shows a range
   picker (30 days, 90 days, 1 year, all), a cost/tokens switch, the total with
   a row per source (Claude CLI, Claude Desktop, each profile folder, Codex;

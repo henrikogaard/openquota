@@ -8,6 +8,10 @@ import OpenQuotaCore
 struct SettingsView: View {
     enum Tab: Hashable { case accounts, history, general }
 
+    /// Every tab uses this size, so switching tabs never resizes the window.
+    static let paneWidth: CGFloat = 680
+    static let paneHeight: CGFloat = 520
+
     var model: AppModel
     @State private var tab = Tab.accounts
     @State private var adding = false
@@ -137,7 +141,7 @@ struct AccountsPane: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(20)
-        .frame(width: 680, height: 440)
+        .frame(width: SettingsView.paneWidth, height: SettingsView.paneHeight)
         .overlay(alignment: .bottomTrailing) {
             if let errorText {
                 Text(errorText).font(.caption).foregroundStyle(.red).padding(8)
@@ -799,9 +803,8 @@ struct GeneralPane: View {
             }
         }
         .formStyle(.grouped)
-        .scrollDisabled(true)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: SettingsView.paneWidth, height: SettingsView.paneHeight)
         .onAppear { loginItem.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginItem.refresh()
