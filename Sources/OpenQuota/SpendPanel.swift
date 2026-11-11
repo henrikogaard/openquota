@@ -6,18 +6,17 @@ struct SpendPanel: View {
     var model: AppModel
     @State private var period = SpendPeriod.today
     @State private var showingConsent = false
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var total: SpendTotal { model.spend.total(period: period) }
     private var hasReading: Bool { model.spend.scannedAt != nil && !model.spend.pricingUnavailable && model.spend.hasLogs }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(SpendCopy.title).font(.system(size: 13, weight: .semibold))
+                Text(SpendCopy.title).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
                 if model.spendScanning { ProgressView().controlSize(.mini) }
-                Text(SpendCopy.thisMac).font(.caption).foregroundStyle(.secondary)
+                Text(SpendCopy.thisMac).font(.system(size: 11)).foregroundStyle(.tertiary)
             }
             if model.spendEnabled {
                 Picker(SpendCopy.period, selection: $period) {
@@ -25,16 +24,17 @@ struct SpendPanel: View {
                         Text(SpendCopy.period(value)).tag(value)
                     }
                 }
-                .pickerStyle(.segmented).labelsHidden()
+                .pickerStyle(.segmented).labelsHidden().controlSize(.small)
                 HStack(alignment: .firstTextBaseline) {
                     Text(hasReading && (total.pricedEvents > 0 || (total.unpricedEvents == 0 && !model.spend.isPartial)) ? money(total.dollars) : "—")
-                        .font(.system(size: 27, weight: .semibold, design: .rounded))
+                        .font(.system(size: 26, weight: .bold))
                         .monospacedDigit()
                     Spacer()
                     Text(SpendCopy.notBill)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if hasReading {
+                    splitBar
                     HStack(spacing: 16) {
                         provider(.claude, name: "Claude", color: .orange)
                         provider(.codex, name: "Codex", color: .green)
@@ -61,21 +61,33 @@ struct SpendPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     Button(SpendCopy.enableShort) { showingConsent = true }
-                        .buttonStyle(.glass)
+                        .controlSize(.small)
                 }
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if reduceTransparency { RoundedRectangle(cornerRadius: Tokens.moduleRadius).fill(.background) }
-        }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Tokens.moduleRadius))
+        .card()
         .alert(SpendCopy.enable, isPresented: $showingConsent) {
             Button(SpendCopy.enableShort) { model.setSpendEnabled(true) }
             Button(SpendCopy.cancel, role: .cancel) {}
         } message: {
             Text(SpendCopy.privacy + "\n\n" + SpendCopy.scope)
+        }
+    }
+
+    /// Claude's and Codex's share of the total, in the same colors as the legend.
+    @ViewBuilder private var splitBar: some View {
+        let claude = model.spend.total(provider: .claude, period: period).dollars
+        let codex = model.spend.total(provider: .codex, period: period).dollars
+        if claude + codex > 0 {
+            GeometryReader { proxy in
+                HStack(spacing: claude > 0 && codex > 0 ? 2 : 0) {
+                    Capsule().fill(.orange)
+                        .frame(width: codex > 0 ? proxy.size.width * claude / (claude + codex) : proxy.size.width)
+                    if codex > 0 { Capsule().fill(.green) }
+                }
+            }
+            .frame(height: 4)
+            .accessibilityHidden(true)
         }
     }
 

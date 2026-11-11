@@ -106,6 +106,43 @@ cost is present, both subtotals are shown. Missing pricing, unreadable files,
 malformed usage records and resource limits produce visible warnings rather
 than a claim that the total is complete.
 
+## Estimated footprint
+
+**Settings → History → Footprint** turns the saved token totals into estimated
+data-centre electricity, CO2e and cooling water. These are **estimates, not
+measurements**: neither Anthropic nor OpenAI publishes energy per token, so
+every figure is shown with a low–high range. Nothing is fetched; the factors
+are fixed in `Sources/OpenQuotaCore/Spend/Footprint.swift` and change only with
+an app update.
+
+| Factor | Value | Basis |
+|---|---|---|
+| Electricity per 1,000 output tokens, standard-size model, data-centre overhead included | 0.3 / 1.0 / 3.0 Wh (low / central / high) | Low: Google's measured median Gemini text prompt, 0.24 Wh ([2025](https://cloud.google.com/blog/products/infrastructure/measuring-the-environmental-impact-of-ai-inference)). Central: Epoch AI's method scaled to Claude by [Couch (2026)](https://simonpcouch.com/blog/2026-01-20-cc-impact/), 0.99 Wh; Epoch's own GPT-4o figure is about 0.6 ([2025](https://epoch.ai/gradient-updates/how-much-energy-does-chatgpt-use)). High: a fit to Jegham et al. ([arXiv 2505.09598](https://arxiv.org/abs/2505.09598)) |
+| Input token against output token | 0.2 | **Assumption**, taken from the API price ratio. No measured ratio exists for hosted models |
+| Cache write against input | 1.25 | **Assumption**, from the price multiplier |
+| Cache read against input | 0.1 | **Assumption**, from the price discount. No published energy measurement |
+| Model size | small 0.25×, standard 1×, large 2× | **Assumption**. Read from whole words in the model name: haiku, mini, nano, flash, spark or small is small; opus, fable, mythos or pro is large; everything else, unknown names included, is standard |
+| On-site cooling water | 0.15 / 0.65 / 1.15 mL per Wh | AWS 2024 (0.15 L/kWh) to Google 2024 (1.15 L/kWh); the central value is their midpoint. Water used to generate the electricity is not included |
+| Grid carbon intensity, g CO2e/kWh | United States 384, World 458, EU 210, Germany 330, United Kingdom 217, France 41, Sweden 35, Norway 28 | 2025, Ember: countries via [Our World in Data](https://ourworldindata.org/grapher/carbon-intensity-electricity), World and EU from Ember's Global Electricity Review 2026 |
+
+- Energy = (output + 0.2 × (input + 1.25 × cache write + 0.1 × cache read))
+  ÷ 1,000 × size multiplier × Wh factor. Codex reasoning tokens are already
+  part of output.
+- **Saved by caching** is the central estimate of what the cache-read tokens
+  would have cost as plain input, minus what they cost as cache reads. It
+  rests entirely on the assumed 0.1 factor.
+- CO2e multiplies the electricity by the grid you pick. The default is the
+  United States, where most of this traffic is served. Your own grid is not
+  the data centre's grid, and providers' clean-power purchases are unknown.
+- The everyday comparisons use a 100 W TV, a 50 W laptop, a 15 Wh phone charge
+  and a 10 W LED bulb, on the central estimate.
+- Training, hardware manufacturing, networks and your own Mac are not included.
+- Unlike cost, the footprint counts every model with tokens, priced or not.
+
+`swift test --filter FootprintTests` covers the token weights, size classes,
+ranges, grid and water arithmetic, and the History totals, buckets and
+per-model rows.
+
 ## Resource bounds
 
 - One actor performs scans away from the UI executor, at most once every five

@@ -55,12 +55,15 @@ public struct ProviderSpec: Codable, Sendable {
         public var resetsAt: String?
         public var resetsAtFormat: String?
         public var unit: String?
+        /// Multiplies used, limit and remaining, e.g. 0.01 for amounts in cents.
+        public var scale: Double?
 
         public init(label: String, kind: UsageWindow.Kind? = nil, url: String? = nil,
                     method: String? = nil, body: String? = nil,
                     headers: [String: String]? = nil,
                     used: String? = nil, limit: String? = nil, remaining: String? = nil,
-                    resetsAt: String? = nil, resetsAtFormat: String? = nil, unit: String? = nil) {
+                    resetsAt: String? = nil, resetsAtFormat: String? = nil, unit: String? = nil,
+                    scale: Double? = nil) {
             self.label = label
             self.kind = kind
             self.url = url
@@ -73,13 +76,15 @@ public struct ProviderSpec: Codable, Sendable {
             self.resetsAt = resetsAt
             self.resetsAtFormat = resetsAtFormat
             self.unit = unit
+            self.scale = scale
         }
     }
 
     public var id: String
     public var displayName: String
     /// Primary fetch URL. May contain {now}, {today}, {d7}, {d30} templates —
-    /// replaced with epoch seconds (now, start-of-today UTC, now−7d, now−30d).
+    /// replaced with epoch seconds (now, start-of-today UTC, now−7d, now−30d) —
+    /// and {d30iso}, the start of the UTC day 30 days ago as RFC 3339.
     public var url: String
     /// HTTP method for the primary fetch (default GET).
     public var method: String?
@@ -169,6 +174,17 @@ public struct ProviderSpec: Codable, Sendable {
 ///                `$.limits[type=TOKENS_LIMIT]`)
 public enum JSONPath {
     public static func value(_ root: Any?, at path: String) -> Any? {
+        resolve(root, at: path).value
+    }
+
+    /// `dropped` is true when a key applied across a flattened array was
+    /// missing from at least one element.
+    private static func resolve(_ root: Any?, at path: String) -> (value: Any?, dropped: Bool) {
+        var dropped = false
+        return (walk(root, at: path, dropped: &dropped), dropped)
+    }
+
+    private static func walk(_ root: Any?, at path: String, dropped: inout Bool) -> Any? {
         var current = root
         var path = path
         if path.hasPrefix("$") { path = String(path.dropFirst()) }
@@ -191,8 +207,9 @@ public enum JSONPath {
                     current = next
                 } else if let array = current as? [Any] {
                     // Key access applied to a wildcard-flattened array.
-                    current = array.map { ($0 as? [String: Any])?[part] as Any? }
-                        .compactMap { $0 }
+                    let found = array.compactMap { ($0 as? [String: Any])?[part] }
+                    if found.count != array.count { dropped = true }
+                    current = found
                 } else {
                     return nil
                 }
@@ -232,8 +249,14 @@ public enum JSONPath {
 
     /// Sum of numeric leaves reachable by `path` — the path may end in a
     /// wildcard-flattened array (e.g. `$.data[*].results[*].amount.value`).
+    /// An array that resolves but is empty sums to zero (a report with no
+    /// entries). A path that does not resolve, an array with no numbers in
+    /// it, or an empty result because elements lacked the expected fields is
+    /// nil, so an unrecognized body never reads as zero.
     public static func sum(_ root: Any?, at path: String?) -> Double? {
-        guard let path, let raw = value(root, at: path) else { return nil }
+        guard let path else { return nil }
+        let (resolved, dropped) = resolve(root, at: path)
+        guard let raw = resolved else { return nil }
         if let array = raw as? [Any] {
             var total = 0.0
             var found = false
@@ -241,7 +264,7 @@ public enum JSONPath {
                 if let n = element as? NSNumber { total += n.doubleValue; found = true }
                 else if let s = element as? String, let d = Double(s) { total += d; found = true }
             }
-            return found && total.isFinite ? total : nil
+            return (found || (array.isEmpty && !dropped)) && total.isFinite ? total : nil
         }
         if let n = raw as? NSNumber, n.doubleValue.isFinite { return n.doubleValue }
         if let s = raw as? String, let n = Double(s), n.isFinite { return n }

@@ -198,12 +198,14 @@ public enum SpecLibrary {
     )
 
     /// OpenAI Admin API — organization costs rolled up over 30 days. Requires
-    /// an org admin key. Sums amount.value across buckets — the `sum:` path
-    /// exists for exactly this. Unverified.
+    /// an org admin key (`sk-admin-…`). Sums amount.value across daily buckets
+    /// — the `sum:` path exists for exactly this. The endpoint returns 7
+    /// buckets unless `limit` says otherwise. OpenAI documents no endpoint for
+    /// the remaining credit balance, so this is spend only. Unverified.
     public static let openAIAdmin = ProviderSpec(
         id: "openai",
-        displayName: "OpenAI",
-        url: "https://api.openai.com/v1/organization/costs?start_time={d30}&group_by=line_item",
+        displayName: "OpenAI API",
+        url: "https://api.openai.com/v1/organization/costs?start_time={d30}&bucket_width=1d&limit=31",
         dashboardURL: "https://platform.openai.com/usage",
         unverified: true,
         windows: [
@@ -396,6 +398,26 @@ public enum SpecLibrary {
                         resetsAt: "$.next_quota_reset", unit: "credits")]
     )
 
+    /// Anthropic Admin API — organization cost report over 30 days. Requires
+    /// an Admin key (`sk-ant-admin…`), which only organizations can create.
+    /// `amount` is a decimal string in cents. Anthropic documents no endpoint
+    /// for the remaining credit balance, so this is spend only. Unverified.
+    public static let anthropicAdmin = ProviderSpec(
+        id: "anthropic",
+        displayName: "Anthropic API",
+        url: "https://api.anthropic.com/v1/organizations/cost_report?starting_at={d30iso}&bucket_width=1d&limit=31",
+        auth: .apiKeyHeader,
+        headers: ["anthropic-version": "2026-10-21"],
+        dashboardURL: "https://platform.claude.com/settings/billing",
+        unverified: true,
+        windows: [
+            .init(
+                label: "Spend 30d", kind: .credits,
+                used: "sum:$.data[*].results[*].amount", unit: "$", scale: 0.01
+            )
+        ]
+    )
+
     /// OpenCode Go — the same key OpenCode stores as `opencode-go` in auth.json,
     /// pasted directly so several subscriptions can be tracked side by side.
     public static let opencodeGo = ProviderSpec(
@@ -424,7 +446,7 @@ public enum SpecLibrary {
         BuiltinProviders.requesty,
         opencodeGo,
         deepseek, moonshot, zai, elevenLabs, minimax, synthetic,
-        kilo, venice, openAIAdmin, warp, perplexity,
+        kilo, venice, openAIAdmin, anthropicAdmin, warp, perplexity,
         clinePass, vercelGateway, atlasCloud, poe, zenMux, devPass, v0, codebuff
     ]
 }
