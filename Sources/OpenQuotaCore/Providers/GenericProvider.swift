@@ -267,7 +267,7 @@ public struct GenericProvider: UsageProvider {
         }
         let response = try await http.send(request)
         let data = try requireOK(response)
-        guard let json = try? JSONSerialization.jsonObject(with: data) else {
+        guard let json = LenientJSON.object(with: data) else {
             throw ProviderError.badResponse("not JSON")
         }
         return json
