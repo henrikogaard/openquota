@@ -131,7 +131,7 @@ struct HistoryPane: View {
             let palette = switch row.provider {
             case .claude: claude
             case .codex: codex
-            case .opencode, .vibe, .copilot: [Self.color(row.provider)]
+            case .opencode, .vibe, .copilot, .antigravity: [Self.color(row.provider)]
             }
             let index = used[row.provider, default: 0]
             colors[row.source] = palette[index % palette.count]
@@ -248,6 +248,7 @@ struct HistoryPane: View {
         case .opencode: "OpenCode"
         case .vibe: "Vibe"
         case .copilot: "Copilot"
+        case .antigravity: "Antigravity"
         }
     }
 
@@ -258,6 +259,7 @@ struct HistoryPane: View {
         case .opencode: .blue
         case .vibe: .purple
         case .copilot: .gray
+        case .antigravity: .indigo
         }
     }
 }

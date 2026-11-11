@@ -253,6 +253,230 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertEqual(fixed.total(provider: .opencode, period: .today, now: now, calendar: calendar).events, 1)
     }
 
+    // MARK: Antigravity
+
+    /// A tiny protobuf writer for test data.
+    private enum Proto {
+        static func varint(_ value: UInt64) -> Data {
+            var value = value
+            var data = Data()
+            repeat {
+                let byte = UInt8(value & 0x7F)
+                value >>= 7
+                data.append(value == 0 ? byte : byte | 0x80)
+            } while value != 0
+            return data
+        }
+        static func number(_ field: Int, _ value: UInt64) -> Data { varint(UInt64(field << 3)) + varint(value) }
+        static func bytes(_ field: Int, _ value: Data) -> Data {
+            varint(UInt64(field << 3 | 2)) + varint(UInt64(value.count)) + value
+        }
+        static func text(_ field: Int, _ value: String) -> Data { bytes(field, Data(value.utf8)) }
+    }
+
+    /// The usage record as it sits in both a generation and its step.
+    private func antigravityCounts(id: String, input: UInt64 = 1_000, output: UInt64 = 60, cached: UInt64 = 5_000) -> Data {
+        Proto.number(1, 1_417) + Proto.number(2, input) + Proto.number(3, output) + Proto.number(5, cached)
+            + Proto.text(7, id) + Proto.number(9, 20) + Proto.number(10, output - 20)
+    }
+
+    private func antigravityGeneration(_ counts: Data, model: String? = "known") -> Data {
+        // Text before, a fixed-width number and a repeat of the counts after: all passed over.
+        var generation = Proto.text(2, "a prompt that is never kept") + Proto.bytes(4, counts)
+            + Proto.varint(UInt64(11 << 3 | 1)) + Data(repeating: 7, count: 8)
+            + Proto.bytes(17, Proto.bytes(2, counts))
+        if let model { generation += Proto.text(19, model) }
+        return Proto.bytes(1, generation) + Proto.text(4, "conversation")
+    }
+
+    private func antigravityStep(_ counts: Data?, seconds: UInt64) -> Data {
+        var step = Proto.bytes(1, Proto.number(1, seconds) + Proto.number(2, 500_000_000))
+        if let counts { step += Proto.bytes(9, counts) }
+        return step
+    }
+
+    @discardableResult
+    private func antigravityDatabase(at url: URL, generations: [Data], steps: [Data]) throws -> SQLiteDatabase {
+        let database = try SQLiteDatabase(url: url)
+        try database.execute("""
+            CREATE TABLE IF NOT EXISTS gen_metadata(idx INTEGER PRIMARY KEY, data BLOB, size INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS steps(
+                idx INTEGER PRIMARY KEY, step_type INTEGER NOT NULL DEFAULT 0, metadata BLOB, step_payload BLOB);
+            DELETE FROM gen_metadata; DELETE FROM steps;
+            """)
+        func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
+        for (index, data) in generations.enumerated() {
+            try database.execute("INSERT INTO gen_metadata VALUES (\(index), x'\(hex(data))', \(data.count))")
+        }
+        for (index, data) in steps.enumerated() {
+            try database.execute("INSERT INTO steps VALUES (\(index), 15, x'\(hex(data))', x'\(hex(Data("secret".utf8)))')")
+        }
+        return database
+    }
+
+    func testAntigravityReadsAClosedConversationWithoutSideFilesAndALiveOneThroughItsLog() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("c.db")
+        let counts = antigravityCounts(id: "r1")
+        let noon = UInt64(noonMillis / 1_000)
+        // Closed the way the tool closes it: the write-ahead log is folded in and gone.
+        try antigravityDatabase(at: url, generations: [antigravityGeneration(counts)],
+                                steps: [antigravityStep(counts, seconds: noon)])
+            .execute("PRAGMA journal_mode=DELETE")
+        // Apple's SQLite can leave the shared-memory file behind; the tool's doesn't.
+        try? FileManager.default.removeItem(atPath: url.path + "-shm")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["c.db"])
+        XCTAssertEqual(try AntigravityUsage.read(databaseURL: url, limit: 10).events.count, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["c.db"])
+
+        // Still open in the tool: the newest rows are in the write-ahead log.
+        let more = antigravityCounts(id: "r2")
+        let writer = try antigravityDatabase(
+            at: url, generations: [antigravityGeneration(counts), antigravityGeneration(more)],
+            steps: [antigravityStep(counts, seconds: noon), antigravityStep(more, seconds: noon + 1)])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertEqual(try AntigravityUsage.read(databaseURL: url, limit: 10).events.count, 2)
+        _ = writer
+    }
+
+    func testProtobufReaderFindsFieldsAndSurvivesGarbage() {
+        let message = ProtobufMessage(
+            Proto.number(1, 300) + Proto.varint(UInt64(2 << 3 | 5)) + Data(repeating: 1, count: 4)
+                + Proto.bytes(3, Proto.number(7, 9)) + Proto.number(1, 4))
+        XCTAssertEqual(message.varint(1), 300)
+        XCTAssertEqual(message.message(3)?.varint(7), 9)
+        XCTAssertEqual(message.bytes(3), Proto.number(7, 9))
+        XCTAssertNil(message.varint(3))
+        XCTAssertNil(message.bytes(1))
+        XCTAssertNil(message.varint(8))
+
+        // A length past the end, an endless varint, a cut-off fixed number, a group, field zero.
+        let broken: [Data] = [
+            Data([0x0A, 0x7F, 0x01]), Data(repeating: 0xFF, count: 40), Data([0x09, 0x01, 0x02]),
+            Data([0x0B, 0x00]), Data([0x00, 0x01]), Data([0x0A]), Data(),
+        ]
+        for data in broken {
+            XCTAssertNil(ProtobufMessage(data).varint(1))
+            XCTAssertNil(ProtobufMessage(data).bytes(1))
+            XCTAssertNil(ProtobufMessage(data).message(1)?.message(4))
+        }
+        // A slice of a larger buffer reads the same as a copy.
+        let padded = Data([0xFF, 0xFF]) + Proto.bytes(1, Proto.number(2, 77))
+        XCTAssertEqual(ProtobufMessage(padded.dropFirst(2)).message(1)?.varint(2), 77)
+    }
+
+    func testAntigravityReadsCountsOncePerGenerationWithTheStepTime() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("c.db")
+        let noon = UInt64(noonMillis / 1_000)
+        let first = antigravityCounts(id: "r1")
+        let second = antigravityCounts(id: "r2", input: 10, output: 30, cached: 0)
+        let late = antigravityCounts(id: "r3", input: 7, output: 21, cached: 0)
+        try antigravityDatabase(at: url, generations: [
+            antigravityGeneration(first),
+            // No counts, no usable counts, garbage: all passed over.
+            Proto.bytes(1, Proto.bytes(4, Proto.number(1, 1_417))),
+            antigravityGeneration(Proto.number(2, UInt64.max) + Proto.text(7, "big")),
+            Data([0x0A, 0x7F, 0x01]),
+            antigravityGeneration(second, model: "a model name with spaces"),
+            // Its step isn't written yet: it takes the time of the one before.
+            antigravityGeneration(late, model: nil),
+        ], steps: [
+            antigravityStep(nil, seconds: noon - 50),
+            antigravityStep(first, seconds: noon),
+            // A second step repeating the same response: the first time is kept.
+            antigravityStep(first, seconds: noon + 5),
+            antigravityStep(second, seconds: noon + 90_000),
+            Data([0xFF]),
+        ])
+
+        let usage = try AntigravityUsage.read(databaseURL: url, limit: 100)
+        XCTAssertFalse(usage.truncated)
+        XCTAssertEqual(usage.events.count, 3)
+        let event = usage.events[0]
+        XCTAssertEqual(event.provider, .antigravity)
+        XCTAssertEqual(event.model, "known")
+        XCTAssertEqual(event.tokens.input, 1_000)
+        XCTAssertEqual(event.tokens.cacheRead, 5_000)
+        // Thinking (9) and response (10) are parts of the output (3), not extra.
+        XCTAssertEqual(event.tokens.output, 60)
+        XCTAssertEqual(event.tokens.cacheWrite5m, 0)
+        XCTAssertNil(event.recordedUSD)
+        XCTAssertEqual(event.timestamp.timeIntervalSince1970, Double(noon) + 0.5, accuracy: 0.001)
+        // Anything not shaped like a model id is dropped, never stored.
+        XCTAssertEqual(usage.events[1].model, "")
+        XCTAssertEqual(usage.events[1].timestamp.timeIntervalSince1970, Double(noon) + 90_000.5, accuracy: 0.001)
+        XCTAssertEqual(usage.events[2].model, "")
+        XCTAssertEqual(usage.events[2].timestamp, usage.events[1].timestamp)
+        XCTAssertEqual(Set(usage.events.map(\.identity)).count, 3)
+
+        XCTAssertTrue(try AntigravityUsage.read(databaseURL: url, limit: 2).truncated)
+        XCTAssertFalse(try AntigravityUsage.read(databaseURL: url, limit: 6).truncated)
+
+        // Out of budget among the generations: what was read so far, marked as cut short.
+        let stepBytes = try AntigravityUsage.read(databaseURL: url, limit: 0).bytes
+        let short = try AntigravityUsage.read(databaseURL: url, limit: 100, byteBudget: stepBytes + 1)
+        XCTAssertTrue(short.exhausted)
+        XCTAssertEqual(short.events.count, 1)
+        var calls = 0
+        let stopped = try AntigravityUsage.read(databaseURL: url, limit: 100, shouldStop: { calls += 1; return calls > 6 })
+        XCTAssertTrue(stopped.exhausted)
+        XCTAssertEqual(stopped.events.count, 1)
+        // Out of budget among the steps: nothing can be dated, so nothing is returned.
+        XCTAssertThrowsError(try AntigravityUsage.read(databaseURL: url, limit: 100, byteBudget: 1))
+        XCTAssertThrowsError(try AntigravityUsage.read(databaseURL: url, limit: 100, shouldStop: { true }))
+    }
+
+    func testAntigravityIgnoresOtherDatabasesAndThrowsOnUnreadableOnes() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let other = root.appendingPathComponent("other.db")
+        try SQLiteDatabase(url: other).execute("CREATE TABLE notes(id INTEGER)")
+        XCTAssertTrue(try AntigravityUsage.read(databaseURL: other, limit: 10).events.isEmpty)
+        let junk = root.appendingPathComponent("junk.db")
+        try Data(repeating: 0x41, count: 4_096).write(to: junk)
+        XCTAssertThrowsError(try AntigravityUsage.read(databaseURL: junk, limit: 10))
+    }
+
+    func testScannerRereadsAnAntigravityConversationWithoutCountingTwice() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let conversations = root.appendingPathComponent("antigravity/conversations")
+        try FileManager.default.createDirectory(at: conversations, withIntermediateDirectories: true)
+        let url = conversations.appendingPathComponent("c1.db")
+        let noon = UInt64(noonMillis / 1_000)
+        let first = antigravityCounts(id: "r1")
+        try antigravityDatabase(at: url, generations: [antigravityGeneration(first)],
+                                steps: [antigravityStep(first, seconds: noon)])
+        // The same conversation copied to a second file counts once.
+        try antigravityDatabase(at: conversations.appendingPathComponent("copy.db"),
+                                generations: [antigravityGeneration(first)],
+                                steps: [antigravityStep(first, seconds: noon)])
+        try Data("{}".utf8).write(to: conversations.appendingPathComponent("notes.json"))
+
+        let source = SpendLogSource(provider: .antigravity, directory: conversations)
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let one = await scanner.scan(sources: [source], now: now, calendar: calendar)
+        XCTAssertFalse(one.isPartial)
+        let total = one.total(provider: .antigravity, period: .today, now: now, calendar: calendar)
+        XCTAssertEqual(total.events, 1)
+        XCTAssertEqual(total.tokens, 6_060)
+        XCTAssertEqual(total.pricedEvents, 1)
+        XCTAssertEqual(one.days.first?.source, "antigravity:\(source.folder):")
+
+        // The conversation goes on: the whole database is read again, replacing what it had.
+        let second = antigravityCounts(id: "r2", input: 10, output: 30, cached: 0)
+        try antigravityDatabase(at: url, generations: [antigravityGeneration(first), antigravityGeneration(second)],
+                                steps: [antigravityStep(first, seconds: noon), antigravityStep(second, seconds: noon + 60)])
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(60)], ofItemAtPath: url.path)
+        let two = await scanner.scan(sources: [source], now: now, calendar: calendar)
+        let grown = two.total(provider: .antigravity, period: .today, now: now, calendar: calendar)
+        XCTAssertEqual(grown.events, 2)
+        XCTAssertEqual(grown.tokens, 6_100)
+    }
+
     // MARK: Scanner
 
     func testScannerReadsAllThreeToolsAndCountsEachOnce() async throws {
@@ -346,6 +570,8 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertEqual(directory(.opencode), ["/Users/me/.local/share/opencode"])
         XCTAssertEqual(directory(.vibe), ["/Users/me/.vibe/logs/session"])
         XCTAssertEqual(directory(.copilot), ["/Users/me/.copilot/session-state"])
+        XCTAssertEqual(directory(.antigravity), ["/Users/me/.gemini/antigravity/conversations"])
+        XCTAssertEqual(sources.first { $0.provider == .antigravity }?.folder, "/Users/me/.gemini/antigravity")
         XCTAssertEqual(sources.first { $0.provider == .vibe }?.folder, "/Users/me/.vibe")
         XCTAssertEqual(sources.first { $0.provider == .copilot }?.folder, "/Users/me/.copilot")
     }

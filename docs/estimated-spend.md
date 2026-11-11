@@ -23,6 +23,11 @@ invoice or convert subscription percentages into dollars.
   `~/.copilot/session-state/*/events.jsonl` (or `COPILOT_HOME`). Usage shows
   up when a session shuts down, on that day; a session still running is not
   counted yet.
+- Google Antigravity (**experimental, best guess**): one entry per model
+  generation in each conversation database under
+  `~/.gemini/antigravity/conversations/*.db`, opened read-only. Antigravity
+  publishes no format for these; see [Antigravity](#antigravity-experimental)
+  for what is confirmed and what is inferred.
 - Today, Yesterday, or 30 calendar days including today, in the Mac's time zone,
   in the popover; 30 days, 90 days, 1 year or all saved history under
   **Settings → History**.
@@ -39,6 +44,11 @@ The database is opened read-only and never changed; SQLite may create
 its own `-shm`/`-wal` side files next to it if they are missing.
 A database that is locked or can't be read is not remembered as read: the
 total is marked partial and it is tried again on the next pass.
+An Antigravity record is a binary blob that also holds conversation text.
+The reader walks it by field number and takes out only the token counts, the
+model id, the response id and the step time; text fields are skipped by
+length and never read as text, logged or stored. A value in the model field that
+is not shaped like a model id is dropped.
 
 ## Saved history
 
@@ -51,7 +61,8 @@ keeps what it reads in a small SQLite database,
   the new lines are read; a large one is read across several passes. A Codex
   log is reread in full when it changes, because its totals are cumulative.
   A Copilot log is read on from where it stopped, with the totals already
-  counted remembered; a Vibe session file is reread in full.
+  counted remembered; a Vibe session file and an Antigravity conversation
+  database are reread in full.
 - **Requests:** per-request token counts, model, timestamp, request identity
   and source for the last 40 days, used to drop duplicates across files (a
   resumed Claude session copies earlier messages into a new file). Older
@@ -130,6 +141,8 @@ They represent the bundled API rates, even for older requests.
    and each differing total is counted, so such a session may be overcounted.
    A Vibe session resumed more than 40 days after it started keeps the total
    it had then; the later usage is not added.
+   An Antigravity generation is identified by its response id, so a
+   conversation database copied elsewhere counts once.
 6. Codex uses per-turn counts where supplied, otherwise differences between
    cumulative snapshots. Repeated snapshots are ignored. Child-session replay
    seeds the cumulative baseline but is not charged again; a live task-start
@@ -187,6 +200,7 @@ per-model rows.
   stay valid.
 - Only regular `.jsonl` files under the selected Claude and Codex log roots,
   `events.jsonl` under Copilot's, `meta.json` under Vibe's (16 MiB at most),
+  `.db` files under Antigravity's conversations folder,
   and OpenCode's one database are read; symlinks inside them are skipped.
   OpenCode's folder is never walked. Credentials, settings and other files
   are ignored.
@@ -199,11 +213,57 @@ per-model rows.
 
 The demo displays fixed synthetic values and does not read local logs.
 
+## Antigravity (experimental)
+
+Antigravity documents none of this. The mapping below was worked out from
+field numbers and integer values in seven real conversation databases (800
+generation records) on one Mac, in November 2026. It can break without
+notice when Antigravity changes its storage.
+
+Each conversation is a SQLite database with a `gen_metadata` table (one
+protobuf record per model generation) and a `steps` table. Paths are protobuf
+field numbers.
+
+| What | Where | Status |
+| --- | --- | --- |
+| Input tokens, without the cached part | `gen_metadata.data` 1.4.2 | Inferred from size and from Windsurf's similar usage record |
+| Output tokens, thinking included | 1.4.3 | Inferred; 1.4.9 + 1.4.10 = 1.4.3 in 790 of 790 records |
+| Cache-read tokens | 1.4.5 | Inferred; present in 698 of 790, far larger than 1.4.2 |
+| Cache-write tokens | not read | Field 4 was never present, so nothing is counted |
+| Model id | 1.19 | Confirmed: one name per model number (1.3) in all records |
+| Response id | 1.4.7 | Confirmed: unique per record, repeated in exactly one step |
+| Time | `steps.metadata` 1.1 (seconds) and 1.2 (nanoseconds) of the step whose 9.7 is that response id | Confirmed for all 792 records that have an id; the step's field 9 is byte-for-byte the record's 1.4 |
+| Second copy of the counts | 1.17.2 | Confirmed identical to 1.4 in 792 of 792; not read, so nothing is counted twice |
+
+Known limits:
+
+- Whether 1.4.2 really excludes cached tokens, and whether 1.4.5 is cache
+  reads rather than something else, is **not confirmed**. If wrong, token
+  totals and estimates are off.
+- Antigravity's model ids (`gemini-4-argon` and the like) are internal names.
+  One with no bundled price is counted as unpriced, never priced by guess.
+- A generation whose step is not written yet takes the time of the
+  generation before it; the first one in a conversation is left out until
+  its step exists.
+- A record whose counts are missing, zero or above one billion is skipped.
+- A closed conversation (no `-wal` file) is read as a plain file, so no side
+  files are created next to it. One that Antigravity has open is read through
+  its write-ahead log; SQLite may then create a missing `-shm` file.
+- A database that is busy or unreadable keeps the totals read before, shows
+  **Partial total**, and is tried again on the next pass.
+- Reading stops at the pass's byte and time budget. A conversation cut short
+  by what other files used is read again on the next pass; one too large for
+  a whole pass keeps what was read and shows **Partial total**.
+- No environment variable for another location is known, so only the default
+  folder is read.
+
 ## Verification
 
-`swift test --filter ToolUsageTests` covers the OpenCode, Vibe and Copilot
-readers, their token splits, the read-only database open, re-reading a grown
-session or updated message without double counting, and default locations.
+`swift test --filter ToolUsageTests` covers the OpenCode, Vibe, Copilot and
+Antigravity readers, their token splits, the read-only database open,
+re-reading a grown session or updated message without double counting, the
+protobuf reader on malformed bytes, and default locations. The Antigravity
+tests use synthetic records only.
 
 `swift test --filter SpendTests` covers token arithmetic, cache bucket splitting,
 long-context and fast multipliers, bundled model resolution, unknown models,
