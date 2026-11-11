@@ -368,4 +368,5 @@ first-match filter, and a `sum:` prefix that totals numeric leaves
 GET; set `method`/`body`/`headers` for POST/GraphQL endpoints. `{d30iso}` is
 the start of the UTC day 30 days ago as RFC 3339. A window's `scale`
 multiplies its numbers (`0.01` for amounts in cents). A `sum:` over an array
-that resolves but is empty is zero.
+that resolves but is empty is zero; elements missing the expected fields
+make it unresolved, not zero.

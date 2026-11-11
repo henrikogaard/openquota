@@ -119,10 +119,13 @@ final class DocumentedAPIProviderTests: XCTestCase {
              "has_more":false}
             """)
         XCTAssertEqual(empty.windows.first?.used, 0, "Days with no cost are zero spend, not an error")
-        do {
-            _ = try await refresh(SpecLibrary.anthropicAdmin, body: #"{"type":"something_else"}"#)
-            XCTFail("A body with no report has no amount to show")
-        } catch {}
+        for body in [#"{"type":"something_else"}"#, #"{"data":[{"type":"not_a_cost_report"}]}"#,
+                     #"{"data":[{"results":[{"currency":"USD"}]}]}"#] {
+            do {
+                _ = try await refresh(SpecLibrary.anthropicAdmin, body: body)
+                XCTFail("Not a cost report, so no amount to show: \(body)")
+            } catch {}
+        }
     }
 
     func test_openAIAdminCostsCoverThirtyDailyBuckets() async throws {
