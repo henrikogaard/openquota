@@ -420,7 +420,7 @@ struct AccountDetail: View {
                         .disabled(model.refreshing || model.isDemo)
                 }
             }
-            if case .saved(let account) = item.kind {
+            if case .saved(let account) = item.kind, account.account.providerID != "opencode-console" {
                 Section(L("Credential", "Påloggingsinformasjon")) {
                     Button(L("Replace Credential…", "Bytt påloggingsinformasjon…")) {
                         replacingAccount = account
@@ -532,6 +532,8 @@ struct AccountDetail: View {
         case .saved(let account):
             account.account.providerID == "cursor"
                 ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen")
+                : account.account.providerID == "opencode-console"
+                ? L("Sign-in session in Keychain", "Påloggingsøkt i nøkkelringen")
                 : account.account.providerID == "mistral"
                     ? L("Session cookie in Keychain", "Øktcookie i nøkkelringen")
                     : L("API key in Keychain", "API-nøkkel i nøkkelringen")
@@ -554,6 +556,9 @@ struct AccountDetail: View {
         case .saved(let account) where account.account.providerID == "mistral":
             L("Experimental: the web console's unofficial endpoints. Shows the included monthly usage and separate Vibe allowance as used percentages, plus any pay-as-you-go credits. Sessions expire roughly monthly — paste a fresh Cookie header then.",
               "Eksperimentell: nettkonsollens uoffisielle endepunkter. Viser inkludert månedlig bruk og separat Vibe-kvote som brukt prosent, pluss eventuelle pay-as-you-go-kreditter. Økter utløper omtrent månedlig — lim inn en fersk Cookie-overskrift da.")
+        case .saved(let account) where account.account.providerID == "opencode-console":
+            L("Experimental: OpenQuota's own OpenCode console sign-in, separate from the OpenCode CLI's. Shows this workspace's Go limits and spend budgets; the prepaid balance is not available. If the card shows a sign-in error, sign in again under Add Account → OpenCode Go. Removing the last workspace of a sign-in deletes its saved session.",
+              "Eksperimentell: OpenQuotas egen pålogging til OpenCode-konsollen, atskilt fra OpenCode CLI. Viser Go-grensene og forbruksbudsjettene til dette arbeidsområdet; forhåndsbetalt saldo er ikke tilgjengelig. Hvis kortet viser en påloggingsfeil, logg inn på nytt under Legg til konto → OpenCode Go. Når du fjerner det siste arbeidsområdet i en pålogging, slettes den lagrede økten.")
         case .saved(let account) where account.account.providerID == "requesty":
             L("Balance is shared by every key in the organization.", "Saldoen deles av alle nøklene i organisasjonen.")
         case .saved(let account) where model.isExperimentalProvider(account.account.providerID):

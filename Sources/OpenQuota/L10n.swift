@@ -11,6 +11,9 @@ func providerError(_ message: String, providerID: String) -> String {
     case "cursor":
         return L("Cursor session expired or rejected. Add a new Cursor session token in Settings to reconnect.",
                  "Cursor-økten er utløpt eller avvist. Legg til en ny Cursor-øktnøkkel i Innstillinger for å koble til igjen.")
+    case "opencode-console":
+        return L("The OpenCode sign-in expired or was rejected. Use Add Account → OpenCode Go → Sign in to OpenCode again.",
+                 "OpenCode-påloggingen er utløpt eller avvist. Bruk Legg til konto → OpenCode Go → Logg inn i OpenCode på nytt.")
     case "mistral":
         return L("The Mistral session expired or was rejected. Sign in at admin.mistral.ai and paste a fresh Cookie header in Settings to reconnect.",
                  "Mistral-økten er utløpt eller avvist. Logg inn på admin.mistral.ai og lim inn en fersk Cookie-overskrift i Innstillinger for å koble til igjen.")

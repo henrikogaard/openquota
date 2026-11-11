@@ -159,6 +159,48 @@ No live paid Pro/Team account has verified this connector yet. Allowance
 percentages are Mistral's own; credits are arithmetic on three reported
 figures, not an estimate. Nothing here is relabeled as anything else.
 
+## OpenCode console sign-in (experimental, explicit opt-in)
+
+Settings → Accounts → + → OpenCode Go → **Sign in to OpenCode** shows a code,
+opens opencode.ai and waits until you approve the code there. It then adds one
+card per workspace, each with that workspace's Go limits and spend budgets.
+
+There is no documented public API for this. OpenQuota uses the device sign-in
+and the console routes of OpenCode's own open-source CLI
+(`packages/core/src/plugin/provider/opencode.ts`, `usage-limits.ts` in
+`anomalyco/opencode`), including its client id `opencode-cli`, because the
+console offers no way to register another client. The routes may change or
+stop working.
+
+| Step | Request | Notes |
+|---|---|---|
+| Code | `POST opencode.ai/console/auth/device/code` | JSON `client_id`, `supports_org_scope`; the page to open must be `https://opencode.ai/…` (no other port, no user part) |
+| Wait | `POST …/auth/device/token` (device-code grant) | polls at the interval OpenCode gives; `slow_down` adds 5 s; stops when the code expires |
+| Account | `GET …/api/user`, `GET …/api/orgs` | email and workspaces; a sign-in limited to one workspace (`org_id`) keeps only that one |
+| Go limits | `GET opencode.ai/zen/go/v1/usage` + `x-opencode-org-id` | 5h/weekly/monthly percent and reset; 403 = no Go in that workspace |
+| Budgets | `GET …/api/policies/current-budgets` + `x-org-id` | `spentDollars` against `limitDollars` with reset; 403 = none. With a limit the row shows percent left and the limit in its name ("Budget $50"); without one it shows the amount spent and no percentage |
+| Renew | `POST …/auth/device/token` (refresh grant) | when the access token is within a minute of expiry; the rotated refresh token is saved; cards of one sign-in share one renewal |
+
+- **Not shown: the prepaid Zen balance.** No route for it appears in
+  OpenCode's own source or docs, so it is not read or guessed.
+- The session is OpenQuota's own, stored as one item in the device-only
+  Keychain. The OpenCode CLI's login, database and `auth.json` are not read
+  for it and are not changed.
+- All requests go to `opencode.ai` over HTTPS, refuse redirects and send
+  `User-Agent: OpenQuota`.
+- A workspace with neither Go nor a budget shows that as an error on its
+  card; remove the card to hide it. Removing the last workspace of a sign-in
+  deletes the saved session (it is not revoked at OpenCode).
+- Signing in again with the same account replaces the session and keeps the
+  card names. It lists the account's workspaces afresh, so new workspaces
+  appear and cards you removed come back.
+- While waiting for approval, a busy or briefly unreachable server is retried
+  until the code expires.
+- A rejected or expired sign-in shows a sign-in error; sign in again.
+
+Fixture tests cover the sign-in, renewal and mapping. No live OpenCode account
+has verified this connector yet.
+
 ## Subscription integrations (explicit opt-in)
 
 Claude and Codex subscriptions are not read from their legacy token files or
@@ -273,6 +315,7 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 |---|---|---|
 | Cursor (experimental) | pasted `WorkosCursorSessionToken` (`userID::jwt`) | `cursor.com/api/usage-summary`, with `api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo,GetCreditGrantsBalance}` fallback |
 | Mistral (experimental) | pasted `Cookie:` header from `admin.mistral.ai` (must include `ory_session_*`) | `admin.mistral.ai/subscription` (RSC budgets) + `/api/billing/credits`, with `console.mistral.ai/api-ui/trpc/billing.vibeUsage` fallback |
+| OpenCode console (experimental) | device sign-in approved in the browser, no paste | `opencode.ai/console/api/{user,orgs,policies/current-budgets}` + `opencode.ai/zen/go/v1/usage` |
 
 Cookie-token spec providers (e.g. Perplexity) use `auth: "cookie"` — the
 pasted value is sent as a `Cookie:` header. Rot is explicit: the row shows an

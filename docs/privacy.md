@@ -9,6 +9,7 @@ a read-only credential or guarantee secrecy on a compromised Mac.
 | Data | Storage/owner |
 |---|---|
 | Pasted API keys and Cursor/Mistral sessions | macOS Keychain, device-only and non-synchronizable |
+| OpenCode console sign-in | OpenQuota's own session (access and refresh token, email, workspace names) in the same Keychain; renewed tokens replace it there |
 | Claude login | Claude Code's own storage; the bridge does not copy credentials |
 | Codex login | Codex-managed files in an independent home per connection |
 | Other local sign-ins | Provider-owned files; some adapters write refreshed tokens back |

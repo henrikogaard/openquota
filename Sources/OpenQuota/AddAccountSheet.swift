@@ -6,7 +6,7 @@ import OpenQuotaCore
 /// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
-        case claude, codex, cursor, mistral, openCodeMethods
+        case claude, codex, cursor, mistral, openCodeMethods, openCodeSignIn
         case apiKey(String)
         case profile(String)
 
@@ -14,7 +14,7 @@ struct AddAccountSheet: View {
         var ownsActions: Bool {
             switch self {
             case .openCodeMethods: false
-            case .claude, .codex, .cursor, .mistral, .apiKey, .profile: true
+            case .claude, .codex, .cursor, .mistral, .openCodeSignIn, .apiKey, .profile: true
             }
         }
     }
@@ -86,7 +86,7 @@ struct AddAccountSheet: View {
         case .codex: "Codex / ChatGPT"
         case .cursor: "Cursor"
         case .mistral: "Mistral"
-        case .openCodeMethods: model.providerName("opencode-go")
+        case .openCodeMethods, .openCodeSignIn: model.providerName("opencode-go")
         case .apiKey(let id), .profile(let id): model.providerName(id)
         }
     }
@@ -96,7 +96,8 @@ struct AddAccountSheet: View {
         case nil: 470
         case .some(.cursor): 480
         case .some(.mistral): 560
-        case .some(.openCodeMethods): 300
+        case .some(.openCodeMethods): 340
+        case .some(.openCodeSignIn): 440
         case .some(.profile(_)): 420
         case .some(.claude): 460
         default: 340
@@ -209,6 +210,12 @@ struct AddAccountSheet: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Button(L("Sign in to OpenCode · Experimental", "Logg inn i OpenCode · Eksperimentell")) {
+                    backTarget = .openCodeMethods
+                    self.target = .openCodeSignIn
+                }
+                .buttonStyle(.glass)
+                .disabled(model.isDemo)
                 Button(L("Add workspace subscription", "Legg til arbeidsområdeabonnement")) {
                     backTarget = .openCodeMethods
                     self.target = .apiKey("opencode-go")
@@ -222,6 +229,8 @@ struct AddAccountSheet: View {
                 Spacer()
             }
             .padding(20)
+        case .openCodeSignIn:
+            OpenCodeSignInForm(model: model, onDone: onDone)
         case .apiKey(let id):
             if let provider = model.specProviders().first(where: { $0.id == id }) {
                 APIKeyForm(model: model, provider: provider, onDone: onDone)
@@ -300,6 +309,93 @@ private struct APIKeyForm: View {
             onDone()
         } catch {
             errorText = (error as? ProviderError)?.userMessage ?? error.localizedDescription
+        }
+    }
+}
+
+/// Signs in to the OpenCode console with a code approved in the browser:
+/// explain and get consent, show the code, wait, then save.
+private struct OpenCodeSignInForm: View {
+    var model: AppModel
+    var onDone: () -> Void
+    @State private var consent = false
+    @State private var login: OpenCodeConsoleProvider.DeviceLogin?
+    @State private var working = false
+    @State private var errorText: String?
+    @State private var task: Task<Void, Never>?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                if let login {
+                    Section {
+                        LabeledContent(L("Code", "Kode")) {
+                            Text(login.userCode)
+                                .font(.system(.title2, design: .monospaced).weight(.semibold))
+                                .textSelection(.enabled)
+                        }
+                        Button(L("Open opencode.ai Again", "Åpne opencode.ai på nytt")) {
+                            NSWorkspace.shared.open(login.verificationURL)
+                        }
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(L("Waiting for you to approve the code in the browser…",
+                                   "Venter på at du godkjenner koden i nettleseren …"))
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text(L("Approve in your browser", "Godkjenn i nettleseren"))
+                    } footer: {
+                        Text(L("Check that the page shows this code, then approve. If OpenCode asks for a workspace, pick the one to follow; sign in again later to add another.",
+                               "Sjekk at siden viser denne koden, og godkjenn. Hvis OpenCode ber om et arbeidsområde, velg det du vil følge; logg inn på nytt senere for å legge til et annet."))
+                    }
+                } else {
+                    Section {
+                        Text(L("Shows your workspaces with their Go limits and spend budgets. The prepaid balance is not available: OpenCode has no confirmed way to read it.",
+                               "Viser arbeidsområdene dine med Go-grenser og forbruksbudsjetter. Forhåndsbetalt saldo er ikke tilgjengelig: OpenCode har ingen bekreftet måte å lese den på."))
+                        Toggle(L("Enable experimental access", "Aktiver eksperimentell tilgang"), isOn: $consent)
+                            .toggleStyle(.checkbox)
+                    } header: {
+                        Text(L("Sign in to OpenCode · Experimental", "Logg inn i OpenCode · Eksperimentell"))
+                    } footer: {
+                        Text(L("OpenQuota signs in the way the OpenCode CLI does, as the client “opencode-cli”, and reads the same console routes. They are not a documented public API and may change or stop working. The sign-in is OpenQuota's own, stored in this Mac’s Keychain; your OpenCode CLI login is not read or changed. It can act as your OpenCode account, so remove it here if you stop using it.",
+                               "OpenQuota logger inn på samme måte som OpenCode CLI, som klienten «opencode-cli», og leser de samme konsollrutene. De er ikke et dokumentert offentlig API og kan endres eller slutte å virke. Påloggingen er OpenQuotas egen og lagres i nøkkelringen på denne Macen; OpenCode CLI-påloggingen din verken leses eller endres. Den kan opptre som OpenCode-kontoen din, så fjern den her hvis du slutter å bruke den."))
+                    }
+                }
+                if let errorText {
+                    Section { Text(errorText).foregroundStyle(.red) }
+                }
+            }
+            .formStyle(.grouped)
+            FormActions(primary: L("Get Sign-in Code", "Hent påloggingskode"),
+                        disabled: !consent || working || login != nil,
+                        action: start, cancel: { task?.cancel(); onDone() })
+        }
+        .onDisappear { task?.cancel() }
+    }
+
+    private func start() {
+        guard consent, !working else { return }
+        working = true
+        errorText = nil
+        task = Task {
+            do {
+                let login = try await model.beginOpenCodeSignIn()
+                self.login = login
+                NSWorkspace.shared.open(login.verificationURL)
+                _ = try await model.completeOpenCodeSignIn(login)
+                onDone()
+            } catch is CancellationError {
+            } catch {
+                login = nil
+                let message = (error as? ProviderError)?.userMessage
+                    ?? L("The sign-in could not be completed.", "Påloggingen kunne ikke fullføres.")
+                errorText = error as? ProviderError == .timedOut
+                    ? L("The code expired before it was approved. Get a new code.",
+                        "Koden utløp før den ble godkjent. Hent en ny kode.")
+                    : message
+            }
+            working = false
         }
     }
 }

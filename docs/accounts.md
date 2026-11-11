@@ -103,6 +103,16 @@ its entry instead of duplicating it. Two keys for the same workspace may share
 one quota; separate rows do not imply separate allowances. OpenQuota does not
 switch the active OpenCode CLI key.
 
+**Sign in to OpenCode (experimental)** is the other way: OpenQuota shows a
+code, opens opencode.ai, and you approve it there. You then get a card per
+workspace with its Go limits and spend budgets, with no keys to paste. If
+OpenCode asks you to pick a workspace, the sign-in covers that one; sign in
+again to add another. The prepaid balance is not shown: OpenCode offers no
+confirmed way to read it. This uses the same unofficial routes and client id
+as OpenCode's own CLI, and its session can act as your OpenCode account, so
+remove the cards if you stop using it. A workspace you follow both ways shows
+the same Go allowance twice. [Technical details](providers.md#opencode-console-sign-in-experimental-explicit-opt-in).
+
 The main CLI login is detected separately. Current OpenCode versions use a
 database; old `auth.json` files may be stale. **Use another sign-in file** is for
 a separate legacy credential-file profile, not the recommended workspace flow.
