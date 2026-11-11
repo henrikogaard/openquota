@@ -41,8 +41,12 @@ final class SQLiteDatabase: @unchecked Sendable {
 
     /// Opens another program's database for reading only; nothing in it is
     /// created or changed, and a busy database fails fast instead of waiting.
-    init(readOnly url: URL) throws {
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+    /// `immutable` reads the file as it is, with no locks and no side files;
+    /// only right for a database no program has open for writing.
+    init(readOnly url: URL, immutable: Bool = false) throws {
+        let name = immutable ? url.absoluteString + "?immutable=1" : url.path
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX | (immutable ? SQLITE_OPEN_URI : 0)
+        guard sqlite3_open_v2(name, &handle, flags, nil) == SQLITE_OK else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
             sqlite3_close(handle)
             handle = nil
@@ -156,6 +160,10 @@ final class SQLiteDatabase: @unchecked Sendable {
         func isNull(_ column: Int32) -> Bool { sqlite3_column_type(statement, column) == SQLITE_NULL }
         func string(_ column: Int32) -> String {
             sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+        }
+        func data(_ column: Int32) -> Data {
+            guard let bytes = sqlite3_column_blob(statement, column) else { return Data() }
+            return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, column)))
         }
     }
 }

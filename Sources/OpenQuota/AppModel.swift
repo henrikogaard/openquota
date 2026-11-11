@@ -271,6 +271,7 @@ final class AppModel {
         case .opencode: return ("OpenCode", nil)
         case .vibe: return ("Mistral Vibe", nil)
         case .copilot: return ("Copilot CLI", nil)
+        case .antigravity: return (L("Antigravity (experimental)", "Antigravity (eksperimentell)"), nil)
         }
     }
 

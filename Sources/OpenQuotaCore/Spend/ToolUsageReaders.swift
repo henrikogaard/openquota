@@ -87,3 +87,163 @@ enum OpenCodeUsage {
         return page
     }
 }
+
+/// Reads fields out of protobuf wire data without a schema: varints,
+/// length-delimited values and fixed-width numbers, by field number. Data that
+/// doesn't parse yields nil; nothing here traps on garbage.
+struct ProtobufMessage {
+    private let data: Data
+
+    init(_ data: Data) { self.data = data }
+
+    private enum Value {
+        case varint(UInt64)
+        case bytes(Range<Data.Index>)
+    }
+
+    /// The first varint field with this number.
+    func varint(_ number: Int) -> UInt64? {
+        if case .varint(let value)? = first(number) { return value }
+        return nil
+    }
+
+    /// A copy of the first length-delimited field with this number.
+    func bytes(_ number: Int) -> Data? {
+        if case .bytes(let range)? = first(number) { return Data(data[range]) }
+        return nil
+    }
+
+    /// The first length-delimited field with this number, as a nested message.
+    func message(_ number: Int) -> ProtobufMessage? {
+        if case .bytes(let range)? = first(number) { return ProtobufMessage(data[range]) }
+        return nil
+    }
+
+    private func first(_ number: Int) -> Value? {
+        var index = data.startIndex
+        while index < data.endIndex {
+            guard let key = nextVarint(&index), key >> 3 > 0 else { return nil }
+            let found = key >> 3 == UInt64(number)
+            switch key & 7 {
+            case 0:
+                guard let value = nextVarint(&index) else { return nil }
+                if found { return .varint(value) }
+            case 1, 5:
+                let width = key & 7 == 1 ? 8 : 4
+                guard data.endIndex - index >= width else { return nil }
+                index += width
+            case 2:
+                guard let length = nextVarint(&index), length <= UInt64(data.endIndex - index) else { return nil }
+                let range = index..<(index + Int(length))
+                index = range.upperBound
+                if found { return .bytes(range) }
+            default:
+                // Groups and unknown wire types: not something to guess at.
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private func nextVarint(_ index: inout Data.Index) -> UInt64? {
+        var value: UInt64 = 0
+        var shift: UInt64 = 0
+        while index < data.endIndex, shift < 64 {
+            let byte = data[index]
+            index += 1
+            value |= UInt64(byte & 0x7F) << shift
+            if byte & 0x80 == 0 { return value }
+            shift += 7
+        }
+        return nil
+    }
+}
+
+/// Google Antigravity keeps each conversation in its own SQLite database, with
+/// one protobuf record per model generation. There is no published schema:
+/// the field numbers below were worked out from the numbers in real databases
+/// (see docs/estimated-spend.md), so this reader is a best guess. Opened
+/// read-only, never changed. A conversation that is closed has no write-ahead
+/// log and is read as a plain file, so SQLite leaves no side files next to it.
+enum AntigravityUsage {
+    struct Usage {
+        var events: [SpendEvent]
+        /// Bytes of records read, for the pass budget.
+        var bytes: Int
+        /// The row limit was reached; later generations were left out.
+        var truncated: Bool
+    }
+
+    /// Steps carry the time; a conversation with more than this is cut short.
+    private static let stepLimit = 200_000
+    private static let tokenLimit: UInt64 = 1_000_000_000
+
+    static func read(databaseURL: URL, limit: Int) throws -> Usage {
+        let live = FileManager.default.fileExists(atPath: databaseURL.path + "-wal")
+        let database = try SQLiteDatabase(readOnly: databaseURL, immutable: !live)
+        var usage = Usage(events: [], bytes: 0, truncated: false)
+        // Some other database in the folder: nothing to read, and not an error.
+        let tables = try database.prepare(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('gen_metadata', 'steps')")
+            .first { $0.int(0) } ?? 0
+        guard tables == 2 else { return usage }
+        // One view of the database for both tables, so a generation and its step are seen together.
+        try database.execute("BEGIN")
+
+        // A generation has no time of its own. The step it produced has one,
+        // and repeats the generation's response id (step.9.7).
+        var times: [Data: Date] = [:]
+        var steps = 0
+        try database.prepare("SELECT metadata FROM steps WHERE metadata IS NOT NULL ORDER BY idx LIMIT ?1")
+            .forEach([stepLimit]) { row in
+                steps += 1
+                let blob = row.data(0)
+                usage.bytes += blob.count
+                let step = ProtobufMessage(blob)
+                guard let id = step.message(9)?.bytes(7), !id.isEmpty, times[id] == nil,
+                      let created = step.message(1), let seconds = created.varint(1),
+                      (1_000_000_000...4_102_444_800).contains(seconds) else { return }
+                let nanos = min(created.varint(2) ?? 0, 999_999_999)
+                times[id] = Date(timeIntervalSince1970: Double(seconds) + Double(nanos) / 1_000_000_000)
+            }
+
+        var rows = 0
+        var previous: Date?
+        try database.prepare("SELECT idx, data FROM gen_metadata WHERE data IS NOT NULL ORDER BY idx LIMIT ?1")
+            .forEach([limit + 1]) { row in
+                rows += 1
+                guard rows <= limit else { return }
+                let blob = row.data(1)
+                usage.bytes += blob.count
+                guard let generation = ProtobufMessage(blob).message(1), let counts = generation.message(4) else { return }
+                func count(_ field: Int) -> Int? {
+                    guard let value = counts.varint(field) else { return 0 }
+                    return value <= tokenLimit ? Int(value) : nil
+                }
+                // Input (2) leaves out the cached part (5); output (3) includes thinking.
+                guard let input = count(2), let output = count(3), let cacheRead = count(5),
+                      input + output + cacheRead > 0 else { return }
+                let id = counts.bytes(7) ?? Data()
+                // A generation whose step isn't written yet borrows the time of the one before it.
+                guard let timestamp = times[id] ?? previous else { return }
+                previous = timestamp
+                let identity = id.isEmpty ? "\(databaseURL.path)#\(row.int(0))"
+                    : id.map { String($0, radix: 16) }.joined(separator: ".")
+                usage.events.append(SpendEvent(
+                    timestamp: timestamp, provider: .antigravity, model: modelName(generation.bytes(19)),
+                    tokens: TokenBreakdown(input: input, cacheRead: cacheRead, output: output),
+                    recordedUSD: nil, identity: identity))
+            }
+        usage.truncated = rows > limit || steps >= stepLimit
+        return usage
+    }
+
+    /// Only something shaped like a model id is kept; anything else is dropped.
+    private static func modelName(_ data: Data?) -> String {
+        guard let data, (1...128).contains(data.count), let name = String(data: data, encoding: .utf8),
+              name.unicodeScalars.allSatisfy({ scalar in
+                  scalar.isASCII && (scalar.properties.isAlphabetic || ("0"..."9").contains(scalar) || "-._:/".unicodeScalars.contains(scalar))
+              }) else { return "" }
+        return name
+    }
+}
