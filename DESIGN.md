@@ -38,7 +38,7 @@ macOS 26 Tahoe and later. The popover window keeps the system material; its card
   picker (30 days, 90 days, 1 year, all), a cost/tokens switch, the total with
   a row per source (Claude CLI, Claude Desktop, each profile folder, Codex;
   email when known), a stacked bar chart per source (days, weeks or months;
-  oranges for Claude, greens for Codex), top models, catch-up progress, and
+  oranges for Claude, greens for Codex, blue OpenCode, purple Vibe, grey Copilot), top models, catch-up progress, and
   the saved-history note with Delete. Accounts has a Mail-style bordered
   list with a bottom +/− bar, alongside a grouped detail `Form`.
 - Account rows separate provider, account label, and optional experimental badge.

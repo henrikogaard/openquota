@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SpendProvider: String, CaseIterable, Sendable, Codable {
-    case claude, codex
+    case claude, codex, opencode, vibe, copilot
 }
 
 public enum SpendPeriod: String, CaseIterable, Sendable {
@@ -96,7 +96,7 @@ public struct SpendSource: Hashable, Sendable {
     public let provider: SpendProvider
     /// The CLI home the logs came from, e.g. `/Users/me/.claude`.
     public let folder: String
-    /// Claude's entrypoint ("claude-desktop", "cli", "sdk-ts", …); empty for Codex.
+    /// Claude's entrypoint ("claude-desktop", "cli", "sdk-ts", …); empty for the others.
     public let app: String
 
     public init(provider: SpendProvider, folder: String, app: String) {
@@ -155,6 +155,15 @@ public struct SpendLogSource: Sendable, Hashable {
         self.directory = directory.standardizedFileURL.resolvingSymlinksInPath()
     }
 
+    /// The tool's home folder, used to name the source.
+    var folder: String {
+        switch provider {
+        case .claude, .codex, .copilot: directory.deletingLastPathComponent().path
+        case .vibe: directory.deletingLastPathComponent().deletingLastPathComponent().path
+        case .opencode: directory.path
+        }
+    }
+
     public static func localSources(
         connections: [SubscriptionConnection], home: URL = FileManager.default.homeDirectoryForCurrentUser,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -171,11 +180,19 @@ public struct SpendLogSource: Sendable, Hashable {
             ($0.kind == .claudeStatusLine ? .claude : .codex, URL(fileURLWithPath: $0.directory))
         }
         var seen = Set<SpendLogSource>()
-        return homes.flatMap { provider, directory in
+        let logs = homes.flatMap { provider, directory in
             (provider == .claude ? ["projects"] : ["sessions", "archived_sessions"]).map {
                 SpendLogSource(provider: provider, directory: directory.appendingPathComponent($0))
             }
-        }.filter { seen.insert($0).inserted }
+        }
+        // Other tools keep usage in one fixed place each.
+        let dataHome = homeFor("XDG_DATA_HOME", fallback: ".local/share")
+        let tools = [
+            SpendLogSource(provider: .opencode, directory: dataHome.appendingPathComponent("opencode")),
+            SpendLogSource(provider: .vibe, directory: homeFor("VIBE_HOME", fallback: ".vibe").appendingPathComponent("logs/session")),
+            SpendLogSource(provider: .copilot, directory: homeFor("COPILOT_HOME", fallback: ".copilot").appendingPathComponent("session-state")),
+        ]
+        return (logs + tools).filter { seen.insert($0).inserted }
     }
 }
 
