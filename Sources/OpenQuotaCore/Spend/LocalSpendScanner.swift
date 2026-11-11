@@ -38,6 +38,10 @@ public actor LocalSpendScanner {
         var endOffset: Int
         /// Bytes this read used of the pass budget.
         var bytes: Int
+        /// For a database: its size and time once everything written up to
+        /// then was read. Saved in place of what discovery saw, so the side
+        /// files SQLite creates while reading aren't taken for a change.
+        var signature: (size: Int, modified: Date)?
         /// Lines read so far, for line-based request identities.
         var lines: Int
         /// The pass ran out of time, bytes or event budget before the end.
@@ -175,11 +179,9 @@ public actor LocalSpendScanner {
                 continue
             }
             remainingBytes -= parsed.bytes
-            // Reading can make SQLite create the database's side files; note
-            // its state after the read, so that alone isn't seen as a change.
-            if file.provider == .opencode, let stat = Self.openCodeStat(file.url) {
-                file.size = stat.size
-                file.modified = stat.modified
+            if let signature = parsed.signature {
+                file.size = signature.size
+                file.modified = signature.modified
             }
             result.isPartial = result.isPartial || parsed.malformed
             // A file is read once, so keep requests stamped slightly ahead of
@@ -537,18 +539,26 @@ public actor LocalSpendScanner {
     ) throws -> Parsed {
         switch file.provider {
         case .opencode:
-            // A database that can't be read right now (busy, or a layout this
-            // version doesn't know) is tried again when it changes.
-            guard let page = try? OpenCodeUsage.read(
+            // A database that can't be read right now (busy, locked, damaged)
+            // throws: nothing is saved, the total is marked partial, and it
+            // is tried again next pass.
+            let page = try OpenCodeUsage.read(
                 databaseURL: file.url, after: offset, afterID: parserState?.cursorID ?? "",
-                limit: limits.events) else {
-                return Parsed(events: [], endOffset: offset, bytes: 0, lines: 0, interrupted: false,
-                              malformed: false, parserState: parserState ?? SpendLogParser.State())
-            }
+                limit: limits.events)
             var state = SpendLogParser.State()
             state.cursorID = page.cursorID
-            return Parsed(events: page.events, endOffset: page.cursor, bytes: page.events.count * 256,
-                          lines: 0, interrupted: page.more, malformed: false, parserState: state)
+            var parsed = Parsed(events: page.events, endOffset: page.cursor, bytes: page.events.count * 256,
+                                lines: 0, interrupted: page.more, malformed: false, parserState: state)
+            // The size and time taken now cover a write that landed during the
+            // read above, which that read may not have seen. Only when a second
+            // look finds nothing more are they safe to save as "read".
+            if !page.more, let stat = Self.openCodeStat(file.url),
+               let probe = try? OpenCodeUsage.read(
+                   databaseURL: file.url, after: page.cursor, afterID: page.cursorID, limit: 1),
+               probe.cursor == page.cursor, probe.cursorID == page.cursorID {
+                parsed.signature = stat
+            }
+            return parsed
         case .vibe:
             // One small JSON document per session, read whole each time it changes.
             guard file.size <= 16 * 1_048_576 else {

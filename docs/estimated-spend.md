@@ -42,6 +42,8 @@ From OpenCode's database it selects only the message id, timestamps, model,
 cost and token counts; message text is in other tables and is never queried.
 The database is opened read-only and never changed; SQLite may create
 its own `-shm`/`-wal` side files next to it if they are missing.
+A database that is locked or can't be read is not remembered as read: the
+total is marked partial and it is tried again on the next pass.
 An Antigravity record is a binary blob that also holds conversation text.
 The reader walks it by field number and takes out only the token counts, the
 model id, the response id and the step time; text fields are skipped by

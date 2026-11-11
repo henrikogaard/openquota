@@ -211,15 +211,46 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertNil(old.copilotSeen)
     }
 
-    func testOpenCodeMissingDatabaseOrTableThrowsWithoutCreatingAFile() throws {
+    func testOpenCodeMissingOrDamagedDatabaseThrowsAndAMissingTableIsEmpty() throws {
         let root = try directory()
         defer { try? FileManager.default.removeItem(at: root) }
         let missing = root.appendingPathComponent("opencode.db")
         XCTAssertThrowsError(try OpenCodeUsage.read(databaseURL: missing, after: 0, limit: 10))
         XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
-        let empty = root.appendingPathComponent("other.db")
-        try SQLiteDatabase(url: empty).execute("CREATE TABLE unrelated(x)")
-        XCTAssertThrowsError(try OpenCodeUsage.read(databaseURL: empty, after: 0, limit: 10))
+        let damaged = root.appendingPathComponent("damaged.db")
+        try Data(repeating: 0x5A, count: 4_096).write(to: damaged)
+        XCTAssertThrowsError(try OpenCodeUsage.read(databaseURL: damaged, after: 0, limit: 10))
+        // An OpenCode version without the table has nothing to read.
+        let other = root.appendingPathComponent("other.db")
+        try SQLiteDatabase(url: other).execute("CREATE TABLE unrelated(x)")
+        let page = try OpenCodeUsage.read(databaseURL: other, after: 7, afterID: "m", limit: 10)
+        XCTAssertTrue(page.events.isEmpty)
+        XCTAssertEqual(page.cursor, 7)
+        XCTAssertEqual(page.cursorID, "m")
+    }
+
+    func testUnreadableOpenCodeDatabaseIsPartialAndTriedAgain() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let opencode = root.appendingPathComponent("opencode")
+        try FileManager.default.createDirectory(at: opencode, withIntermediateDirectories: true)
+        let database = opencode.appendingPathComponent("opencode.db")
+        try Data(repeating: 0x5A, count: 4_096).write(to: database)
+        let sources = [SpendLogSource(provider: .opencode, directory: opencode)]
+        let scanner = LocalSpendScanner(limits: .init(), pricing: pricing)
+        let failed = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertTrue(failed.isPartial)
+        XCTAssertEqual(failed.filesRead, 0)
+        // Still unread, not remembered as done: the next pass tries again.
+        let again = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertTrue(again.isPartial)
+        XCTAssertEqual(again.filesReused, 0)
+        // Once it can be read, it is.
+        try FileManager.default.removeItem(at: database)
+        try openCodeDatabase(at: database, rows: [("m1", noonMillis, assistant(created: noonMillis))])
+        let fixed = await scanner.scan(sources: sources, now: now, calendar: calendar)
+        XCTAssertFalse(fixed.isPartial)
+        XCTAssertEqual(fixed.total(provider: .opencode, period: .today, now: now, calendar: calendar).events, 1)
     }
 
     // MARK: Antigravity
