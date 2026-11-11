@@ -277,7 +277,9 @@ public struct OpenCodeConsoleProvider: UsageProvider {
     }
 
     /// Spend budgets that cover this member, in dollars as OpenCode reports
-    /// them: spent against the limit.
+    /// them: spent against the limit. A row with a limit is drawn as a
+    /// percentage, so the limit goes in its label ("Budget $50") to keep the
+    /// dollar scale visible. Without a limit the row shows the amount spent.
     private func budgetWindows(_ session: Session, workspaceID: String) async throws -> [UsageWindow] {
         guard let budgets = try await get(
             "\(Self.server)/api/policies/current-budgets", token: session.access,
@@ -289,12 +291,24 @@ public struct OpenCodeConsoleProvider: UsageProvider {
             }
             return seen.insert(rule).inserted
         }
-        return usable.enumerated().map { index, budget in
-            let limit = adapterNum(budget, ["limitDollars"]).flatMap { $0 > 0 ? $0 : nil }
+        func limit(_ budget: [String: Any]) -> Double? {
+            adapterNum(budget, ["limitDollars"]).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        }
+        let open = usable.filter { limit($0) == nil }.count
+        var openIndex = 0
+        return usable.map { budget in
+            let limit = limit(budget)
             let reset = (budget["resetsAt"] as? String).flatMap(Self.date)
+            let label: String
+            if let limit {
+                label = "Budget $" + String(format: limit == limit.rounded() ? "%.0f" : "%.2f", limit)
+            } else {
+                openIndex += 1
+                label = open == 1 ? "Budget" : "Budget \(openIndex)"
+            }
             return UsageWindow(
                 id: "\(id).budget.\(budget["ruleID"] as? String ?? "")",
-                label: usable.count == 1 ? "Budget" : "Budget \(index + 1)", kind: .credits,
+                label: label, kind: .credits,
                 used: adapterNum(budget, ["spentDollars"]), limit: limit, unit: "$", resetsAt: reset)
         }
     }

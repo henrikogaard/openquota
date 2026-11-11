@@ -163,7 +163,7 @@ stop working.
 | Wait | `POST …/auth/device/token` (device-code grant) | polls at the interval OpenCode gives; `slow_down` adds 5 s; stops when the code expires |
 | Account | `GET …/api/user`, `GET …/api/orgs` | email and workspaces; a sign-in limited to one workspace (`org_id`) keeps only that one |
 | Go limits | `GET opencode.ai/zen/go/v1/usage` + `x-opencode-org-id` | 5h/weekly/monthly percent and reset; 403 = no Go in that workspace |
-| Budgets | `GET …/api/policies/current-budgets` + `x-org-id` | `spentDollars` against `limitDollars` with reset; 403 = none. A zero limit shows the amount with no percentage |
+| Budgets | `GET …/api/policies/current-budgets` + `x-org-id` | `spentDollars` against `limitDollars` with reset; 403 = none. With a limit the row shows percent left and the limit in its name ("Budget $50"); without one it shows the amount spent and no percentage |
 | Renew | `POST …/auth/device/token` (refresh grant) | when the access token is within a minute of expiry; the rotated refresh token is saved; cards of one sign-in share one renewal |
 
 - **Not shown: the prepaid Zen balance.** No route for it appears in

@@ -21,7 +21,7 @@ public enum Localized {
     /// Provider-supplied window labels are English; translate the common ones.
     public static func windowLabel(_ label: String) -> String {
         guard norwegian else { return label }
-        // "Budget 2": several budgets in one workspace are numbered.
+        // "Budget $50", "Budget 2": a budget's limit or number follows the word.
         if label.hasPrefix("Budget ") { return "Budsjett " + label.dropFirst(7) }
         return windowLabels[label] ?? label
     }
