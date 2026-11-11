@@ -172,13 +172,23 @@ enum AntigravityUsage {
         var bytes: Int
         /// The row limit was reached; later generations were left out.
         var truncated: Bool
+        /// The byte or time budget ran out; later generations were left out.
+        var exhausted = false
     }
+
+    private struct OutOfBudget: Error {}
 
     /// Steps carry the time; a conversation with more than this is cut short.
     private static let stepLimit = 200_000
     private static let tokenLimit: UInt64 = 1_000_000_000
 
-    static func read(databaseURL: URL, limit: Int) throws -> Usage {
+    /// Stops once more than `byteBudget` bytes of records were read or
+    /// `shouldStop` says so. Out of budget among the steps throws, since
+    /// generations without their times can't be placed on a day; among the
+    /// generations it returns the ones read so far, marked `exhausted`.
+    static func read(
+        databaseURL: URL, limit: Int, byteBudget: Int = .max, shouldStop: () -> Bool = { false }
+    ) throws -> Usage {
         let live = FileManager.default.fileExists(atPath: databaseURL.path + "-wal")
         let database = try SQLiteDatabase(readOnly: databaseURL, immutable: !live)
         var usage = Usage(events: [], bytes: 0, truncated: false)
@@ -199,6 +209,7 @@ enum AntigravityUsage {
                 steps += 1
                 let blob = row.data(0)
                 usage.bytes += blob.count
+                guard usage.bytes <= byteBudget, !shouldStop() else { throw OutOfBudget() }
                 let step = ProtobufMessage(blob)
                 guard let id = step.message(9)?.bytes(7), !id.isEmpty, times[id] == nil,
                       let created = step.message(1), let seconds = created.varint(1),
@@ -209,10 +220,13 @@ enum AntigravityUsage {
 
         var rows = 0
         var previous: Date?
-        try database.prepare("SELECT idx, data FROM gen_metadata WHERE data IS NOT NULL ORDER BY idx LIMIT ?1")
-            .forEach([limit + 1]) { row in
+        let generations = try database.prepare(
+            "SELECT idx, data FROM gen_metadata WHERE data IS NOT NULL ORDER BY idx LIMIT ?1")
+        do {
+            try generations.forEach([limit + 1]) { row in
                 rows += 1
                 guard rows <= limit else { return }
+                guard usage.bytes < byteBudget, !shouldStop() else { throw OutOfBudget() }
                 let blob = row.data(1)
                 usage.bytes += blob.count
                 guard let generation = ProtobufMessage(blob).message(1), let counts = generation.message(4) else { return }
@@ -234,6 +248,9 @@ enum AntigravityUsage {
                     tokens: TokenBreakdown(input: input, cacheRead: cacheRead, output: output),
                     recordedUSD: nil, identity: identity))
             }
+        } catch is OutOfBudget {
+            usage.exhausted = true
+        }
         usage.truncated = rows > limit || steps >= stepLimit
         return usage
     }

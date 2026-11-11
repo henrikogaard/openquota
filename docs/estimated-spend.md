@@ -249,6 +249,9 @@ Known limits:
   its write-ahead log; SQLite may then create a missing `-shm` file.
 - A database that is busy or unreadable keeps the totals read before, shows
   **Partial total**, and is tried again on the next pass.
+- Reading stops at the pass's byte and time budget. A conversation cut short
+  by what other files used is read again on the next pass; one too large for
+  a whole pass keeps what was read and shows **Partial total**.
 - No environment variable for another location is known, so only the default
   folder is read.
 

@@ -177,7 +177,7 @@ public actor LocalSpendScanner {
             remainingBytes -= parsed.bytes
             // Reading can make SQLite create the database's side files; note
             // its state after the read, so that alone isn't seen as a change.
-            if file.provider == .opencode || file.provider == .antigravity, let stat = Self.openCodeStat(file.url) {
+            if file.provider == .opencode, let stat = Self.openCodeStat(file.url) {
                 file.size = stat.size
                 file.modified = stat.modified
             }
@@ -563,9 +563,16 @@ public actor LocalSpendScanner {
             // One conversation per database, read whole each time it changes.
             // A database that is busy throws: what was read before is kept,
             // and it is tried again next pass.
-            let usage = try AntigravityUsage.read(databaseURL: file.url, limit: limits.events)
-            return Parsed(events: usage.events, endOffset: 0, bytes: usage.bytes, lines: 0, interrupted: false,
-                          malformed: usage.truncated, parserState: SpendLogParser.State())
+            let seconds = limits.seconds
+            let usage = try AntigravityUsage.read(
+                databaseURL: file.url, limit: limits.events, byteBudget: byteBudget,
+                shouldStop: { Task.isCancelled || start.duration(to: .now) >= .seconds(seconds) })
+            // Cut short by what other files used of this pass: read again
+            // next pass. Too large even for a whole pass: a partial total.
+            let again = usage.exhausted && byteBudget < limits.scanBytes
+            return Parsed(events: usage.events, endOffset: 0, bytes: usage.bytes, lines: 0, interrupted: again,
+                          malformed: usage.truncated || (usage.exhausted && !again),
+                          parserState: SpendLogParser.State())
         case .claude, .codex, .copilot:
             break
         }

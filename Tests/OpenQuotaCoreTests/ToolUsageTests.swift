@@ -383,6 +383,19 @@ final class ToolUsageTests: XCTestCase {
 
         XCTAssertTrue(try AntigravityUsage.read(databaseURL: url, limit: 2).truncated)
         XCTAssertFalse(try AntigravityUsage.read(databaseURL: url, limit: 6).truncated)
+
+        // Out of budget among the generations: what was read so far, marked as cut short.
+        let stepBytes = try AntigravityUsage.read(databaseURL: url, limit: 0).bytes
+        let short = try AntigravityUsage.read(databaseURL: url, limit: 100, byteBudget: stepBytes + 1)
+        XCTAssertTrue(short.exhausted)
+        XCTAssertEqual(short.events.count, 1)
+        var calls = 0
+        let stopped = try AntigravityUsage.read(databaseURL: url, limit: 100, shouldStop: { calls += 1; return calls > 6 })
+        XCTAssertTrue(stopped.exhausted)
+        XCTAssertEqual(stopped.events.count, 1)
+        // Out of budget among the steps: nothing can be dated, so nothing is returned.
+        XCTAssertThrowsError(try AntigravityUsage.read(databaseURL: url, limit: 100, byteBudget: 1))
+        XCTAssertThrowsError(try AntigravityUsage.read(databaseURL: url, limit: 100, shouldStop: { true }))
     }
 
     func testAntigravityIgnoresOtherDatabasesAndThrowsOnUnreadableOnes() throws {
