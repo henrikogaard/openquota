@@ -12,7 +12,7 @@ invoice or convert subscription percentages into dollars.
 
 - Claude Code JSONL usage under `~/.claude/projects`, or `CLAUDE_CONFIG_DIR`.
 - Codex JSONL rollouts under `~/.codex/sessions` and `archived_sessions`, or
-  `CODEX_HOME`.
+  `CODEX_HOME`, including the older ones Codex compresses to `.jsonl.zst`.
 - The corresponding directories of explicitly connected Claude/Codex profiles.
 - OpenCode: assistant messages in `~/.local/share/opencode/opencode.db` (or
   under `XDG_DATA_HOME`), opened read-only. Each message has its own token
@@ -66,7 +66,8 @@ keeps what it reads in a small SQLite database,
 - **Requests:** per-request token counts, model, timestamp, request identity
   and source for the last 40 days, used to drop duplicates across files (a
   resumed Claude session copies earlier messages into a new file). Older
-  requests are removed once every log has been read.
+  requests are removed once every log has been read. A pass that was
+  cancelled mid-read, or whose folder walk was cut short, removes nothing.
 - **Days:** daily totals per source and model: input, cache-write, cache-read
   and output tokens, estimated and log-reported cost, priced and unpriced
   request counts. Kept until you delete them. No prompts or responses.
@@ -77,6 +78,13 @@ SDK, …). History shows each source with the email of the matching connection
 when known. Claude Desktop signs in separately, so its usage is not given the
 CLI folder's email.
 
+- A compressed Codex rollout is read from start to end in one go, once: a
+  compressed stream can't be picked up half-way, and these archives don't
+  change. It counts as the same log as the plain file it was made from, so
+  a rollout read before and after compression counts once while its requests
+  are still kept (40 days). A day whose requests were already removed keeps
+  the totals it had: older days OpenQuota only partly saw before this stay
+  as they were, until you delete history and let it rebuild.
 - Each pass reads new or changed files, newest first, taking turns between
   Claude and Codex, within the time and byte budget below. While older logs
   remain, passes repeat a few seconds apart; the panel says how many files are
@@ -85,7 +93,9 @@ CLI folder's email.
   that day: its requests that show up later come from copied or resumed
   sessions. A different source (a newly connected folder) still counts.
 - A file with lines that couldn't be used keeps the total marked partial
-  until the file changes. A file rewritten without growing is read again from
+  until the file changes. A Codex `response_item` line over the line limit (a
+  whole tool output) is the exception: it never carries token counts, so it
+  is skipped without marking the file. A file rewritten without growing is read again from
   the start.
 - A Codex file over 64 MiB, or one a whole pass can't finish, is skipped until
   it changes and counted as partial. Claude files have no size limit.
@@ -106,6 +116,8 @@ OpenQuota adapts OpenUsage's shared pricing engine, including its bundled
 LiteLLM/models.dev snapshots and supplement, from
 [`robinebers/openusage` at `cb21465`](https://github.com/robinebers/openusage/tree/cb21465e3d88d8b2075ca48d38c936b82177fb78).
 The MIT notice is shipped in the pricing resource bundle as `OpenUsage-LICENSE.txt`.
+Compressed logs are read with [Zstandard](https://github.com/facebook/zstd)
+(BSD licence), built from source by SwiftPM and linked into the app.
 The supplement's timestamp is **2026-09-30**. The catalogs include their own
 retrieval timestamps. Prices are bundled snapshots, updated by an app update;
 this version does not download live pricing or maintain historical tariffs.
@@ -198,16 +210,23 @@ per-model rows.
 - Files already read are recognised by path, size and modification time and
   skipped. Changed files are reread from their start so cumulative baselines
   stay valid.
-- Only regular `.jsonl` files under the selected Claude and Codex log roots,
+- Only regular `.jsonl` files (and `.jsonl.zst` for Codex) under the selected Claude and Codex log roots,
   `events.jsonl` under Copilot's, `meta.json` under Vibe's (16 MiB at most),
   `.db` files under Antigravity's conversations folder,
   and OpenCode's one database are read; symlinks inside them are skipped.
   OpenCode's folder is never walked. Credentials, settings and other files
   are ignored.
-- Each pass is bounded to 20,000 directory entries and 2,000 files per source
-  folder, 64 MiB per Codex file, 256 MiB of new reads, 1 MiB per line, 100,000
-  events per file read, and a 10-second discovery/read budget. Daily totals are
-  then rebuilt only for the days the pass touched.
+- Each pass is bounded to 200,000 directory entries per source folder, 2,000
+  files not read yet per source folder, 256 MiB of new reads, 1 MiB per line,
+  100,000 events per file read, and a 10-second discovery/read budget. Files
+  already read don't count against the 2,000, so a folder with more files is
+  worked through over several passes instead of being cut off; the panel says
+  how many are left. A compressed rollout may decompress to at most 4 GiB and
+  hold at most 1,000,000 requests (the 100,000-event bound applies to plain
+  logs), and is finished once started, so it can run past the time budget; it
+  counts against the byte budget by its compressed size, several times less
+  than what is actually read.
+  Daily totals are then rebuilt only for the days the pass touched.
 - Exceeding a limit shows **Partial total**. It does not quietly claim zero
   spend. Old cache entries and removed sources/files are dropped.
 
@@ -264,6 +283,11 @@ Antigravity readers, their token splits, the read-only database open,
 re-reading a grown session or updated message without double counting, the
 protobuf reader on malformed bytes, and default locations. The Antigravity
 tests use synthetic records only.
+
+`swift test --filter CompressedLogTests` covers zstd decompression (large,
+empty, multi-frame, damaged, cut-off and oversized input), compressed Codex
+rollouts in the scanner, a plain log and its compressed copy counting once,
+and a folder larger than one pass.
 
 `swift test --filter SpendTests` covers token arithmetic, cache bucket splitting,
 long-context and fast multipliers, bundled model resolution, unknown models,

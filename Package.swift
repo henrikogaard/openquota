@@ -1,7 +1,11 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-var packageDependencies: [Package.Dependency] = []
+// zstd: Codex compresses older session logs to .jsonl.zst, and neither macOS
+// nor Foundation can read that format.
+var packageDependencies: [Package.Dependency] = [
+    .package(url: "https://github.com/facebook/zstd", from: "1.5.6")
+]
 var openQuotaDependencies: [Target.Dependency] = ["OpenQuotaCore"]
 
 // Sparkle is macOS-only; declare it only when the manifest evaluates on macOS
@@ -36,7 +40,10 @@ let package = Package(
         ),
         .target(
             name: "OpenQuotaCore",
-            dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux]))],
+            dependencies: [
+                .target(name: "CSQLite", condition: .when(platforms: [.linux])),
+                .product(name: "libzstd", package: "zstd"),
+            ],
             path: "Sources/OpenQuotaCore",
             resources: [.process("Resources")]
         ),
@@ -54,7 +61,8 @@ let package = Package(
         ),
         .testTarget(
             name: "OpenQuotaCoreTests",
-            dependencies: ["OpenQuotaCore"],
+            // libzstd: tests compress their own fixtures.
+            dependencies: ["OpenQuotaCore", .product(name: "libzstd", package: "zstd")],
             path: "Tests/OpenQuotaCoreTests"
         )
     ]
