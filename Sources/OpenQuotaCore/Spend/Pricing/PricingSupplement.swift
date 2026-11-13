@@ -92,9 +92,14 @@ extension PricingSupplement {
                 outputPerMillion: entry.outputPerMillion,
                 cacheWritePerMillion: entry.cacheWritePerMillion ?? entry.inputPerMillion,
                 cacheReadPerMillion: entry.cacheReadPerMillion ?? entry.inputPerMillion * 0.1,
+                inputAbove200kPerMillion: entry.inputAboveThresholdPerMillion,
+                outputAbove200kPerMillion: entry.outputAboveThresholdPerMillion,
+                cacheWriteAbove200kPerMillion: entry.cacheWriteAboveThresholdPerMillion,
+                cacheReadAbove200kPerMillion: entry.cacheReadAboveThresholdPerMillion,
                 cacheReadIsExplicit: entry.cacheReadPerMillion != nil,
                 // Carry the declared multiplier onto the entry itself: scanners that flag fast mode
                 // on the request (Claude's `speed` field) price the base slug, never a `-fast` one.
+                longContextThresholdTokens: entry.longContextThresholdTokens ?? 200_000,
                 fastMultiplier: file.fastMultipliers?[model] ?? 1
             )
         }
@@ -124,12 +129,22 @@ extension PricingSupplement {
             var outputPerMillion: Double
             var cacheWritePerMillion: Double?
             var cacheReadPerMillion: Double?
+            var inputAboveThresholdPerMillion: Double?
+            var outputAboveThresholdPerMillion: Double?
+            var cacheWriteAboveThresholdPerMillion: Double?
+            var cacheReadAboveThresholdPerMillion: Double?
+            var longContextThresholdTokens: Int?
 
             enum CodingKeys: String, CodingKey {
                 case inputPerMillion = "input_per_million"
                 case outputPerMillion = "output_per_million"
                 case cacheWritePerMillion = "cache_write_per_million"
                 case cacheReadPerMillion = "cache_read_per_million"
+                case inputAboveThresholdPerMillion = "input_above_threshold_per_million"
+                case outputAboveThresholdPerMillion = "output_above_threshold_per_million"
+                case cacheWriteAboveThresholdPerMillion = "cache_write_above_threshold_per_million"
+                case cacheReadAboveThresholdPerMillion = "cache_read_above_threshold_per_million"
+                case longContextThresholdTokens = "long_context_threshold_tokens"
             }
         }
 

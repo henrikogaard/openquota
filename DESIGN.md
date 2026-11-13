@@ -46,7 +46,9 @@ macOS 26 Tahoe and later. The popover window keeps the system material; its card
   applies at once to the popover and Settings; system dialogs keep the system
   language.
 - `TabView` toolbar tabs: Accounts, History and General. History shows a range
-  picker (30 days, 90 days, 1 year, all), a cost/tokens switch, the total with
+  picker (today, yesterday, last 7 days, 30 days, 90 days, 1 year, all),
+  using a menu when the segmented options cannot fit. It includes a cost/tokens/footprint
+  switch, the total with
   a row per source (Claude CLI, Claude Desktop, each profile folder, Codex;
   email when known), a stacked bar chart per source (days, weeks or months;
   oranges for Claude, greens for Codex, blue OpenCode, purple Vibe, grey Copilot, indigo Antigravity), top models, catch-up progress, and

@@ -153,6 +153,7 @@ enum SpendCopy {
         switch value {
         case .today: text("Today", "I dag")
         case .yesterday: text("Yesterday", "I går")
+        case .sevenDays: text("7 Days", "7 dager")
         case .thirtyDays: text("30 Days", "30 dager")
         }
     }

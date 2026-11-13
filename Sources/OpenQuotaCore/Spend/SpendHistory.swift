@@ -86,7 +86,8 @@ public struct SpendHistory: Sendable, Equatable {
     func rows(in range: SpendHistoryRange, now: Date, calendar: Calendar) -> [Row] {
         guard let start = range.start(now: now, firstDay: firstDay, calendar: calendar) else { return [] }
         let first = Self.dayKey(start, calendar: calendar)
-        let last = Self.dayKey(now, calendar: calendar)
+        let end = range == .yesterday ? calendar.date(byAdding: .day, value: -1, to: now)! : now
+        let last = Self.dayKey(end, calendar: calendar)
         return rows.filter { $0.day >= first && $0.day <= last }
     }
 
@@ -105,12 +106,12 @@ public struct SpendHistory: Sendable, Equatable {
 }
 
 public enum SpendHistoryRange: String, CaseIterable, Sendable {
-    case days30, days90, year, all
+    case today, yesterday, days7, days30, days90, year, all
 
-    /// Bars are days for 30 and 90 days, weeks for a year, months for all.
+    /// Bars are days for ranges up to 90 days, weeks for a year, months for all.
     public var granularity: Calendar.Component {
         switch self {
-        case .days30, .days90: .day
+        case .today, .yesterday, .days7, .days30, .days90: .day
         case .year: .weekOfYear
         case .all: .month
         }
@@ -120,6 +121,9 @@ public enum SpendHistoryRange: String, CaseIterable, Sendable {
     func start(now: Date, firstDay: String?, calendar: Calendar) -> Date? {
         let today = calendar.startOfDay(for: now)
         switch self {
+        case .today: return today
+        case .yesterday: return calendar.date(byAdding: .day, value: -1, to: today)
+        case .days7: return calendar.date(byAdding: .day, value: -6, to: today)
         case .days30: return calendar.date(byAdding: .day, value: -29, to: today)
         case .days90: return calendar.date(byAdding: .day, value: -89, to: today)
         case .year: return calendar.date(byAdding: .day, value: -364, to: today)
