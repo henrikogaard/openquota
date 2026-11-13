@@ -36,6 +36,14 @@ enum DemoSnapshots {
                           resetsAt: Date().addingTimeInterval(1_500_000)),
                 ]),
             UsageSnapshot(
+                account: .init(providerID: "opencode-console", id: "demo-console#workspace", label: "Console workspace"),
+                providerID: "opencode-console",
+                windows: [
+                    .init(id: "console.5h", label: "5h", used: 25, limit: 100, unit: "%"),
+                    .init(id: "console.budget", label: "Budget $50", kind: .credits, used: 12.5, limit: 50, unit: "$"),
+                ],
+                creditsRemaining: 12.34, creditsUnit: "USD"),
+            UsageSnapshot(
                 account: .init(providerID: "opencode-go", id: "demo-oc2", label: "Work key"),
                 providerID: "opencode-go",
                 errorMessage: ProviderError.unauthorized.userMessage),

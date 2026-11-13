@@ -57,6 +57,7 @@ Each saved key/session has its own row. Other local providers discover their def
 | Claude Code | Passive status line, optional CLI check | Sanitized documented status-line readings; updates while you use Claude Code. Opt-in: runs your Claude CLI per profile folder every 30 minutes or on Refresh |
 | Codex / ChatGPT | Managed CLI sign-in | Codex app-server subscription limits and credits; isolated Codex home per connection |
 | OpenCode Go | Local API key | Rolling, weekly and monthly usage |
+| OpenCode Console | Account sign-in | Go limits, spend budgets and prepaid workspace balance when permitted |
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
 | Grok | Local OAuth | Billing-period usage; named local accounts |
 | Cursor | Experimental, manual session token | Cursor Models / Other Models allowance and on-demand spend; internal dashboard with legacy RPC fallback |

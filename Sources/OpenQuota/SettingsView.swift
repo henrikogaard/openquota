@@ -446,7 +446,7 @@ struct AccountDetail: View {
                 }
             }
             if let snapshot, !snapshot.windows.isEmpty || snapshot.errorMessage != nil
-                || (snapshot.providerID == "openrouter" && snapshot.creditsRemaining != nil) {
+                || (["openrouter", "opencode-console"].contains(snapshot.providerID) && snapshot.creditsRemaining != nil) {
                 Section(L("Usage", "Bruk")) {
                     ForEach(snapshot.windows) { window in
                         if snapshot.providerID == "openrouter", window.kind == .credits {
@@ -457,6 +457,11 @@ struct AccountDetail: View {
                     }
                     if snapshot.providerID == "openrouter" {
                         OpenRouterAccountReadings(snapshot: snapshot, showsPeriodSpend: true)
+                    }
+                    if snapshot.providerID == "opencode-console", let credits = snapshot.creditsRemaining {
+                        MetricLine(label: L("Balance", "Saldo"),
+                                   value: credits.formatted(.currency(code: "USD").precision(.fractionLength(2))),
+                                   detail: nil)
                     }
                     if let error = snapshot.errorMessage {
                         Text(providerError(error, providerID: snapshot.providerID)).foregroundStyle(.orange)
@@ -645,8 +650,8 @@ struct AccountDetail: View {
             L("Experimental: the web console's unofficial endpoints. Shows the included monthly usage and separate Vibe allowance as used percentages, plus any pay-as-you-go credits. Sessions expire roughly monthly — paste a fresh Cookie header then.",
               "Eksperimentell: nettkonsollens uoffisielle endepunkter. Viser inkludert månedlig bruk og separat Vibe-kvote som brukt prosent, pluss eventuelle pay-as-you-go-kreditter. Økter utløper omtrent månedlig — lim inn en fersk Cookie-overskrift da.")
         case .saved(let account) where account.account.providerID == "opencode-console":
-            L("Experimental: OpenQuota's own OpenCode console sign-in, separate from the OpenCode CLI's. Shows this workspace's Go limits and spend budgets; the prepaid balance is not available. If the card shows a sign-in error, sign in again under Add Account → OpenCode Go. Removing the last workspace of a sign-in deletes its saved session.",
-              "Eksperimentell: OpenQuotas egen pålogging til OpenCode-konsollen, atskilt fra OpenCode CLI. Viser Go-grensene og forbruksbudsjettene til dette arbeidsområdet; forhåndsbetalt saldo er ikke tilgjengelig. Hvis kortet viser en påloggingsfeil, logg inn på nytt under Legg til konto → OpenCode Go. Når du fjerner det siste arbeidsområdet i en pålogging, slettes den lagrede økten.")
+            L("Experimental: OpenQuota's own OpenCode console sign-in, separate from the OpenCode CLI's. Shows this workspace's Go limits, spend budgets and prepaid balance when permitted. If the card shows a sign-in error, sign in again under Add Account → OpenCode Go. Removing the last workspace of a sign-in deletes its saved session.",
+              "Eksperimentell: OpenQuotas egen pålogging til OpenCode-konsollen, atskilt fra OpenCode CLI. Viser Go-grensene, forbruksbudsjettene og forhåndsbetalt saldo for dette arbeidsområdet når tilgangen tillater det. Hvis kortet viser en påloggingsfeil, logg inn på nytt under Legg til konto → OpenCode Go. Når du fjerner det siste arbeidsområdet i en pålogging, slettes den lagrede økten.")
         case .saved(let account) where account.account.providerID == "requesty":
             L("Balance is shared by every key in the organization.", "Saldoen deles av alle nøklene i organisasjonen.")
         case .saved(let account) where model.isExperimentalProvider(account.account.providerID):

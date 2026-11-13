@@ -1,9 +1,9 @@
 import Foundation
 
-/// OpenCode Console sign-in: workspaces, Go limits and spend budgets.
+/// OpenCode Console sign-in: workspaces, Go limits, spend budgets and prepaid balance.
 ///
 /// Uses the device sign-in the OpenCode CLI itself uses (`opencode-cli`) and
-/// the same console routes it calls. None of them is a documented public API.
+/// Console endpoints. None of them is a documented public API.
 /// OpenQuota keeps its own session, separate from the CLI's, so refreshing it
 /// never signs the CLI out.
 ///
@@ -11,7 +11,8 @@ import Foundation
 ///    until the user approves the code in the browser.
 /// 2. `GET /console/api/user` and `/console/api/orgs`: email and workspaces.
 /// 3. Per workspace: `GET /zen/go/v1/usage` (Go limits; 403 = no Go) and
-///    `GET /console/api/policies/current-budgets` (403 = none).
+///    `GET /console/api/policies/current-budgets` (403 = none), and
+///    `GET /console/api/billing/status` (optional, prepaid balances only).
 public struct OpenCodeConsoleProvider: UsageProvider {
     public let id = "opencode-console"
     public let displayName = "OpenCode"
@@ -249,18 +250,64 @@ public struct OpenCodeConsoleProvider: UsageProvider {
         }
         async let goResult = goWindows(session, workspaceID: workspaceID)
         async let budgetResult = budgetWindows(session, workspaceID: workspaceID)
+        async let balanceResult = prepaidBalance(session, workspaceID: workspaceID, accountID: account.id)
         let go = try await goResult
         let windows = try await go + budgetResult
-        guard !windows.isEmpty else {
+        let balance = try await balanceResult
+        guard !windows.isEmpty || balance.usd != nil else {
             throw ProviderError.badResponse(Localized.text(
-                "No Go subscription or budget in this workspace.",
-                "Ingen Go-abonnement eller budsjett i dette arbeidsområdet."))
+                "No Go limits, budgets or prepaid balance are available in this workspace.",
+                "Ingen Go-grenser, budsjetter eller forhåndsbetalt saldo er tilgjengelig i dette arbeidsområdet."))
         }
         var identity = account.account
         identity.label = workspace.label ?? workspace.name
         identity.email = session.email
         identity.plan = go.isEmpty ? nil : "Go"
-        return UsageSnapshot(account: identity, providerID: id, windows: windows)
+        return UsageSnapshot(account: identity, providerID: id, windows: windows,
+                             creditsRemaining: balance.usd, creditsUnit: balance.usd == nil ? nil : "USD",
+                             errorMessage: balance.message)
+    }
+
+    private struct PrepaidBalance: Sendable {
+        var usd: Double?
+        var message: String?
+    }
+
+    private func prepaidBalance(_ session: Session, workspaceID: String, accountID: String) async throws -> PrepaidBalance {
+        let rateLimited = Localized.text("Prepaid balance is rate limited. Will retry later.",
+                                         "For mange forespørsler om forhåndsbetalt saldo. Prøver igjen senere.")
+        guard await gate.shouldReadBilling(accountID) else { return PrepaidBalance(message: rateLimited) }
+        do {
+            guard let root = try await get(
+                "\(Self.server)/api/billing/status", token: session.access,
+                headers: ["x-org-id": workspaceID]) as? [String: Any],
+                  let billingMode = root["billingMode"] as? String else {
+                throw ProviderError.badResponse("billing status")
+            }
+            // Available capacity can include an invoiced credit line. Only an
+            // explicitly prepaid ledger balance is displayed as wallet funds.
+            guard billingMode == "prepaid" else { return PrepaidBalance() }
+            guard let raw = root["balanceMicroCents"] as? String, let microCents = Int64(raw) else {
+                throw ProviderError.badResponse("prepaid balance")
+            }
+            return PrepaidBalance(usd: Double(microCents) / 100_000_000)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            if case ProviderError.rateLimited(let delay) = error {
+                await gate.deferBilling(accountID, until: Date().addingTimeInterval(delay ?? 300))
+                return PrepaidBalance(message: rateLimited)
+            }
+            if case ProviderError.unauthorized = error {
+                return PrepaidBalance(message: Localized.text(
+                    "Prepaid balance access was denied. Workspace owner or admin access may be required.",
+                    "Tilgang til forhåndsbetalt saldo ble avvist. Tilgang som eier eller administrator i arbeidsområdet kan være nødvendig."))
+            }
+            return PrepaidBalance(message: Localized.text(
+                "Prepaid balance is unavailable. Will retry on refresh.",
+                "Forhåndsbetalt saldo er utilgjengelig. Prøver igjen ved oppdatering."))
+        }
     }
 
     private func goWindows(_ session: Session, workspaceID: String) async throws -> [UsageWindow] {
@@ -442,6 +489,16 @@ public struct OpenCodeConsoleProvider: UsageProvider {
 /// get its result.
 private actor SessionGate {
     private var running: [String: Task<OpenCodeConsoleProvider.Session, Error>] = [:]
+    private var billingRetryAfter: [String: Date] = [:]
+
+    func shouldReadBilling(_ accountID: String, now: Date = Date()) -> Bool {
+        billingRetryAfter = billingRetryAfter.filter { $0.value > now }
+        return billingRetryAfter[accountID] == nil
+    }
+
+    func deferBilling(_ accountID: String, until: Date) {
+        billingRetryAfter[accountID] = until
+    }
 
     func run(
         _ key: String, _ operation: @escaping @Sendable () async throws -> OpenCodeConsoleProvider.Session

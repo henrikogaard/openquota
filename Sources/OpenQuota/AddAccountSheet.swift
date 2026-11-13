@@ -357,15 +357,15 @@ private struct OpenCodeSignInForm: View {
                     }
                 } else {
                     Section {
-                        Text(L("Shows your workspaces with their Go limits and spend budgets. The prepaid balance is not available: OpenCode has no confirmed way to read it.",
-                               "Viser arbeidsområdene dine med Go-grenser og forbruksbudsjetter. Forhåndsbetalt saldo er ikke tilgjengelig: OpenCode har ingen bekreftet måte å lese den på."))
+                        Text(L("Shows your workspaces with their Go limits, spend budgets and prepaid balance when your account has billing access.",
+                               "Viser arbeidsområdene dine med Go-grenser, forbruksbudsjetter og forhåndsbetalt saldo når kontoen din har faktureringstilgang."))
                         Toggle(L("Enable experimental access", "Aktiver eksperimentell tilgang"), isOn: $consent)
                             .toggleStyle(.checkbox)
                     } header: {
                         Text(L("Sign in to OpenCode · Experimental", "Logg inn i OpenCode · Eksperimentell"))
                     } footer: {
-                        Text(L("OpenQuota signs in the way the OpenCode CLI does, as the client “opencode-cli”, and reads the same console routes. They are not a documented public API and may change or stop working. The sign-in is OpenQuota's own, stored in this Mac’s Keychain; your OpenCode CLI login is not read or changed. It can act as your OpenCode account, so remove it here if you stop using it.",
-                               "OpenQuota logger inn på samme måte som OpenCode CLI, som klienten «opencode-cli», og leser de samme konsollrutene. De er ikke et dokumentert offentlig API og kan endres eller slutte å virke. Påloggingen er OpenQuotas egen og lagres i nøkkelringen på denne Macen; OpenCode CLI-påloggingen din verken leses eller endres. Den kan opptre som OpenCode-kontoen din, så fjern den her hvis du slutter å bruke den."))
+                        Text(L("OpenQuota signs in the way the OpenCode CLI does, as the client “opencode-cli”, and reads Console endpoints. They are not a documented public API and may change or stop working. The sign-in is OpenQuota's own, stored in this Mac’s Keychain; your OpenCode CLI login is not read or changed. It can act as your OpenCode account, so remove it here if you stop using it.",
+                               "OpenQuota logger inn på samme måte som OpenCode CLI, som klienten «opencode-cli», og leser konsollendepunkter. De er ikke et dokumentert offentlig API og kan endres eller slutte å virke. Påloggingen er OpenQuotas egen og lagres i nøkkelringen på denne Macen; OpenCode CLI-påloggingen din verken leses eller endres. Den kan opptre som OpenCode-kontoen din, så fjern den her hvis du slutter å bruke den."))
                     }
                 }
                 if let errorText {
