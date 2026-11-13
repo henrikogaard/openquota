@@ -43,8 +43,9 @@ enum DemoSnapshots {
                 account: .init(providerID: "openrouter", id: "demo-key1", label: "Personal key"),
                 providerID: "openrouter",
                 windows: [.init(id: "openrouter.key usage", label: "Key usage", kind: .credits,
-                                used: 3, unit: "$")],
-                creditsRemaining: 18.75, creditsUnit: "USD"),
+                                used: 3, limit: 10, remaining: 7, unit: "$")],
+                creditsRemaining: 3.75, creditsUnit: "USD",
+                openRouter: .init(totalSpend: 3, dailySpend: 0.50, monthlySpend: 3)),
             UsageSnapshot(
                 account: .init(providerID: "mistral", id: "demo-mistral", label: "Pro"),
                 providerID: "mistral",

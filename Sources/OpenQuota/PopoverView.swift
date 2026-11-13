@@ -290,7 +290,9 @@ struct AccountUsage: View {
                 .foregroundStyle(.secondary)
             }
             ForEach(snapshot.windows) { window in
-                if CompactQuotaRow.fits(window) {
+                if snapshot.providerID == "openrouter", window.kind == .credits {
+                    OpenRouterKeyUsage(window: window, totalSpend: snapshot.openRouter?.totalSpend)
+                } else if CompactQuotaRow.fits(window) {
                     CompactQuotaRow(window: window)
                 } else {
                     QuotaRow(window: window)
@@ -299,10 +301,11 @@ struct AccountUsage: View {
             if !sameAccountLabels.isEmpty {
                 SameAccountWarning(labels: sameAccountLabels, compact: true)
             }
-            if let balance {
+            if snapshot.providerID == "openrouter" {
+                OpenRouterAccountReadings(snapshot: snapshot)
+            } else if let balance {
                 MetricLine(
-                    label: snapshot.providerID == "openrouter"
-                        ? L("Account balance", "Kontosaldo") : L("Balance", "Saldo"),
+                    label: L("Balance", "Saldo"),
                     value: balance, detail: nil)
             }
             if snapshot.windows.isEmpty && balance == nil && snapshot.errorMessage == nil {

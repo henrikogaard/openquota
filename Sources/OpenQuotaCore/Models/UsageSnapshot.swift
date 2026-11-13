@@ -46,6 +46,7 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public var windows: [UsageWindow]
     /// Available credits, when the provider exposes a balance.
     public var creditsRemaining: Double?
+    public var openRouter: OpenRouterDetails?
     public var creditsUnit: String?
     /// When this data was fetched.
     public var fetchedAt: Date
@@ -72,9 +73,11 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         isStale: Bool = false,
         errorMessage: String? = nil,
         lastAttemptedAt: Date? = nil,
-        credentialSource: CredentialSource? = nil
+        credentialSource: CredentialSource? = nil,
+        openRouter: OpenRouterDetails? = nil
     ) {
         self.account = account
+        self.openRouter = openRouter
         self.providerID = providerID
         self.windows = windows
         self.creditsRemaining = creditsRemaining

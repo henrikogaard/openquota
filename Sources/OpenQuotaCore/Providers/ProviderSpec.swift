@@ -80,6 +80,9 @@ public struct ProviderSpec: Codable, Sendable {
         }
     }
 
+    // Internal routing for the bundled spec; custom JSON specs stay generic.
+    var usesOpenRouterReadings = false
+
     public var id: String
     public var displayName: String
     /// Primary fetch URL. May contain {now}, {today}, {d7}, {d30} templates —

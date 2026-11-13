@@ -445,14 +445,28 @@ struct AccountDetail: View {
                     SameAccountWarning(labels: same.map { $0.account.label ?? L("Default", "Standard") })
                 }
             }
-            if let snapshot, !snapshot.windows.isEmpty || snapshot.errorMessage != nil {
+            if let snapshot, !snapshot.windows.isEmpty || snapshot.errorMessage != nil
+                || (snapshot.providerID == "openrouter" && snapshot.creditsRemaining != nil) {
                 Section(L("Usage", "Bruk")) {
                     ForEach(snapshot.windows) { window in
-                        WindowRow(window: window).font(.callout)
+                        if snapshot.providerID == "openrouter", window.kind == .credits {
+                            OpenRouterKeyUsage(window: window, totalSpend: snapshot.openRouter?.totalSpend)
+                        } else {
+                            WindowRow(window: window).font(.callout)
+                        }
+                    }
+                    if snapshot.providerID == "openrouter" {
+                        OpenRouterAccountReadings(snapshot: snapshot, showsPeriodSpend: true)
                     }
                     if let error = snapshot.errorMessage {
                         Text(providerError(error, providerID: snapshot.providerID)).foregroundStyle(.orange)
                     }
+                }
+            }
+            if case .saved(let account) = item.kind, account.account.providerID == "openrouter" {
+                Section(L("Balance warning", "Saldovarsel")) {
+                    OpenRouterBalancePreference(accountID: account.id)
+                        .disabled(model.isDemo)
                 }
             }
             if let snapshot {

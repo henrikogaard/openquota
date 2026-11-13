@@ -206,8 +206,12 @@ public actor RefreshScheduler {
 
     private func recordResult(accountID: String, result: Result<UsageSnapshot, ProviderError>) {
         switch result {
-        case .success:
-            failures.removeValue(forKey: accountID)
+        case .success(let snapshot):
+            if let delay = snapshot.openRouter?.retryAfter {
+                recordResult(accountID: accountID, result: .failure(.rateLimited(retryAfter: delay)))
+            } else {
+                failures.removeValue(forKey: accountID)
+            }
         case .failure(let error):
             let count = (failures[accountID]?.count ?? 0) + 1
             // Rate-limit responses carry a server hint; honor it over backoff.
