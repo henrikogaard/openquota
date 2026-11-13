@@ -41,7 +41,10 @@ enum DemoSnapshots {
                 errorMessage: ProviderError.unauthorized.userMessage),
             UsageSnapshot(
                 account: .init(providerID: "openrouter", id: "demo-key1", label: "Personal key"),
-                providerID: "openrouter", creditsRemaining: 18.75, creditsUnit: "USD"),
+                providerID: "openrouter",
+                windows: [.init(id: "openrouter.key usage", label: "Key usage", kind: .credits,
+                                used: 3, unit: "$")],
+                creditsRemaining: 18.75, creditsUnit: "USD"),
             UsageSnapshot(
                 account: .init(providerID: "mistral", id: "demo-mistral", label: "Pro"),
                 providerID: "mistral",

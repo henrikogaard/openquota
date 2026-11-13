@@ -263,8 +263,10 @@ struct AccountUsage: View {
     var credentialSourceName: String?
 
     private var balance: String? {
+        // OpenRouter key usage has a different scope from the account balance.
         guard let credits = snapshot.creditsRemaining,
-              !snapshot.windows.contains(where: { $0.kind == .credits }) else { return nil }
+              (snapshot.providerID == "openrouter"
+               || !snapshot.windows.contains(where: { $0.kind == .credits })) else { return nil }
         return Format.amount(credits, unit: snapshot.creditsUnit)
     }
 
@@ -298,7 +300,10 @@ struct AccountUsage: View {
                 SameAccountWarning(labels: sameAccountLabels, compact: true)
             }
             if let balance {
-                MetricLine(label: L("Balance", "Saldo"), value: balance, detail: nil)
+                MetricLine(
+                    label: snapshot.providerID == "openrouter"
+                        ? L("Account balance", "Kontosaldo") : L("Balance", "Saldo"),
+                    value: balance, detail: nil)
             }
             if snapshot.windows.isEmpty && balance == nil && snapshot.errorMessage == nil {
                 Text(snapshot.providerID == "claude"

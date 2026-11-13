@@ -23,7 +23,7 @@ public enum BuiltinProviders {
         }(),
         windows: [
             .init(
-                label: "Credits",
+                label: "Key usage",
                 kind: .credits,
                 // /api/v1/key: usage + optional limit; credits endpoint gives the balance.
                 url: "https://openrouter.ai/api/v1/key",

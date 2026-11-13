@@ -49,7 +49,7 @@ public enum Localized {
         "Plan": "Plan", "Budget": "Budsjett", "Requests": "Forespørsler", "Search": "Søk", "Characters": "Tegn",
         "Subscription": "Abonnement", "Points": "Poeng", "Billing": "Fakturering",
         "Allowance": "Kvote", "Lifetime spend": "Totalt forbruk", "Key spend": "Nøkkelforbruk",
-        "Spend 30d": "Forbruk 30d", "Plan credits": "Plankreditter", "Premium week": "Premium-uke",
+        "Key usage": "Nøkkelbruk", "Spend 30d": "Forbruk 30d", "Plan credits": "Plankreditter", "Premium week": "Premium-uke",
         "Sessions (30d)": "Økter (30d)", "Input (30d)": "Inndata (30d)", "Output (30d)": "Utdata (30d)",
         "Cursor Models": "Cursor-modeller", "Other Models": "Andre modeller", "On-demand spend": "Ekstraforbruk",
     ]

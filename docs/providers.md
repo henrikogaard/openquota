@@ -14,7 +14,7 @@ and limits](estimated-spend.md).
 
 | Provider | Auth | Endpoint | Notes |
 |---|---|---|---|
-| OpenRouter | bearer | `openrouter.ai/api/v1/credits` + `/api/v1/key` | total credits minus consumed credits; independent key limit |
+| OpenRouter | bearer, management key for account balance | `openrouter.ai/api/v1/credits` + `/api/v1/key` | total credits minus consumed credits; independent key limit |
 | Requesty | bearer | `api-v2.requesty.ai/v1/manage/org` | organization balance; management API access required |
 | DeepSeek | bearer | `api.deepseek.com/user/balance` | USD balance |
 | Moonshot | bearer | `api.moonshot.ai/v1/users/me/balance` | unverified |
