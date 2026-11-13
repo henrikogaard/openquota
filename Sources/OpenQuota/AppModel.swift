@@ -589,7 +589,7 @@ final class AppModel {
     func providerName(_ id: String) -> String {
         providers.first(where: { $0.id == id })?.displayName
             ?? hiddenProviderNames[id]
-            ?? ["opencode": "OpenCode Go", "opencode-go": "OpenCode Go", "openrouter": "OpenRouter",
+            ?? ["opencode": "OpenCode Go", "opencode-go": "OpenCode Go", "opencode-console": "OpenCode", "openrouter": "OpenRouter",
                 "claude": "Claude Code", "codex": "Codex / ChatGPT",
                 "mistral": "Mistral"][id] ?? id.capitalized
     }
@@ -613,8 +613,8 @@ final class AppModel {
             L("Mistral's web console session (admin.mistral.ai); unofficial endpoints, not a public API",
               "Nettkonsolløkten til Mistral (admin.mistral.ai); uoffisielle endepunkter, ikke et offentlig API")
         case "opencode-console":
-            L("OpenCode console sign-in · the routes OpenCode's own CLI uses; not a documented public API",
-              "OpenCode-konsollpålogging · rutene OpenCodes egen CLI bruker; ikke et dokumentert offentlig API")
+            L("OpenCode console sign-in · Console endpoints, not a documented public API",
+              "OpenCode-konsollpålogging · konsollendepunkter, ikke et dokumentert offentlig API")
         case "opencode", "opencode-go":
             L("OpenCode Go workspace usage endpoint · one key per workspace subscription",
               "Bruksendepunkt for OpenCode Go-arbeidsområde · én nøkkel per arbeidsområdeabonnement")

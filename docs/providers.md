@@ -163,10 +163,11 @@ figures, not an estimate. Nothing here is relabeled as anything else.
 
 Settings → Accounts → + → OpenCode Go → **Sign in to OpenCode** shows a code,
 opens opencode.ai and waits until you approve the code there. It then adds one
-card per workspace, each with that workspace's Go limits and spend budgets.
+card per workspace, each with that workspace's Go limits, spend budgets and
+prepaid balance when billing access permits it.
 
 There is no documented public API for this. OpenQuota uses the device sign-in
-and the console routes of OpenCode's own open-source CLI
+and Console endpoints. The Go and budget reads follow OpenCode's open-source CLI
 (`packages/core/src/plugin/provider/opencode.ts`, `usage-limits.ts` in
 `anomalyco/opencode`), including its client id `opencode-cli`, because the
 console offers no way to register another client. The routes may change or
@@ -179,16 +180,18 @@ stop working.
 | Account | `GET …/api/user`, `GET …/api/orgs` | email and workspaces; a sign-in limited to one workspace (`org_id`) keeps only that one |
 | Go limits | `GET opencode.ai/zen/go/v1/usage` + `x-opencode-org-id` | 5h/weekly/monthly percent and reset; 403 = no Go in that workspace |
 | Budgets | `GET …/api/policies/current-budgets` + `x-org-id` | `spentDollars` against `limitDollars` with reset; 403 = none. With a limit the row shows percent left and the limit in its name ("Budget $50"); without one it shows the amount spent and no percentage |
+| Balance | `GET …/api/billing/status` + `x-org-id` | prepaid `balanceMicroCents` integer string / 100,000,000 → USD; invoiced credit capacity is not wallet funds; optional failures leave Go/budgets visible |
 | Renew | `POST …/auth/device/token` (refresh grant) | when the access token is within a minute of expiry; the rotated refresh token is saved; cards of one sign-in share one renewal |
 
-- **Not shown: the prepaid Zen balance.** No route for it appears in
-  OpenCode's own source or docs, so it is not read or guessed.
+- The prepaid balance comes from the Console billing endpoint. Missing, malformed
+  or denied billing data never becomes a zero balance; it shows a scoped warning.
+  Billing `Retry-After` cooldowns are per account and do not pause Go/budget reads.
 - The session is OpenQuota's own, stored as one item in the device-only
   Keychain. The OpenCode CLI's login, database and `auth.json` are not read
   for it and are not changed.
 - All requests go to `opencode.ai` over HTTPS, refuse redirects and send
   `User-Agent: OpenQuota`.
-- A workspace with neither Go nor a budget shows that as an error on its
+- A workspace with no Go limits, budget or prepaid balance shows an error on its
   card; remove the card to hide it. Removing the last workspace of a sign-in
   deletes the saved session (it is not revoked at OpenCode).
 - Signing in again with the same account replaces the session and keeps the
@@ -198,8 +201,11 @@ stop working.
   until the code expires.
 - A rejected or expired sign-in shows a sign-in error; sign in again.
 
-Fixture tests cover the sign-in, renewal and mapping. No live OpenCode account
-has verified this connector yet.
+Fixture tests cover sign-in, renewal, quota mapping and optional billing. An
+authorized read on 2026-11-13 confirmed HTTP 200 and the prepaid microcent-string
+response with an existing OpenQuota Console session, without renewal or writes.
+Go/budget readings and packaged-app behavior have not been independently
+compared with a live dashboard.
 
 ## Subscription integrations (explicit opt-in)
 

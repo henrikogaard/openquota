@@ -10,8 +10,8 @@ private final class ScriptedHTTP: HTTPClient, @unchecked Sendable {
 
     var requests: [HTTPRequest] { lock.withLock { sent } }
 
-    func queue(_ match: String, _ answers: (Int, String)...) {
-        let responses = answers.map { HTTPResponse(status: $0.0, headers: [:], body: Data($0.1.utf8)) }
+    func queue(_ match: String, headers: [String: String] = [:], _ answers: (Int, String)...) {
+        let responses = answers.map { HTTPResponse(status: $0.0, headers: headers, body: Data($0.1.utf8)) }
         lock.withLock {
             queues.removeAll { $0.match == match }
             queues.append((match, responses))
@@ -222,7 +222,7 @@ final class OpenCodeConsoleProviderTests: XCTestCase {
         XCTAssertEqual(budget.used, 12.5)
         XCTAssertEqual(budget.limit, 50)
         XCTAssertEqual(budget.unit, "$")
-        XCTAssertNil(snapshot.creditsRemaining, "The prepaid balance is not read")
+        XCTAssertNil(snapshot.creditsRemaining, "The optional billing endpoint is unavailable in this fixture")
 
         let go = try XCTUnwrap(http.last("/zen/go/v1/usage"))
         XCTAssertEqual(go.url.absoluteString, "https://opencode.ai/zen/go/v1/usage")
@@ -230,6 +230,101 @@ final class OpenCodeConsoleProviderTests: XCTestCase {
         XCTAssertEqual(go.headers["x-opencode-org-id"], "wrk_b")
         XCTAssertEqual(http.last("/api/policies/current-budgets")?.headers["x-org-id"], "wrk_b")
         XCTAssertTrue(http.requests.allSatisfy { $0.url.host == "opencode.ai" && $0.url.scheme == "https" })
+    }
+
+    func test_prepaidBalanceMapsMicroCentsAndKeepsGoAndBudgets() async throws {
+        let (provider, http, _) = make()
+        _ = try await signIn(provider, http)
+        http.queue("/api/billing/status", (200, #"{"billingMode":"prepaid","balanceMicroCents":"1234567890","availableMicroCents":"1200000000"}"#))
+        let account = try await provider.accounts()[1]
+        let snapshot = try await provider.refresh(account: account)
+        XCTAssertEqual(try XCTUnwrap(snapshot.creditsRemaining), 12.3456789, accuracy: 0.00000001)
+        XCTAssertEqual(snapshot.creditsUnit, "USD")
+        XCTAssertEqual(snapshot.windows.count, 4)
+        let request = try XCTUnwrap(http.last("/api/billing/status"))
+        XCTAssertEqual(request.headers["x-org-id"], "wrk_b")
+        XCTAssertEqual(request.headers["Authorization"], "Bearer access-1")
+        XCTAssertEqual(request.headers["User-Agent"], "OpenQuota")
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertFalse(request.allowsRedirects)
+    }
+
+    func test_zeroPrepaidBalanceIsValidWithoutGoOrBudgets() async throws {
+        let (provider, http, _) = make()
+        _ = try await signIn(provider, http)
+        http.queue("/zen/go/v1/usage", (403, "{}"))
+        http.queue("/api/policies/current-budgets", (403, "{}"))
+        http.queue("/api/billing/status", (200, #"{"billingMode":"prepaid","balanceMicroCents":"0"}"#))
+        let snapshot = try await provider.refresh(account: try await provider.accounts()[0])
+        XCTAssertEqual(snapshot.creditsRemaining, 0)
+        XCTAssertTrue(snapshot.windows.isEmpty)
+        XCTAssertNil(snapshot.errorMessage)
+    }
+
+    func test_billingFailuresKeepQuotaAndNeverInventOrDiscloseBalance() async throws {
+        let answers: [(Int, String)] = [
+            (403, "provider-private-diagnostic"), (500, "provider-private-diagnostic"),
+            (200, "not json"), (200, "{}"),
+            (200, #"{"billingMode":"prepaid","balanceMicroCents":"NaN"}"#),
+            (200, #"{"billingMode":"prepaid","balanceMicroCents":"9999999999999999999999999"}"#),
+            (200, #"{"billingMode":"prepaid","balanceMicroCents":true}"#),
+            (200, #"{"billingMode":"prepaid","availableMicroCents":"5000000000"}"#)
+        ]
+        for answer in answers {
+            let (provider, http, _) = make()
+            _ = try await signIn(provider, http)
+            http.queue("/api/billing/status", answer)
+            let snapshot = try await provider.refresh(account: try await provider.accounts()[0])
+            XCTAssertNil(snapshot.creditsRemaining)
+            XCTAssertNil(snapshot.creditsUnit)
+            XCTAssertEqual(snapshot.windows.count, 4)
+            let warning = try XCTUnwrap(snapshot.errorMessage)
+            XCTAssertFalse(warning.contains("provider-private-diagnostic"))
+        }
+    }
+
+    func test_invoicedCapacityIsNotPrepaidCredit() async throws {
+        let (provider, http, _) = make()
+        _ = try await signIn(provider, http)
+        http.queue("/api/billing/status", (200, #"{"billingMode":"invoiced","balanceMicroCents":"0","availableMicroCents":"50000000000","creditLimitMicroCents":"50000000000"}"#))
+        let snapshot = try await provider.refresh(account: try await provider.accounts()[0])
+        XCTAssertNil(snapshot.creditsRemaining)
+        XCTAssertNil(snapshot.errorMessage)
+        XCTAssertEqual(snapshot.windows.count, 4)
+    }
+
+    func test_partialBillingFailureRemovesOldBalanceRatherThanCallingItFresh() async throws {
+        let (provider, http, _) = make()
+        _ = try await signIn(provider, http)
+        http.queue("/api/billing/status", (200, #"{"billingMode":"prepaid","balanceMicroCents":"1234000000"}"#), (403, "{}"))
+        let account = try await provider.accounts()[0]
+        let store = SnapshotStore()
+        await store.finishRefresh(accountID: account.id, result: .success(try await provider.refresh(account: account)))
+        await store.finishRefresh(accountID: account.id, result: .success(try await provider.refresh(account: account)))
+        let latest = await store.snapshot(for: account.id)
+        XCTAssertNil(latest?.creditsRemaining)
+        XCTAssertEqual(latest?.windows.count, 4)
+        XCTAssertNotNil(latest?.errorMessage)
+        XCTAssertFalse(latest?.isStale ?? true)
+    }
+
+    func test_billingRetryAfterIsScopedToItsAccountAndDoesNotDelayGo() async throws {
+        let (provider, http, _) = make()
+        _ = try await signIn(provider, http)
+        let accounts = try await provider.accounts()
+        http.queue("/api/billing/status", headers: ["Retry-After": "60"],
+                   (429, "{}"), (200, #"{"billingMode":"prepaid","balanceMicroCents":"250000000"}"#))
+        let first = try await provider.refresh(account: accounts[0])
+        let retry = try await provider.refresh(account: accounts[0])
+        XCTAssertEqual(first.windows.count, 4)
+        XCTAssertEqual(retry.windows.count, 4)
+        XCTAssertNotNil(retry.errorMessage)
+        XCTAssertEqual(http.count("/api/billing/status"), 1)
+        XCTAssertEqual(http.count("/zen/go/v1/usage"), 2)
+        let otherWorkspace = try await provider.refresh(account: accounts[1])
+        XCTAssertEqual(otherWorkspace.creditsRemaining, 2.5)
+        XCTAssertNil(otherWorkspace.errorMessage)
+        XCTAssertEqual(http.last("/api/billing/status")?.headers["x-org-id"], "wrk_b")
     }
 
     func test_workspaceWithoutGoShowsBudgetsOnlyAndNothingAtAllIsAnError() async throws {

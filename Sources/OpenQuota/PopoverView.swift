@@ -263,10 +263,13 @@ struct AccountUsage: View {
     var credentialSourceName: String?
 
     private var balance: String? {
-        // OpenRouter key usage has a different scope from the account balance.
+        // Key usage and workspace budgets are separate from prepaid wallet funds.
         guard let credits = snapshot.creditsRemaining,
-              (snapshot.providerID == "openrouter"
+              (snapshot.providerID == "openrouter" || snapshot.providerID == "opencode-console"
                || !snapshot.windows.contains(where: { $0.kind == .credits })) else { return nil }
+        if snapshot.providerID == "opencode-console" {
+            return credits.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+        }
         return Format.amount(credits, unit: snapshot.creditsUnit)
     }
 
