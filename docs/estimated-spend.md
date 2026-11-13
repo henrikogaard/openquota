@@ -118,7 +118,9 @@ LiteLLM/models.dev snapshots and supplement, from
 The MIT notice is shipped in the pricing resource bundle as `OpenUsage-LICENSE.txt`.
 Compressed logs are read with [Zstandard](https://github.com/facebook/zstd)
 (BSD licence), built from source by SwiftPM and linked into the app.
-The supplement's timestamp is **2026-09-30**. The catalogs include their own
+The upstream supplement snapshot is dated **2026-09-30**, with targeted
+OpenQuota additions checked on **2026-11-13** for Fable 5.2, Haiku 5.5 and
+Gemini 4 Hydrogen. The catalogs include their own
 retrieval timestamps. Prices are bundled snapshots, updated by an app update;
 this version does not download live pricing or maintain historical tariffs.
 They represent the bundled API rates, even for older requests.
@@ -294,3 +296,27 @@ long-context and fast multipliers, bundled model resolution, unknown models,
 recorded-cost precedence, request/replay deduplication, Codex cumulative deltas,
 child replay filtering, cache refresh/deletion, scan limits and local calendar
 boundaries (including daylight saving).
+
+## Short ranges and missing prices
+
+History includes Today, Yesterday and Last 7 Days, alongside the existing longer
+ranges. Days follow this Mac's local calendar; Last 7 Days includes today plus
+six earlier days. Single-day charts are daily totals, not hourly activity.
+At narrow Settings widths, the range selector uses a menu so all options remain
+accessible. The compact Estimated Spend card also offers 7 Days.
+
+Models without known prices still contribute token counts, but not dollar
+value. History warns about those exclusions and about unreadable log records.
+When an app update adds a missing rate, retained previously unpriced request
+records are repriced on the next scan, even if their logs have not changed.
+This preserves deduplication and does not delete history. Already pruned request
+records cannot be reconstructed from daily token aggregates alone, so their
+saved totals are retained.
+
+The targeted rate additions use the published [Fable 5.2 rates](https://platform.claude.com/docs/en/models/fable-5-2/overview),
+[Fable fast pricing](https://platform.claude.com/docs/en/build-with-claude/fast-mode),
+[Haiku 5.5 rates](https://platform.claude.com/docs/en/models/haiku-5-5/overview),
+and [Gemini 4 Hydrogen rates](https://ai.google.dev/gemini-api/docs/pricing#gemini-4-hydrogen).
+Haiku's 100k prompt threshold applies to the whole request, including cache
+and output rates. These changes do not turn local token estimates into a
+complete record of account billing or activity on other devices.

@@ -79,6 +79,16 @@ struct FootprintView: View {
                 y: .value("kWh", bucket.footprint.energyWh.mid / 1000))
             .foregroundStyle(Color.accentColor)
         }
+        .chartXAxis {
+            if range == .today || range == .yesterday {
+                AxisMarks(values: .stride(by: .day)) {
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                }
+            } else {
+                AxisMarks(values: .automatic(desiredCount: 7))
+            }
+        }
         .chartYAxis {
             AxisMarks { mark in
                 AxisGridLine()

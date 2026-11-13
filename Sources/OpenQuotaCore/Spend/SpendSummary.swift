@@ -5,7 +5,7 @@ public enum SpendProvider: String, CaseIterable, Sendable, Codable {
 }
 
 public enum SpendPeriod: String, CaseIterable, Sendable {
-    case today, yesterday, thirtyDays
+    case today, yesterday, sevenDays, thirtyDays
 
     public func interval(now: Date, calendar: Calendar = .current) -> DateInterval {
         let today = calendar.startOfDay(for: now)
@@ -18,6 +18,9 @@ public enum SpendPeriod: String, CaseIterable, Sendable {
         case .yesterday:
             start = calendar.date(byAdding: .day, value: -1, to: today)!
             end = today
+        case .sevenDays:
+            start = calendar.date(byAdding: .day, value: -6, to: today)!
+            end = now
         case .thirtyDays:
             start = calendar.date(byAdding: .day, value: -29, to: today)!
             end = now

@@ -69,22 +69,40 @@ struct HistoryPane: View {
     }
 
     private var controls: some View {
-        HStack {
-            Picker(L("Range", "Periode"), selection: $range) {
-                Text(L("30 Days", "30 dager")).tag(SpendHistoryRange.days30)
-                Text(L("90 Days", "90 dager")).tag(SpendHistoryRange.days90)
-                Text(L("1 Year", "1 år")).tag(SpendHistoryRange.year)
-                Text(L("All", "Alt")).tag(SpendHistoryRange.all)
+        ViewThatFits(in: .horizontal) {
+            HStack { rangePicker; Spacer(); metricPicker }
+            VStack(alignment: .leading, spacing: 10) { rangePicker; metricPicker }
+            HStack {
+                rangeSelection.pickerStyle(.menu).labelsHidden()
+                Spacer()
+                metricPicker
             }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            Spacer()
-            Picker(L("Show", "Vis"), selection: $metric) {
-                Text(L("Cost", "Kostnad")).tag(Metric.cost)
-                Text(L("Tokens", "Tokens")).tag(Metric.tokens)
-                Text(L("Footprint", "Fotavtrykk")).tag(Metric.footprint)
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
         }
+    }
+
+    private var rangePicker: some View {
+        rangeSelection.pickerStyle(.segmented).labelsHidden().fixedSize()
+    }
+
+    private var rangeSelection: some View {
+        Picker(L("Range", "Periode"), selection: $range) {
+            Text(L("Today", "I dag")).tag(SpendHistoryRange.today)
+            Text(L("Yesterday", "I går")).tag(SpendHistoryRange.yesterday)
+            Text(L("Last 7 Days", "Siste 7 dager")).tag(SpendHistoryRange.days7)
+            Text(L("30 Days", "30 dager")).tag(SpendHistoryRange.days30)
+            Text(L("90 Days", "90 dager")).tag(SpendHistoryRange.days90)
+            Text(L("1 Year", "1 år")).tag(SpendHistoryRange.year)
+            Text(L("All", "Alt")).tag(SpendHistoryRange.all)
+        }
+    }
+
+    private var metricPicker: some View {
+        Picker(L("Show", "Vis"), selection: $metric) {
+            Text(L("Cost", "Kostnad")).tag(Metric.cost)
+            Text(L("Tokens", "Tokens")).tag(Metric.tokens)
+            Text(L("Footprint", "Fotavtrykk")).tag(Metric.footprint)
+        }
+        .pickerStyle(.segmented).labelsHidden().fixedSize()
     }
 
     private var summary: some View {
@@ -97,6 +115,13 @@ struct HistoryPane: View {
                 Spacer()
                 Text(metric == .cost ? SpendCopy.notBill : L("Input, output and cache", "Inndata, utdata og hurtigbuffer"))
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if metric == .cost, total.unpricedEvents > 0 {
+                Label(L("\(total.unpricedEvents) usage records are excluded from API value because model pricing is missing.",
+                        "\(total.unpricedEvents) bruksposter er utelatt fra API-verdien fordi modellpriser mangler."),
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             let colors = sourceColors
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
@@ -151,6 +176,16 @@ struct HistoryPane: View {
         }
         .chartForegroundStyleScale(domain: keys, range: keys.map { colors[$0] ?? .gray })
         .chartLegend(.hidden)
+        .chartXAxis {
+            if range == .today || range == .yesterday {
+                AxisMarks(values: .stride(by: .day)) {
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                }
+            } else {
+                AxisMarks(values: .automatic(desiredCount: 7))
+            }
+        }
         .chartYAxis {
             AxisMarks { mark in
                 AxisGridLine()
@@ -197,6 +232,12 @@ struct HistoryPane: View {
         VStack(alignment: .leading, spacing: 8) {
             if model.spend.pendingFiles > 0 {
                 Label(SpendCopy.catchingUp(model.spend.pendingFiles), systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if model.spend.unreadableFiles > 0 {
+                Label(L("\(model.spend.unreadableFiles) log files contain unreadable records; saved totals may be incomplete.",
+                        "\(model.spend.unreadableFiles) loggfiler inneholder uleselige poster; lagrede totaler kan være ufullstendige."),
+                      systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if model.spend.skippedFiles > 0 {

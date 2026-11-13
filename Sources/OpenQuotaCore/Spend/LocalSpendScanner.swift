@@ -229,6 +229,7 @@ public actor LocalSpendScanner {
         result.pendingFiles = ordered.count - processed + deferred
         do {
             try database.transaction {
+                affectedDays.formUnion(try Self.newlyPriceableDays(database, pricing: pricing))
                 try Self.recompute(database, days: affectedDays, pricing: pricing, calendar: calendar)
                 if result.pendingFiles == 0, !incomplete, !Task.isCancelled {
                     try Self.prune(database, now: now, keepDays: limits.eventDays, calendar: calendar)
@@ -356,6 +357,33 @@ public actor LocalSpendScanner {
                 event.recordedUSD, fingerprint(event.identity), event.requestID.map(fingerprint),
                 event.sidechain, event.hasSpeed, event.fast, event.ultrafast,
             ])
+        }
+        return days
+    }
+
+    private static func newlyPriceableDays(_ database: SQLiteDatabase, pricing: ModelPricing) throws -> Set<String> {
+        let query = try database.prepare("""
+            SELECT DISTINCT day, provider, model FROM days
+            WHERE unpriced > 0 AND EXISTS(SELECT 1 FROM events WHERE events.day = days.day AND events.source = days.source)
+            """)
+        var priceable: [String: Bool] = [:]
+        var days = Set<String>()
+        try query.forEach { row in
+            let model = row.string(2), provider = row.string(1)
+            let key = provider + ":" + model
+            let resolves: Bool
+            if let cached = priceable[key] { resolves = cached }
+            else {
+                if provider == SpendProvider.codex.rawValue {
+                    resolves = CodexUsagePricing.resolveRates(pricing: pricing, model: model).rates != nil
+                } else {
+                    resolves = pricing.resolve(model: model) != nil
+                        || (provider != SpendProvider.claude.rawValue
+                            && pricing.resolve(model: model.replacingOccurrences(of: ".", with: "-")) != nil)
+                }
+                if priceable.count < 2_000 { priceable[key] = resolves }
+            }
+            if resolves { days.insert(row.string(0)) }
         }
         return days
     }
