@@ -14,7 +14,7 @@ and limits](estimated-spend.md).
 
 | Provider | Auth | Endpoint | Notes |
 |---|---|---|---|
-| OpenRouter | bearer | `openrouter.ai/api/v1/credits` + `/api/v1/key` | total credits minus consumed credits; independent key limit |
+| OpenRouter | bearer, management key for account balance | `openrouter.ai/api/v1/credits` + `/api/v1/key` | independent account balance and key allowance; partial readings and period spend |
 | Requesty | bearer | `api-v2.requesty.ai/v1/manage/org` | organization balance; management API access required |
 | DeepSeek | bearer | `api.deepseek.com/user/balance` | USD balance |
 | Moonshot | bearer | `api.moonshot.ai/v1/users/me/balance` | unverified |
@@ -413,3 +413,25 @@ the start of the UTC day 30 days ago as RFC 3339. A window's `scale`
 multiplies its numbers (`0.01` for amounts in cents). A `sum:` over an array
 that resolves but is empty is zero; elements missing the expected fields
 make it unresolved, not zero.
+
+## OpenRouter
+
+A regular API key can report its own usage and allowance. The account-wide
+balance endpoint currently requires a management key. These are independent
+readings: denied or unavailable balance access does not hide key usage, and a
+key-usage failure does not hide a fresh account balance. A partial reading shows
+a scoped explanation and omits the failed reading. If both requests fail, the
+previous snapshot remains visibly stale under the normal retry policy.
+
+The compact card shows lifetime key spend, any reported remaining key allowance,
+and account balance when available. Resetting allowances use `limit_remaining`,
+not lifetime spend. Today and this month's key spend appear only in account
+details, when OpenRouter reports them. All currency values are USD.
+
+Account details also include a local low-balance warning threshold, default $5.
+Choose $0 to turn it off. It highlights the balance in the card and details;
+it sends no notifications. Unknown balances do not trigger warnings.
+
+Mappings follow OpenRouter's [current-key reference](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
+and [credits reference](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits).
+Live accuracy and permissions require a separately authorized account check.

@@ -20,6 +20,10 @@ macOS 26 Tahoe and later. The popover window keeps the system material; its card
   with several accounts adds a one-line account header above each group.
 - Rings and percentages are grey until usage gets tight: orange at 80% used,
   red at 90%.
+- OpenRouter keeps account balance separate from lifetime key spend and key
+  allowance, using currency amounts. Period spending stays in account details.
+  A per-account USD warning threshold defaults to $5; $0 turns it off. Endpoint
+  permission and availability warnings stay scoped to the missing reading.
 - Balances and errors stay visible; error text wraps in full. Last successful
   reading and source appear only for a saved (stale) reading or an error. The
   footer carries the overall update time.

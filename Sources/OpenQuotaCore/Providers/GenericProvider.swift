@@ -54,6 +54,9 @@ public struct GenericProvider: UsageProvider {
             throw ProviderError.unauthorized
         }
         let headers = authHeaders(key: key)
+        if spec.usesOpenRouterReadings {
+            return try await OpenRouterReadings.refresh(http: http, headers: headers, account: account)
+        }
         let root = try await fetchJSON(
             url: spec.url, method: spec.method, body: spec.body, headers: headers)
 

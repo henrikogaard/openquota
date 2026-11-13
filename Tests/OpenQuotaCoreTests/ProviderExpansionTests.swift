@@ -3,12 +3,13 @@ import XCTest
 
 /// Captures requests and returns canned responses keyed by URL substring.
 final class RecordingHTTP: HTTPClient, @unchecked Sendable {
+    private let requestLock = NSLock()
     var requests: [HTTPRequest] = []
     var responses: [(match: String, response: HTTPResponse)] = []
     var defaultBody = "{}"
 
     func send(_ request: HTTPRequest) async throws -> HTTPResponse {
-        requests.append(request)
+        requestLock.withLock { requests.append(request) }
         for (match, response) in responses
         where request.url.absoluteString.contains(match) {
             return response

@@ -269,6 +269,8 @@ private struct APIKeyForm: View {
 
     private var note: String {
         switch provider.id {
+        case "openrouter": L("A regular API key shows its own usage and allowance. Account balance requires a management key, which can also manage your account's API keys. OpenQuota only reads data and stores the key in this Mac's Keychain. Experimental.",
+                             "En vanlig API-nøkkel viser eget forbruk og egen kvote. Kontosaldo krever en administrasjonsnøkkel, som også kan administrere kontoens API-nøkler. OpenQuota leser bare data og lagrer nøkkelen i nøkkelringen på denne Macen. Eksperimentell.")
         case "requesty": L("Needs a management key. Balance is shared across the organization.",
                             "Krever en administrasjonsnøkkel. Saldoen deles i hele organisasjonen.")
         case "zenmux": L("Needs a Management API key.", "Krever en administrasjons-API-nøkkel.")

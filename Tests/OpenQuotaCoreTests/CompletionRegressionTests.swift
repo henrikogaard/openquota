@@ -26,6 +26,24 @@ final class CompletionRegressionTests: XCTestCase {
         XCTAssertEqual(snapshot.creditsRemaining, 37.5)
         XCTAssertEqual(snapshot.creditsUnit, "USD")
         XCTAssertEqual(snapshot.windows[0].percentRemaining, 70)
+        XCTAssertEqual(snapshot.windows[0].label, "Key usage")
+        XCTAssertEqual(snapshot.windows[0].used, 3)
+    }
+
+    func testOpenRouterUnlimitedKeyUsageDoesNotReplaceAccountBalance() async throws {
+        let http = RecordingHTTP()
+        http.stub("/credits", body: #"{"data":{"total_credits":50,"total_usage":12.5}}"#)
+        http.stub("/key", body: #"{"data":{"usage":0,"limit":null}}"#)
+        let p = provider(BuiltinProviders.openRouter, http, directory: try directory())
+        _ = try p.addKey("fixture-key", label: nil)
+        let accounts = try await p.accounts()
+        let snapshot = try await p.refresh(account: accounts[0])
+        XCTAssertEqual(snapshot.creditsRemaining, 37.5)
+        XCTAssertEqual(snapshot.windows[0].label, "Key usage")
+        XCTAssertEqual(snapshot.windows[0].used, 0)
+        XCTAssertNil(snapshot.windows[0].limit)
+        XCTAssertNil(snapshot.windows[0].remaining)
+        XCTAssertNil(snapshot.windows[0].percentRemaining)
     }
 
     func testRequestyBalanceNeverInventsQuota() async throws {

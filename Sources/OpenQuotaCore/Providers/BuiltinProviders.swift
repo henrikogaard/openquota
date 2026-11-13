@@ -8,31 +8,35 @@ public enum BuiltinProviders {
     /// OpenRouter: credit balance + key usage.
     /// GET /api/v1/credits → {"data": {"total_credits": N, "total_usage": N}}
     /// GET /api/v1/key     → {"data": {"label": str, "limit": N|null, "usage": N}}
-    public static let openRouter = ProviderSpec(
-        id: "openrouter",
-        displayName: "OpenRouter",
-        url: "https://openrouter.ai/api/v1/credits",
-        dashboardURL: "https://openrouter.ai/settings/credits",
-        identityLabel: nil,
-        map: {
-            var map = ProviderSpec.FieldMap()
-            map.creditsRemaining = "$.data.total_credits"
-            map.creditsUsed = "$.data.total_usage"
-            map.creditsUnitLabel = "USD"
-            return map
-        }(),
-        windows: [
-            .init(
-                label: "Credits",
-                kind: .credits,
-                // /api/v1/key: usage + optional limit; credits endpoint gives the balance.
-                url: "https://openrouter.ai/api/v1/key",
-                used: "$.data.usage",
-                limit: "$.data.limit",
-                unit: "$"
-            )
-        ]
-    )
+    public static let openRouter: ProviderSpec = {
+        var spec = ProviderSpec(
+            id: "openrouter",
+            displayName: "OpenRouter",
+            url: "https://openrouter.ai/api/v1/credits",
+            dashboardURL: "https://openrouter.ai/settings/credits",
+            identityLabel: nil,
+            map: {
+                var map = ProviderSpec.FieldMap()
+                map.creditsRemaining = "$.data.total_credits"
+                map.creditsUsed = "$.data.total_usage"
+                map.creditsUnitLabel = "USD"
+                return map
+            }(),
+            windows: [
+                .init(
+                    label: "Key usage",
+                    kind: .credits,
+                    // /api/v1/key: usage + optional limit; credits endpoint gives the balance.
+                    url: "https://openrouter.ai/api/v1/key",
+                    used: "$.data.usage",
+                    limit: "$.data.limit",
+                    unit: "$"
+                )
+            ]
+        )
+        spec.usesOpenRouterReadings = true
+        return spec
+    }()
 
     /// Requesty: organization balance + aggregated usage.
     /// GET api-v2.requesty.ai/v1/manage/org → org info incl. current balance
