@@ -4,6 +4,7 @@ import OpenQuotaCore
 
 @main
 struct OpenQuotaApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
     @AppStorage(Localized.languageKey) private var language = ""
 
@@ -21,6 +22,16 @@ struct OpenQuotaApp: App {
         }
         // The panes' minimum size is the window's minimum; see SettingsWindowSizing.
         .windowResizability(.contentMinSize)
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// A click on the Dock icon (shown while Settings is open) brings Settings
+    /// back, also after the app was hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        sender.unhide(nil)
+        sender.activate()
+        return true
     }
 }
 #else
