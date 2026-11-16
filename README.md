@@ -36,7 +36,9 @@ pinned source shows **—**, never a different account. Meters show what's left;
 balances, activity, and estimated spend remain separate.
 
 English and Norwegian Bokmål are supported. OpenQuota lives in the menu bar,
-not a normal Dock window. Turn on **General → Open at login** to start it
+not a normal Dock window. While Settings is open it shows a Dock icon and is
+in ⌘-Tab, so the window is easy to find again; the icon goes away when
+Settings closes. Turn on **General → Open at login** to start it
 automatically. Check for updates through the Options menu.
 
 ## Why another one

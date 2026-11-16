@@ -33,6 +33,7 @@ struct SettingsView: View {
                 .tag(Tab.general)
         }
         .background(SettingsWindowSizing())
+        .background(SettingsDockPresence())
         .onAppear(perform: consumeAddRequest)
         .onChange(of: model.requestsAddAccount) { _, _ in consumeAddRequest() }
     }
