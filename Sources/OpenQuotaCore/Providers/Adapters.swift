@@ -22,6 +22,7 @@ public enum Adapters {
             MistralProvider(http: http, credentials: credentials),
             OpenCodeConsoleProvider(http: http, credentials: credentials),
             CopilotProvider(http: http, files: files),
+            AntigravityProvider(http: http, files: files),
         ]
     }
 }

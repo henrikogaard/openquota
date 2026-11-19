@@ -70,8 +70,9 @@ Documented API-key endpoints that need a small handwritten adapter rather than a
 
 Not planned: CodexBar's browser-cookie and private-endpoint integrations
 (Windsurf, Manus, Notion AI, Qwen, T3 Chat, Raycast and similar). They need
-imported web sessions, which OpenQuota does not do. Antigravity and Ollama
-(OpenUsage) read local app state with no documented interface yet.
+imported web sessions, which OpenQuota does not do. Ollama (OpenUsage) reads
+local app state with no documented interface yet. Antigravity is supported
+experimentally; see [Antigravity](#antigravity-experimental).
 
 ## Cursor (experimental, explicit opt-in)
 
@@ -313,7 +314,33 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 | Grok | `~/.grok/auth.json` (multi-entry) | `cli-chat-proxy.grok.com/v1/billing?format=credits`; refresh via `auth.x.ai/oauth2/token` | weekly pool + PAYG balance |
 | OpenCode Go | `opencode-go` key from OpenCode 2's `credential` table in `~/.local/share/opencode/opencode*.db` (read-only via `/usr/bin/sqlite3`), falling back to `auth.json` only when no database has that table; or pasted keys (Add Account → OpenCode Go, one per subscription) | `GET opencode.ai/zen/go/v1/usage` | 5h/weekly/monthly |
 | Devin | `windsurf_api_key` (and optional `https://` `api_server_url`) in `~/.local/share/devin/credentials.toml` | `POST {server}/exa.seat_management_pb.SeatManagementService/GetUserStatus` (Connect, default `server.codeium.com`) | daily/weekly remaining percentage; overage balance in USD |
+| Antigravity (experimental) | newest live `~/.gemini/antigravity/daemon/hub_*.json` (`pid`, `httpPort`, `csrfToken`) | `POST http://127.0.0.1:{httpPort}/exa.language_server_pb.LanguageServerService/GetUserStatus` (Connect, `X-Codeium-Csrf-Token`) | per-model-family remaining quota and reset; see below |
 | Copilot | `~/.config/gh/hosts.yml` (gh CLI token) | `api.github.com/copilot_internal/v2/token` → `copilot_internal/user` | premium/chat/completions % |
+
+## Antigravity (experimental)
+
+Antigravity has no public quota API. While the desktop app runs, its language
+server listens on 127.0.0.1 and writes the port and a CSRF token to
+`~/.gemini/antigravity/daemon/hub_<port>.json`. OpenQuota reads the newest few
+of those files, skips any whose process is gone, and asks the first live one
+for `GetUserStatus`. The token is sent only to 127.0.0.1, never stored or
+logged, and redirects are refused.
+
+- The quota belongs to the Google account, so it covers the app and the
+  `agy` CLI together. The CLI runs its own language server but writes no hub
+  file, so the app must be open for a reading; otherwise the last reading is
+  kept and marked outdated.
+- One row per model family (for example "Gemini 4 Neon"); the most-used
+  variant ("Low", "High", ...) decides the row.
+- A model with a reset time but no `remainingFraction` is shown as used up.
+  That follows proto3, which leaves a zero out of JSON; it is inferred, not
+  documented.
+- The plan is `userTier.description` (for example "Google AI Ultra"), else
+  `planInfo.planName`.
+
+Fixture tests cover the mapping; one live reading on one Mac in November
+2026 matched the fields above. Token spend for both the app and the CLI is
+under [Estimated Spend](estimated-spend.md#antigravity-experimental).
 
 ## Session-token provider (manual paste only)
 

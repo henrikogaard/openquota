@@ -14,7 +14,7 @@ struct ProviderGlyph: View {
         "cursor": "cursorarrow.rays", "openrouter": "arrow.triangle.branch",
         "requesty": "arrow.left.arrow.right", "grok": "bolt", "gemini": "sparkles",
         "devin": "person.crop.square", "opencode": "terminal", "opencode-go": "terminal",
-        "copilot": "airplane", "mistral": "wind", "deepseek": "water.waves",
+        "copilot": "airplane", "antigravity": "arrow.up.circle", "mistral": "wind", "deepseek": "water.waves",
         "elevenlabs": "waveform", "perplexity": "magnifyingglass", "warp": "chevron.right.2",
         "openai-admin": "building.2", "v0": "square.on.square", "vercel-ai-gateway": "triangle",
     ]

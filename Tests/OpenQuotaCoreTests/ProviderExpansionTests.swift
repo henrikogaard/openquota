@@ -676,7 +676,7 @@ final class ProviderRegistryTests: XCTestCase {
         }
         // adapters
         for adapterID in ["gemini", "grok", "opencode",
-                          "devin", "cursor", "mistral", "copilot"] {
+                          "devin", "cursor", "mistral", "copilot", "antigravity"] {
             XCTAssertTrue(ids.contains(adapterID), adapterID)
         }
         XCTAssertFalse(ids.contains("claude"))

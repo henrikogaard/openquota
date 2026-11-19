@@ -25,7 +25,9 @@ invoice or convert subscription percentages into dollars.
   counted yet.
 - Google Antigravity (**experimental, best guess**): one entry per model
   generation in each conversation database under
-  `~/.gemini/antigravity/conversations/*.db`, opened read-only. Antigravity
+  `~/.gemini/antigravity/conversations/*.db` (the desktop app) and
+  `~/.gemini/antigravity-cli/conversations/*.db` (the `agy` CLI), opened
+  read-only. Each folder is its own row. Antigravity
   publishes no format for these; see [Antigravity](#antigravity-experimental)
   for what is confirmed and what is inferred.
 - Today, Yesterday, or 30 calendar days including today, in the Mac's time zone,
@@ -214,7 +216,7 @@ per-model rows.
   stay valid.
 - Only regular `.jsonl` files (and `.jsonl.zst` for Codex) under the selected Claude and Codex log roots,
   `events.jsonl` under Copilot's, `meta.json` under Vibe's (16 MiB at most),
-  `.db` files under Antigravity's conversations folder,
+  `.db` files under Antigravity's two conversations folders (app and CLI),
   and OpenCode's one database are read; symlinks inside them are skipped.
   OpenCode's folder is never walked. Credentials, settings and other files
   are ignored.
@@ -276,7 +278,8 @@ Known limits:
   by what other files used is read again on the next pass; one too large for
   a whole pass keeps what was read and shows **Partial total**.
 - No environment variable for another location is known, so only the default
-  folder is read.
+  folders are read. The CLI's databases have the same tables as the app's;
+  this was checked on one CLI conversation in November 2026.
 
 ## Verification
 
