@@ -271,7 +271,11 @@ final class AppModel {
         case .opencode: return ("OpenCode", nil)
         case .vibe: return ("Mistral Vibe", nil)
         case .copilot: return ("Copilot CLI", nil)
-        case .antigravity: return (L("Antigravity (experimental)", "Antigravity (eksperimentell)"), nil)
+        case .antigravity:
+            if (source.folder as NSString).lastPathComponent == "antigravity-cli" {
+                return (L("Antigravity CLI (experimental)", "Antigravity CLI (eksperimentell)"), nil)
+            }
+            return (L("Antigravity app (experimental)", "Antigravity-appen (eksperimentell)"), nil)
         }
     }
 

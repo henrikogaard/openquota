@@ -195,6 +195,8 @@ public struct SpendLogSource: Sendable, Hashable {
             SpendLogSource(provider: .vibe, directory: homeFor("VIBE_HOME", fallback: ".vibe").appendingPathComponent("logs/session")),
             SpendLogSource(provider: .copilot, directory: homeFor("COPILOT_HOME", fallback: ".copilot").appendingPathComponent("session-state")),
             SpendLogSource(provider: .antigravity, directory: home.appendingPathComponent(".gemini/antigravity/conversations")),
+            // The agy CLI keeps the same conversation databases in its own folder.
+            SpendLogSource(provider: .antigravity, directory: home.appendingPathComponent(".gemini/antigravity-cli/conversations")),
         ]
         return (logs + tools).filter { seen.insert($0).inserted }
     }

@@ -570,7 +570,10 @@ final class ToolUsageTests: XCTestCase {
         XCTAssertEqual(directory(.opencode), ["/Users/me/.local/share/opencode"])
         XCTAssertEqual(directory(.vibe), ["/Users/me/.vibe/logs/session"])
         XCTAssertEqual(directory(.copilot), ["/Users/me/.copilot/session-state"])
-        XCTAssertEqual(directory(.antigravity), ["/Users/me/.gemini/antigravity/conversations"])
+        XCTAssertEqual(directory(.antigravity), ["/Users/me/.gemini/antigravity/conversations",
+                                                 "/Users/me/.gemini/antigravity-cli/conversations"])
+        XCTAssertEqual(sources.filter { $0.provider == .antigravity }.map(\.folder),
+                       ["/Users/me/.gemini/antigravity", "/Users/me/.gemini/antigravity-cli"])
         XCTAssertEqual(sources.first { $0.provider == .antigravity }?.folder, "/Users/me/.gemini/antigravity")
         XCTAssertEqual(sources.first { $0.provider == .vibe }?.folder, "/Users/me/.vibe")
         XCTAssertEqual(sources.first { $0.provider == .copilot }?.folder, "/Users/me/.copilot")
