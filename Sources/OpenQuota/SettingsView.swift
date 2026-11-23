@@ -17,20 +17,20 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            AccountsPane(model: model, adding: $adding)
-                .settingsPane()
-                .id(language)
-                .tabItem { Label(L("Accounts", "Kontoer"), systemImage: "person.crop.circle") }
-                .tag(Tab.accounts)
-            HistoryPane(model: model)
-                .settingsPane()
-                .id(language)
-                .tabItem { Label(L("History", "Historikk"), systemImage: "chart.bar.xaxis") }
-                .tag(Tab.history)
-            GeneralPane(model: model)
-                .settingsPane()
-                .tabItem { Label(L("General", "Generelt"), systemImage: "gearshape") }
-                .tag(Tab.general)
+            SwiftUI.Tab(L("Accounts", "Kontoer"), systemImage: "person.crop.circle", value: Tab.accounts) {
+                AccountsPane(model: model, adding: $adding)
+                    .settingsPane()
+                    .id(language)
+            }
+            SwiftUI.Tab(L("History", "Historikk"), systemImage: "clock.arrow.circlepath", value: Tab.history) {
+                HistoryPane(model: model)
+                    .settingsPane()
+                    .id(language)
+            }
+            SwiftUI.Tab(L("General", "Generelt"), systemImage: "gearshape", value: Tab.general) {
+                GeneralPane(model: model)
+                    .settingsPane()
+            }
         }
         .background(SettingsWindowSizing())
         .background(SettingsDockPresence())
