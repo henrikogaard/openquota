@@ -119,8 +119,9 @@ fallback.
 
 This connector includes shared usage and credit balances in addition to Vibe Code.
 For the separate **Mistral Vibe CLI** card, sign in to Vibe with a Vibe API key.
-OpenQuota detects `ai.mistral.vibe` / `MISTRAL_API_KEY` in the macOS Keychain or
-the CLI's `~/.vibe/.env` fallback. It does not import browser/OIDC sign-ins.
+OpenQuota checks `MISTRAL_API_KEY` in its process environment, then `.env` in
+`$VIBE_HOME` (default `~/.vibe`), then the `ai.mistral.vibe` / `MISTRAL_API_KEY`
+macOS Keychain item. It does not import browser/OIDC sign-ins.
 Like [Vibe's billing reader](https://github.com/mistralai/mistral-vibe/blob/v3.1.5/vibe/app_server/_billing.py),
 it reads `vibe_budget` from `GET https://api.mistral.ai/v1/billing/budget`.
 A missing allowance or missing usage permission is unavailable, not 0% used.

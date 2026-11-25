@@ -12,10 +12,38 @@ struct MistralVibeCLIProvider: UsageProvider {
     let http: any HTTPClient
     let credential: @Sendable () throws -> (String, CredentialSource)?
 
-    init(http: any HTTPClient, files: LocalCredentialFiles) {
+    init(http: any HTTPClient, files: LocalCredentialFiles,
+         environment: [String: String]? = nil, keychain: (@Sendable () throws -> String?)? = nil) {
         self.http = http
+        let systemHome = files.home == FileManager.default.homeDirectoryForCurrentUser
+        let env = environment ?? (systemHome ? ProcessInfo.processInfo.environment : [:])
         credential = {
-            #if os(macOS)
+            if let key = env["MISTRAL_API_KEY"], !key.isEmpty { return (key, .environment) }
+            let dir = env["VIBE_HOME"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil }
+                ?? files.home.appendingPathComponent(".vibe")
+            if let contents = LocalCredentialFiles(home: dir).readText(".env"),
+               let key = Self.savedKey(contents) { return (key, .configFile) }
+            let key = try keychain.map { try $0() } ?? (systemHome ? Self.keychainKey() : nil)
+            return key.map { ($0, .keychainItem) }
+        }
+    }
+
+    private static func savedKey(_ contents: String) -> String? {
+        // Keys have no whitespace. Accept Vibe's optional export, quotes and trailing comment.
+        let pattern = #"^(?:export\s+)?MISTRAL_API_KEY\s*=\s*(?:'([^'\s]+)'|"([^"\s]+)"|([^\s'"]+))(?:\s+#.*|\s*)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        for line in contents.components(separatedBy: .newlines) {
+            let text = line.trimmingCharacters(in: .whitespaces) as NSString
+            guard let match = regex.firstMatch(in: text as String, range: NSRange(location: 0, length: text.length)) else { continue }
+            for i in 1..<match.numberOfRanges where match.range(at: i).location != NSNotFound {
+                return text.substring(with: match.range(at: i))
+            }
+        }
+        return nil
+    }
+
+    private static func keychainKey() throws -> String? {
+        #if os(macOS)
             // Vibe owns this item. Never migrate it or prompt during polling.
             let context = LAContext()
             context.interactionNotAllowed = true
@@ -30,21 +58,13 @@ struct MistralVibeCLIProvider: UsageProvider {
             let status = SecItemCopyMatching(query as CFDictionary, &item)
             if status == errSecSuccess, let data = item as? Data,
                let key = String(data: data, encoding: .utf8) {
-                return (key, .keychainItem)
+                return key
             }
             guard status == errSecItemNotFound else {
                 throw ProviderError.badResponse(Localized.text("Vibe Keychain item unavailable.", "Nøkkelringoppføringen for Vibe er utilgjengelig."))
             }
-            #endif
-            for line in (files.readText(".vibe/.env") ?? "").split(whereSeparator: \.isNewline) {
-                let parts = line.split(separator: "=", maxSplits: 1)
-                if parts.count == 2, parts[0].trimmingCharacters(in: .whitespaces) == "MISTRAL_API_KEY" {
-                    return (parts[1].trimmingCharacters(in: .whitespaces)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'")), .configFile)
-                }
-            }
-            return nil
-        }
+        #endif
+        return nil
     }
 
     init(http: any HTTPClient, credential: @escaping @Sendable () throws -> (String, CredentialSource)?) {
@@ -90,7 +110,17 @@ struct MistralVibeCLIProvider: UsageProvider {
                                                          "Mistral rapporterte ingen månedskvote for Vibe Code."))
         }
         let label = Localized.text("Vibe Code · monthly", "Vibe Code · månedlig")
-        let payg = budget.payg_enabled.map {
+        var enabled = budget.payg_enabled
+        if enabled == nil {
+            struct Subscription: Decodable { let vibe_payg_enabled: Bool? }
+            let request = HTTPRequest(url: URL(string: "https://api.mistral.ai/v1/billing/subscription")!,
+                                      headers: ["Authorization": "Bearer \(key)"], allowsRedirects: false)
+            if let response = try? await http.send(request), let data = try? requireOK(response) {
+                enabled = (try? JSONDecoder().decode(Subscription.self, from: data))?.vibe_payg_enabled
+            }
+            try Task.checkCancellation()
+        }
+        let payg = enabled.map {
             $0 ? Localized.text(" · PAYG on", " · betaling per bruk på") : Localized.text(" · PAYG off", " · betaling per bruk av")
         } ?? ""
         return UsageSnapshot(account: account.account, providerID: id, windows: [

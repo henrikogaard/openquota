@@ -31,6 +31,7 @@ struct AddAccountSheet: View {
     @State private var target: Target?
     @State private var backTarget: Target?
     @State private var search = ""
+    @State private var vibeError: String?
     @FocusState private var searchFocused: Bool
 
     private var tiles: [Tile] {
@@ -214,9 +215,20 @@ struct AddAccountSheet: View {
                        "Logg inn i Vibe med en Vibe-API-nøkkel. OpenQuota finner den lagrede CLI-nøkkelen og viser månedskvoten for Vibe Code. Ingen nettleserinformasjonskapsel er nødvendig."))
                     .padding()
                 Spacer()
+                if let vibeError { Text(vibeError).foregroundStyle(.secondary).padding(.horizontal) }
                 FormActions(primary: L("Detect Account", "Finn konto"), disabled: model.isDemo, action: {
-                    model.setProviderHidden(false, id: "mistral-vibe-cli")
-                    onDone()
+                    Task {
+                        do {
+                            if try await model.detectVibeCLI() { onDone() }
+                            else {
+                                vibeError = L("No Vibe API key found. Sign in with a key in Vibe, then try again.",
+                                              "Fant ingen Vibe-API-nøkkel. Logg inn med en nøkkel i Vibe og prøv igjen.")
+                            }
+                        } catch {
+                            vibeError = L("Could not read the Vibe credential. Check your CLI sign-in and Keychain.",
+                                          "Kunne ikke lese Vibe-nøkkelen. Kontroller CLI-påloggingen og nøkkelringen.")
+                        }
+                    }
                 }, cancel: onDone)
             }
         case .openCodeMethods:

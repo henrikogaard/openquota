@@ -567,6 +567,13 @@ final class AppModel {
 
     static let hiddenProvidersKey = "hiddenProviderIDs"
 
+    func detectVibeCLI() async throws -> Bool {
+        guard let provider = Adapters.all(http: http, credentials: credentials).first(where: { $0.id == "mistral-vibe-cli" }),
+              try await !provider.accounts().isEmpty else { return false }
+        setProviderHidden(false, id: provider.id)
+        return true
+    }
+
     /// Providers found from a local CLI sign-in, as opposed to ones the user added.
     static func isDetectedLocal(_ provider: any UsageProvider) -> Bool {
         !(provider is GenericProvider) && !(provider is ProfiledProvider) && !(provider is CursorProvider)

@@ -2,6 +2,25 @@ import XCTest
 @testable import OpenQuotaCore
 
 final class MistralVibeCLITests: XCTestCase {
+    func testCLIKeyPrecedenceAndCustomHome() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let http = RecordingHTTP()
+        http.stub("/budget", body: #"{"vibe_budget":{"usage_percentage":10,"initial_budget":20}}"#)
+        http.stub("/subscription", body: #"{"vibe_payg_enabled":true}"#)
+        for assignment in ["export MISTRAL_API_KEY='work' # team", "MISTRAL_API_KEY=work # team"] {
+            try Data(assignment.utf8).write(to: home.appendingPathComponent(".env"))
+            let provider = MistralVibeCLIProvider(http: http, files: .init(home: home),
+                                                  environment: ["VIBE_HOME": home.path], keychain: { "personal" })
+            let accounts = try await provider.accounts()
+            let account = try XCTUnwrap(accounts.first)
+            XCTAssertEqual(account.source, .configFile)
+            let snapshot = try await provider.refresh(account: account)
+            XCTAssertTrue(snapshot.windows[0].label.contains(Localized.text("PAYG on", "betaling per bruk på")))
+            XCTAssertTrue(http.requests.allSatisfy { $0.headers["Authorization"] == "Bearer work" && !$0.allowsRedirects })
+        }
+    }
     func testVibeAllowanceIsIndependentOfConsoleAndSharedBudget() async throws {
         let http = RecordingHTTP()
         http.stub("/billing/budget", body: """
