@@ -616,6 +616,9 @@ final class AppModel {
         case "mistral":
             L("Mistral's web console session (admin.mistral.ai); unofficial endpoints, not a public API",
               "Nettkonsolløkten til Mistral (admin.mistral.ai); uoffisielle endepunkter, ikke et offentlig API")
+        case "mistral-vibe-cli":
+            L("Monthly Vibe Code allowance from Mistral billing, using the CLI’s saved key.",
+              "Månedskvote for Vibe Code fra Mistral, hentet med CLI-ens lagrede nøkkel.")
         case "opencode-console":
             L("OpenCode console sign-in · Console endpoints, not a documented public API",
               "OpenCode-konsollpålogging · konsollendepunkter, ikke et dokumentert offentlig API")

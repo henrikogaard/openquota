@@ -65,13 +65,13 @@ Each saved key/session has its own row. Other local providers discover their def
 | Grok | Local OAuth | Billing-period usage; named local accounts |
 | Cursor | Experimental, manual session token | Cursor Models / Other Models allowance and on-demand spend; internal dashboard with legacy RPC fallback |
 | Mistral | Experimental, manual web session | Pro/Team included monthly usage and separate Vibe allowance as used percentages; pay-as-you-go credits |
+| Mistral Vibe CLI | Auto-detected Vibe CLI key | Monthly Vibe Code allowance, reset date and pay-as-you-go status when reported |
 | OpenRouter | API key | Remaining account credits and independent key usage/limit |
 | Requesty | Management API key | Organization balance |
 | Additional / custom providers | Specs and CLI adapters | See [provider details](docs/providers.md) |
 
-**Mistral has no public API for Pro/Team subscription limits.** The Admin API
-is Enterprise-only and `api.mistral.ai` exposes no usage endpoint, so OpenQuota
-reads the signed-in web console session: you paste a `Cookie:` request header
+**Mistral has two independent connections.** Vibe CLI uses the billing API.
+For the existing web-console connection, paste a `Cookie:` request header
 from admin.mistral.ai (the same manual, no-browser-import model as Cursor).
 These are unofficial endpoints, the session expires roughly monthly, and
 allowance figures are Mistral's own percentages. The legacy Admin-analytics

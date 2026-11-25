@@ -50,12 +50,8 @@ device-only Keychain and sent only to the provider's API host.
 Docs: [Anthropic cost report](https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-cost-report),
 [OpenAI costs](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs).
 
-Mistral is **not** an API-key spec. The documented Admin API is
-Enterprise-only (standard API keys are refused), and `api.mistral.ai` exposes
-no usage or billing endpoint at all — every candidate path answers 404.
-Pro/Team subscription allowances are read through the web console session
-instead; see the [Mistral section](#mistral-experimental-explicit-opt-in).
-Do not create Studio or Admin keys to chase subscription limits.
+Mistral Vibe CLI and the [Mistral web console](#mistral-experimental-explicit-opt-in)
+are separate providers. Neither requires an Enterprise Admin API key.
 
 ## Next candidates (from the OpenUsage / CodexBar audit)
 
@@ -121,10 +117,13 @@ is a sensitive web session, not a read-only API key. The pasted header must
 include an `ory_session_*` cookie; a `csrftoken` cookie enables the console
 fallback.
 
-Why a session: Mistral's plans (Pro, Team) include monthly usage shared across
-Le Chat, Studio, the API and Vibe Code, but there is no public API for the
-remaining allowance. The Admin API is Enterprise-only and `api.mistral.ai` has
-no usage endpoint. The signed-in web console is the only remaining source.
+This connector includes shared usage and credit balances in addition to Vibe Code.
+For the separate **Mistral Vibe CLI** card, sign in to Vibe with a Vibe API key.
+OpenQuota detects `ai.mistral.vibe` / `MISTRAL_API_KEY` in the macOS Keychain or
+the CLI's `~/.vibe/.env` fallback. It does not import browser/OIDC sign-ins.
+Like [Vibe's billing reader](https://github.com/mistralai/mistral-vibe/blob/v3.1.5/vibe/app_server/_billing.py),
+it reads `vibe_budget` from `GET https://api.mistral.ai/v1/billing/budget`.
+A missing allowance or missing usage permission is unavailable, not 0% used.
 
 Per refresh (all GET, redirects refused, credentials only in Cookie headers to
 the two fixed HTTPS hosts):
