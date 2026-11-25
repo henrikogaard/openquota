@@ -114,7 +114,7 @@ struct MistralVibeCLIProvider: UsageProvider {
         if enabled == nil {
             struct Subscription: Decodable { let vibe_payg_enabled: Bool? }
             let request = HTTPRequest(url: URL(string: "https://api.mistral.ai/v1/billing/subscription")!,
-                                      headers: ["Authorization": "Bearer \(key)"], allowsRedirects: false)
+                                      headers: ["Authorization": "Bearer \(key)"], timeout: 3, allowsRedirects: false)
             if let response = try? await http.send(request), let data = try? requireOK(response) {
                 enabled = (try? JSONDecoder().decode(Subscription.self, from: data))?.vibe_payg_enabled
             }
