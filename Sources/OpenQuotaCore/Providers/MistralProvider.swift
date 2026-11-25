@@ -304,10 +304,7 @@ enum MistralSubscriptionParser {
 /// Mistral subscription allowances (Pro/Team plans) through the web console
 /// session that admin.mistral.ai itself uses.
 ///
-/// There is no public API for this: Mistral's Admin API is Enterprise-only,
-/// `api.mistral.ai` exposes no usage endpoint, and the Admin analytics
-/// connector reports workspace activity, not a personal allowance. The only
-/// source for a Pro/Team remaining allowance is the signed-in Ory web session.
+/// This web-session adapter is independent of Vibe CLI billing.
 /// The user pastes a `Cookie:` request header manually — the same explicit,
 /// no-browser-import model as Cursor's session token. Sessions expire
 /// (roughly monthly), and then the row must be re-pasted.

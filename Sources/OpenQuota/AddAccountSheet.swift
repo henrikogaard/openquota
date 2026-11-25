@@ -6,7 +6,7 @@ import OpenQuotaCore
 /// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
-        case claude, codex, cursor, mistral, openCodeMethods, openCodeSignIn
+        case claude, codex, cursor, mistral, vibeCLI, openCodeMethods, openCodeSignIn
         case apiKey(String)
         case profile(String)
 
@@ -14,7 +14,7 @@ struct AddAccountSheet: View {
         var ownsActions: Bool {
             switch self {
             case .openCodeMethods: false
-            case .claude, .codex, .cursor, .mistral, .openCodeSignIn, .apiKey, .profile: true
+            case .claude, .codex, .cursor, .mistral, .vibeCLI, .openCodeSignIn, .apiKey, .profile: true
             }
         }
     }
@@ -31,6 +31,7 @@ struct AddAccountSheet: View {
     @State private var target: Target?
     @State private var backTarget: Target?
     @State private var search = ""
+    @State private var vibeError: String?
     @FocusState private var searchFocused: Bool
 
     private var tiles: [Tile] {
@@ -43,6 +44,7 @@ struct AddAccountSheet: View {
             "mistral": Tile(
                 target: .mistral, providerID: "mistral",
                 name: L("Mistral · Experimental", "Mistral · Eksperimentell")),
+            "mistral-vibe-cli": Tile(target: .vibeCLI, providerID: "mistral-vibe-cli", name: "Mistral Vibe CLI"),
             // Also reachable through the OpenCode Go tile; its own tile makes it findable.
             "opencode-signin": Tile(
                 target: .openCodeSignIn, providerID: "opencode-go",
@@ -90,6 +92,7 @@ struct AddAccountSheet: View {
         case .codex: "Codex / ChatGPT"
         case .cursor: "Cursor"
         case .mistral: "Mistral"
+        case .vibeCLI: "Mistral Vibe CLI"
         case .openCodeMethods, .openCodeSignIn: model.providerName("opencode-go")
         case .apiKey(let id), .profile(let id): model.providerName(id)
         }
@@ -206,6 +209,28 @@ struct AddAccountSheet: View {
             CursorSessionForm(model: model, onDone: onDone)
         case .mistral:
             MistralSessionWizard(model: model, onDone: onDone)
+        case .vibeCLI:
+            VStack(alignment: .leading) {
+                Text(L("Sign in to Vibe with a Vibe API key. OpenQuota detects the CLI’s saved key and shows your monthly Vibe Code allowance. No browser cookie is needed.",
+                       "Logg inn i Vibe med en Vibe-API-nøkkel. OpenQuota finner den lagrede CLI-nøkkelen og viser månedskvoten for Vibe Code. Ingen nettleserinformasjonskapsel er nødvendig."))
+                    .padding()
+                Spacer()
+                if let vibeError { Text(vibeError).foregroundStyle(.secondary).padding(.horizontal) }
+                FormActions(primary: L("Detect Account", "Finn konto"), disabled: model.isDemo, action: {
+                    Task {
+                        do {
+                            if try await model.detectVibeCLI() { onDone() }
+                            else {
+                                vibeError = L("No Vibe API key found. Sign in with a key in Vibe, then try again.",
+                                              "Fant ingen Vibe-API-nøkkel. Logg inn med en nøkkel i Vibe og prøv igjen.")
+                            }
+                        } catch {
+                            vibeError = L("Could not read the Vibe credential. Check your CLI sign-in and Keychain.",
+                                          "Kunne ikke lese Vibe-nøkkelen. Kontroller CLI-påloggingen og nøkkelringen.")
+                        }
+                    }
+                }, cancel: onDone)
+            }
         case .openCodeMethods:
             VStack(alignment: .leading, spacing: 12) {
                 Text(L(
@@ -578,8 +603,8 @@ private struct MistralSessionWizard: View {
                    "Logg inn med Mistral-kontoen du vil følge (for eksempel Pro- eller Team-kontoen din). OpenQuota leser aldri nettleseren din — du limer inn økten selv i de neste stegene."))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(L("Mistral has no public API for subscription limits, so OpenQuota reads the web console session you paste. The cookie is stored in this Mac's Keychain only.",
-                   "Mistral har ikke noe offentlig API for abonnementskvote, så OpenQuota leser nettkonsolløkten du limer inn. Cookien lagres bare i nøkkelringen på denne Macen."))
+            Text(L("This connection reads the web console session you paste. The cookie is stored in this Mac's Keychain only.",
+                   "Denne tilkoblingen leser nettkonsolløkten du limer inn. Cookien lagres bare i nøkkelringen på denne Macen."))
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

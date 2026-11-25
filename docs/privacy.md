@@ -25,6 +25,8 @@ provider-owned files.
 ## Data access
 
 - Networking uses ephemeral sessions without retained cookies or response caches.
+- Mistral Vibe CLI sends its key only to `https://api.mistral.ai/v1/billing/budget`
+  and, if needed for pay-as-you-go status, `/v1/billing/subscription`. Redirects are disabled.
 - Cursor and Mistral web sessions are explicitly opt-in, manually supplied,
   and unofficial. No automatic browser import or session renewal occurs.
 - The Claude bridge saves only allowlisted quota fields. When Claude Desktop

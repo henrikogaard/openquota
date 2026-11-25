@@ -17,10 +17,11 @@
 
 ## Mistral sessions
 
-Pro/Team subscription allowances are read through the web console session,
-not an API key: `api.mistral.ai` has no usage endpoint, and the Admin API is
-Enterprise-only. Studio or Admin API keys do not help here — do not create
-keys for this. Paste the `Cookie:` request header from a signed-in
+For **Mistral Vibe CLI**, use Vibe's saved API key; the billing endpoint
+requires permission to view organization inference usage. Local session
+token counts are not a substitute for a missing monthly allowance.
+
+For the separate **Mistral** web-console connection, paste the `Cookie:` request header from a signed-in
 admin.mistral.ai request; it must include an `ory_session_*` cookie. Sessions
 expire roughly monthly; the row then shows a sign-in error until a fresh
 header is pasted. Allowances (Included / Vibe) are Mistral's own percentages;

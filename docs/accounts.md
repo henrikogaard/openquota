@@ -138,8 +138,11 @@ identity gets an independent entry. [Technical details](providers.md#cursor-expe
 
 ## Mistral: experimental
 
-Mistral has no public API for Pro/Team subscription limits, so OpenQuota reads
-the signed-in web console. Add Account → Mistral runs a short wizard: it opens
+**Mistral Vibe CLI** detects the CLI's saved Vibe API key and shows its monthly
+Code allowance. You can compare this card with the **Vibe** row of an existing
+web-console account. Adding or hiding the CLI card does not change that account.
+
+For the web-console connection, Add Account → Mistral runs a short wizard: it opens
 admin.mistral.ai for you, explains how to copy the `Cookie:` request header in
 Safari, Chrome or Firefox, and **connects with a live check** — it shows what
 Mistral reports (allowances, credits) before anything is saved. Nothing is

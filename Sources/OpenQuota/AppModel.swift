@@ -567,6 +567,13 @@ final class AppModel {
 
     static let hiddenProvidersKey = "hiddenProviderIDs"
 
+    func detectVibeCLI() async throws -> Bool {
+        guard let provider = Adapters.all(http: http, credentials: credentials).first(where: { $0.id == "mistral-vibe-cli" }),
+              try await !provider.accounts().isEmpty else { return false }
+        setProviderHidden(false, id: provider.id)
+        return true
+    }
+
     /// Providers found from a local CLI sign-in, as opposed to ones the user added.
     static func isDetectedLocal(_ provider: any UsageProvider) -> Bool {
         !(provider is GenericProvider) && !(provider is ProfiledProvider) && !(provider is CursorProvider)
@@ -616,6 +623,9 @@ final class AppModel {
         case "mistral":
             L("Mistral's web console session (admin.mistral.ai); unofficial endpoints, not a public API",
               "Nettkonsolløkten til Mistral (admin.mistral.ai); uoffisielle endepunkter, ikke et offentlig API")
+        case "mistral-vibe-cli":
+            L("Monthly Vibe Code allowance from Mistral billing, using the CLI’s saved key.",
+              "Månedskvote for Vibe Code fra Mistral, hentet med CLI-ens lagrede nøkkel.")
         case "opencode-console":
             L("OpenCode console sign-in · Console endpoints, not a documented public API",
               "OpenCode-konsollpålogging · konsollendepunkter, ikke et dokumentert offentlig API")
