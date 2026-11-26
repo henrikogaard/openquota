@@ -51,7 +51,7 @@ final class AntigravityStatusLineTests: XCTestCase {
         XCTAssertEqual(reading.recordedAt, now)
         XCTAssertEqual(reading.planTier, "Pro")
         XCTAssertEqual(reading.email, "developer@example.com")
-        XCTAssertEqual(reading.buckets.map(\.id), ["ai-credits", "claude-gpt-5h", "gemini-weekly"])
+        XCTAssertEqual(reading.buckets.map(\.id), ["gemini-weekly", "claude-gpt-5h", "ai-credits"])
 
         let encoded = String(decoding: encodedData, as: UTF8.self)
         for forbidden in ["secret-project", "12345678-abcd", "Top secret task", "transcript.jsonl", "0.4213", "disabled-bucket"] {
@@ -63,14 +63,52 @@ final class AntigravityStatusLineTests: XCTestCase {
         XCTAssertFalse(snapshot.isStale)
         XCTAssertEqual(snapshot.account.plan, "Pro")
         XCTAssertEqual(snapshot.account.email, "developer@example.com")
-        XCTAssertEqual(snapshot.windows.map(\.label), ["AI Credits", "Claude GPT · 5h", "Gemini · Week"])
-        XCTAssertEqual(snapshot.windows[0].kind, .credits)
-        XCTAssertEqual(snapshot.windows[0].remaining, 42)
-        XCTAssertNil(snapshot.windows[0].percentRemaining)
+        XCTAssertEqual(snapshot.windows.map(\.label), ["Gemini · Week", "Claude GPT · 5h", "AI Credits"])
+        XCTAssertEqual(try XCTUnwrap(snapshot.windows[0].used), 6.22, accuracy: 0.001)
+        XCTAssertEqual(snapshot.windows[0].resetsAt, ISO8601DateFormatter().date(from: "2026-07-06T07:50:32Z"))
         XCTAssertEqual(try XCTUnwrap(snapshot.windows[1].used), 75, accuracy: 0.001)
         XCTAssertEqual(snapshot.windows[1].resetsAt, now.addingTimeInterval(3600))
-        XCTAssertEqual(try XCTUnwrap(snapshot.windows[2].used), 6.22, accuracy: 0.001)
-        XCTAssertEqual(snapshot.windows[2].resetsAt, ISO8601DateFormatter().date(from: "2026-07-06T07:50:32Z"))
+        XCTAssertEqual(snapshot.windows[2].kind, .credits)
+        XCTAssertEqual(snapshot.windows[2].remaining, 42)
+        XCTAssertNil(snapshot.windows[2].percentRemaining)
+    }
+
+    func test_captureHandlesLiveBucketIDsOrderingAndEpochZeroUntouchedResets() throws {
+        let now = Date(timeIntervalSince1970: 1_795_685_200)
+        let input = Data(#"""
+            {
+              "plan_tier": "Google AI Ultra",
+              "quota": {
+                "3p-weekly": {"remaining_fraction": 1, "reset_time": "1970-01-01T00:00:00Z"},
+                "3p-5h": {"remaining_fraction": 1, "reset_time": "1970-01-01T00:00:00Z"},
+                "gemini-weekly": {"remaining_fraction": 0.98, "reset_time": "2026-12-03T07:54:29Z"},
+                "gemini-5h": {"remaining_fraction": 0.965, "reset_time": "2026-11-26T12:54:29Z"}
+              }
+            }
+            """#.utf8)
+
+        let reading = try XCTUnwrap(AntigravityUsageReading.capture(input, now: now))
+        XCTAssertEqual(reading.buckets.map(\.id), ["gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly"])
+        XCTAssertNotNil(reading.buckets[0].resetsAt)
+        XCTAssertNotNil(reading.buckets[1].resetsAt)
+        XCTAssertNil(reading.buckets[2].resetsAt)
+        XCTAssertNil(reading.buckets[3].resetsAt)
+
+        let account = AccountIdentity(providerID: "antigravity", id: "antigravity@test", label: "Antigravity")
+        let snapshot = try reading.snapshot(account: account, now: now)
+        XCTAssertEqual(snapshot.account.plan, "Google AI Ultra")
+        XCTAssertEqual(snapshot.windows.map(\.label), [
+            "Gemini · 5h", "Gemini · Week", "Claude & GPT · 5h", "Claude & GPT · Week",
+        ])
+        XCTAssertNil(snapshot.windows[2].resetsAt)
+        XCTAssertNil(snapshot.windows[3].resetsAt)
+
+        // Older persisted readings with epoch 0 reset dates are also sanitized in snapshot().
+        let legacy = AntigravityUsageReading(
+            recordedAt: now,
+            buckets: [.init(id: "3p-weekly", remainingFraction: 1, resetsAt: Date(timeIntervalSince1970: 0))])
+        let legacySnapshot = try legacy.snapshot(account: account, now: now)
+        XCTAssertNil(legacySnapshot.windows.first?.resetsAt)
     }
 
     func test_captureHandlesOmittedZeroFractionAndEmptyQuota() throws {
@@ -112,6 +150,8 @@ final class AntigravityStatusLineTests: XCTestCase {
     func test_displayLabelsFormatDocumentedBucketIDs() {
         XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "gemini-weekly"), "Gemini · Week")
         XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "gemini-5h"), "Gemini · 5h")
+        XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "3p-weekly"), "Claude & GPT · Week")
+        XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "3p-5h"), "Claude & GPT · 5h")
         XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "claude-gpt-weekly"), "Claude GPT · Week")
         XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "ai-credits"), "AI Credits")
         XCTAssertEqual(AntigravityUsageReading.displayLabel(for: "weekly"), "Week")
@@ -377,6 +417,34 @@ final class AntigravityStatusLineTests: XCTestCase {
         XCTAssertTrue(try installer.disconnect(connection))
         let restored = try XCTUnwrap(try readSettings(settingsURL)["statusLine"] as? [String: Any])
         XCTAssertEqual(restored["command"] as? String, "echo original")
+    }
+
+    func test_interactiveLaunchScriptUsesInteractiveAgyWithoutHeadlessFlags() {
+        let home = URL(fileURLWithPath: "/Users/tester")
+        let defaultScript = AntigravityCLIStatus.interactiveLaunchScript(
+            executablePath: "/Users/tester/.local/bin/agy",
+            configurationDirectory: "/Users/tester/.gemini/antigravity-cli",
+            homeDirectory: home)
+        XCTAssertTrue(defaultScript.contains("rm -f -- \"$0\""))
+        XCTAssertTrue(defaultScript.contains("exec '/Users/tester/.local/bin/agy'"))
+        XCTAssertFalse(defaultScript.contains("--settings"))
+        XCTAssertFalse(defaultScript.contains("-p"))
+        XCTAssertFalse(defaultScript.contains("--print"))
+
+        let customScript = AntigravityCLIStatus.interactiveLaunchScript(
+            executablePath: "/opt/my's/agy",
+            configurationDirectory: "/Users/tester/alt's/agy-profile",
+            homeDirectory: home)
+        XCTAssertTrue(customScript.contains("exec '/opt/my'\\''s/agy' --settings '/Users/tester/alt'\\''s/agy-profile/settings.json'"))
+        XCTAssertFalse(customScript.contains(" -p"))
+        XCTAssertFalse(customScript.contains("--print"))
+
+        let fallbackScript = AntigravityCLIStatus.interactiveLaunchScript(
+            executablePath: nil,
+            configurationDirectory: nil,
+            homeDirectory: home)
+        XCTAssertTrue(fallbackScript.contains("exec \"${SHELL:-/bin/zsh}\" -lc 'exec agy'"))
+        XCTAssertFalse(fallbackScript.contains("-p"))
     }
 
     func test_spendLocalSourcesClassifiesAntigravityConnectionsAsAntigravityNotCodex() throws {

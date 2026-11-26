@@ -90,10 +90,15 @@ line is present, so `agy`'s built-in status bar keeps working. Any existing
 custom status-line command is chained and its output is forwarded.
 
 **Monitoring is passive.** Quota buckets, reset times, and your Google AI plan
-tier update while you use `agy` in Terminal, and readings are marked outdated
-after ten minutes without a new event. OpenQuota reads no Google OAuth tokens
-and makes no network requests. Disconnect restores the previous `statusLine`
-setting if the installed command has not been edited. See
+tier update while you use `agy` in Terminal (or open `/usage` inside `agy`),
+and readings are marked outdated after ten minutes without a new event. The
+quota is shared across `agy`, ACP clients (`agy acp` in T3 Code, Octant, Zed,
+etc.), and the Antigravity app, though `agy acp` itself does not run
+`statusLine`. OpenQuota reads no Google OAuth tokens, never wraps `agy -p`
+(which Google's [Antigravity FAQ](https://antigravity.google/docs/faq) states
+is unsupported in third-party apps on consumer plans), and makes no network
+requests. Disconnect restores the previous `statusLine` setting if the
+installed command has not been edited. See
 [Antigravity CLI status line](https://antigravity.google/docs/cli/statusline)
 and [provider details](providers.md#antigravity-cli-status-line).
 

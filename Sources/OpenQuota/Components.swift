@@ -262,6 +262,12 @@ struct SectionHeader: View {
 }
 
 enum Format {
+    /// Capitalize all-lowercase plan names ("plus" → "Plus") without mangling
+    /// already-cased titles ("Google AI Ultra" stays "Google AI Ultra").
+    static func planName(_ plan: String) -> String {
+        plan == plan.lowercased() ? plan.capitalized : plan
+    }
+
     static func amount(_ value: Double, unit: String?) -> String {
         switch unit {
         case "$", "USD", "usd":

@@ -185,7 +185,7 @@ struct ProviderSection: View {
     private var subtitle: String? {
         guard let single else { return nil }
         let label = single.account.label.flatMap { $0 == name ? nil : $0 }
-        let parts = [single.account.plan?.capitalized, label, single.account.email].compactMap { $0 }
+        let parts = [single.account.plan.map(Format.planName), label, single.account.email].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -206,6 +206,20 @@ struct ProviderSection: View {
                         .help(subtitle)
                 }
                 Spacer(minLength: 4)
+                if providerID == "antigravity", !model.isDemo {
+                    Button {
+                        model.openAntigravityTerminal()
+                    } label: {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 18, height: 18)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.tertiary)
+                    .help(L("Open agy in Terminal to refresh quota", "Åpne agy i Terminal for å oppdatere kvote"))
+                    .accessibilityLabel(L("Open agy in Terminal", "Åpne agy i Terminal"))
+                }
                 if let dashboardURL {
                     Link(destination: dashboardURL) {
                         Image(systemName: "arrow.up.right")
@@ -220,6 +234,9 @@ struct ProviderSection: View {
             }
             ForEach(Array(snapshots.enumerated()), id: \.element.account.id) { index, snapshot in
                 if index > 0 { Divider().opacity(0.5) }
+                let antigravityConnection = snapshot.providerID == "antigravity"
+                    ? model.subscriptionConnections.first { $0.accountID == snapshot.account.id }
+                    : nil
                 AccountUsage(
                     snapshot: snapshot,
                     showsHeader: single == nil,
@@ -228,7 +245,10 @@ struct ProviderSection: View {
                     },
                     credentialSourceName: snapshot.credentialSource.map {
                         model.credentialSourceName($0)
-                    })
+                    },
+                    onOpenAntigravityTerminal: snapshot.providerID == "antigravity" && !model.isDemo
+                        ? { model.openAntigravityTerminal(for: antigravityConnection) }
+                        : nil)
             }
         }
         .card()
@@ -261,6 +281,7 @@ struct AccountUsage: View {
     var showsHeader: Bool
     var sameAccountLabels: [String] = []
     var credentialSourceName: String?
+    var onOpenAntigravityTerminal: (() -> Void)?
 
     private var balance: String? {
         // Key usage and workspace budgets are separate from prepaid wallet funds.
@@ -282,7 +303,7 @@ struct AccountUsage: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if let plan = snapshot.account.plan {
-                        Text(plan.capitalized).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(Format.planName(plan)).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     if let email = snapshot.account.email {
                         Text(email).font(.system(size: 11)).foregroundStyle(.tertiary)
@@ -312,15 +333,26 @@ struct AccountUsage: View {
                     value: balance, detail: nil)
             }
             if snapshot.windows.isEmpty && balance == nil && snapshot.errorMessage == nil {
-                Text(snapshot.providerID == "claude"
-                     ? L("Usage appears after your next Claude Code reply.",
-                         "Bruken vises etter neste svar i Claude Code.")
-                     : snapshot.providerID == "antigravity"
-                     ? L("Usage appears while you use Antigravity CLI (agy).",
-                         "Bruken vises mens du bruker Antigravity CLI (agy).")
-                     : ProviderError.awaitingReading.userMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(snapshot.providerID == "claude"
+                         ? L("Usage appears after your next Claude Code reply.",
+                             "Bruken vises etter neste svar i Claude Code.")
+                         : snapshot.providerID == "antigravity"
+                         ? L("Updates automatically when you open Antigravity CLI (agy) in Terminal.",
+                             "Oppdateres automatisk når du åpner Antigravity CLI (agy) i Terminal.")
+                         : ProviderError.awaitingReading.userMessage)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                    if let onOpenAntigravityTerminal {
+                        Button {
+                            onOpenAntigravityTerminal()
+                        } label: {
+                            Label(L("Open agy in Terminal", "Åpne agy i Terminal"), systemImage: "terminal")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
             }
             if let error = snapshot.errorMessage {
                 Label(providerError(error, providerID: snapshot.providerID), systemImage: "exclamationmark.triangle.fill")
@@ -331,14 +363,24 @@ struct AccountUsage: View {
             }
             // Fresh readings say nothing extra; the footer has the time.
             if snapshot.isStale || snapshot.errorMessage != nil, let lastSuccessfulAt = snapshot.lastSuccessfulAt {
-                Text(
-                    (snapshot.isStale
-                        ? L("Saved reading · last successful", "Lagret måling · sist vellykket")
-                        : L("Last successful", "Sist vellykket"))
-                        + " " + lastSuccessfulAt.formatted(
-                            .relative(presentation: .named).locale(Localized.appLocale)))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 8) {
+                    Text(
+                        (snapshot.isStale
+                            ? L("Saved reading · last successful", "Lagret måling · sist vellykket")
+                            : L("Last successful", "Sist vellykket"))
+                            + " " + lastSuccessfulAt.formatted(
+                                .relative(presentation: .named).locale(Localized.appLocale)))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    if snapshot.isStale, !snapshot.windows.isEmpty, let onOpenAntigravityTerminal {
+                        Spacer(minLength: 4)
+                        Button(L("Check in Terminal", "Sjekk i Terminal")) {
+                            onOpenAntigravityTerminal()
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 10, weight: .medium))
+                    }
+                }
             }
             if snapshot.errorMessage != nil, let attemptedAt = snapshot.lastAttemptedAt {
                 Text(L("Last attempt", "Siste forsøk") + " " + attemptedAt.formatted(

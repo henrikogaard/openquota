@@ -292,7 +292,7 @@ public struct AntigravityUsageReading: Codable, Sendable, Equatable {
         }
 
         var parsedBuckets: [Bucket] = []
-        for id in rawQuota.keys.sorted() {
+        for id in rawQuota.keys.sorted(by: Self.bucketOrder) {
             guard let raw = rawQuota[id] else { continue }
             if raw.disabled == true { continue }
             let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -323,11 +323,15 @@ public struct AntigravityUsageReading: Codable, Sendable, Equatable {
                 }
             }
 
+            // Antigravity emits Unix epoch 0 ("1970-01-01T00:00:00Z") for
+            // untouched buckets that have not started a reset window yet.
             let resetsAt: Date?
             if let resetTime = raw.reset_time, let parsed = parseISO8601(resetTime) {
-                resetsAt = parsed
+                resetsAt = parsed.timeIntervalSince1970 > 0 ? parsed : nil
             } else if let seconds = raw.reset_in_seconds {
-                resetsAt = now.addingTimeInterval(seconds)
+                resetsAt = (seconds == 0 && raw.remaining_fraction == 1)
+                    ? nil
+                    : now.addingTimeInterval(seconds)
             } else {
                 resetsAt = nil
             }
@@ -367,18 +371,19 @@ public struct AntigravityUsageReading: Codable, Sendable, Equatable {
                 "Antigravity-målingen har et tidspunkt i fremtiden"))
         }
         var windows: [UsageWindow] = []
-        for bucket in buckets {
+        for bucket in buckets.sorted(by: { Self.bucketOrder($0.id, $1.id) }) {
             let windowID = "antigravity.\(Self.slug(bucket.id))"
             let label = Self.displayLabel(for: bucket.id)
+            let resetsAt = bucket.resetsAt.flatMap { $0.timeIntervalSince1970 > 0 ? $0 : nil }
             if let fraction = bucket.remainingFraction {
                 let used = min(max((1 - fraction) * 100, 0), 100)
                 windows.append(UsageWindow(
                     id: windowID, label: label, kind: .consumption,
-                    used: used, limit: 100, unit: "%", resetsAt: bucket.resetsAt))
+                    used: used, limit: 100, unit: "%", resetsAt: resetsAt))
             } else if let amount = bucket.remainingAmount {
                 windows.append(UsageWindow(
                     id: windowID, label: label, kind: .credits,
-                    remaining: amount, resetsAt: bucket.resetsAt))
+                    remaining: amount, resetsAt: resetsAt))
             }
         }
         guard !windows.isEmpty else {
@@ -444,6 +449,7 @@ public struct AntigravityUsageReading: Codable, Sendable, Equatable {
         ]
         let acronyms: [String: String] = [
             "ai": "AI", "gpt": "GPT", "oss": "OSS", "g1": "AI", "cli": "CLI",
+            "3p": "Claude & GPT",
         ]
 
         var parts = rawParts
@@ -465,6 +471,24 @@ public struct AntigravityUsageReading: Codable, Sendable, Equatable {
         case (false, nil): return prefix
         case (true, nil): return bucketID
         }
+    }
+
+    /// Natural display order: Gemini first, then partner models (`3p` / Claude & GPT),
+    /// then any other buckets; shorter windows (`5h`) before longer ones (`weekly`).
+    static func bucketOrder(_ lhs: String, _ rhs: String) -> Bool {
+        func rank(_ id: String) -> (Int, Int, String) {
+            let lower = id.lowercased()
+            let familyRank: Int =
+                lower.hasPrefix("gemini") ? 0 :
+                (lower.hasPrefix("3p") || lower.hasPrefix("claude") || lower.hasPrefix("gpt")) ? 1 : 2
+            let windowRank: Int =
+                lower.hasSuffix("-5h") || lower == "5h" ? 0 :
+                lower.hasSuffix("-daily") || lower.hasSuffix("-day") || lower.hasSuffix("-24h") ? 1 :
+                lower.hasSuffix("-weekly") || lower.hasSuffix("-week") || lower.hasSuffix("-7d") ? 2 :
+                lower.hasSuffix("-monthly") || lower.hasSuffix("-month") || lower.hasSuffix("-30d") ? 3 : 4
+            return (familyRank, windowRank, lower)
+        }
+        return rank(lhs) < rank(rhs)
     }
 
     private static func slug(_ value: String) -> String {

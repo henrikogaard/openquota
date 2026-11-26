@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Observation
 import OpenQuotaCore
@@ -45,6 +46,7 @@ final class AppModel {
     private let subscriptionStore = SubscriptionConnectionStore(
         url: AppModel.appSupportDir.appendingPathComponent("connections.json"))
     private let claudeCLIRefreshRequests = ClaudeCLIRefreshRequests()
+    private var statusLineReadingDates: [String: Date] = [:]
     private var codexLoginTask: Task<Void, Never>?
     private var codexLoginGeneration: UInt64 = 0
 
@@ -106,6 +108,7 @@ final class AppModel {
 
     private func pullFromStore() async {
         refreshSpend()
+        await refreshChangedStatusLineReadings()
         await store.markStale(olderThan: 300)
         let state = await store.state()
         let updated = sorted(state.snapshots)
@@ -114,6 +117,99 @@ final class AppModel {
         snapshots = updated
         do { try cache.save(state.snapshots) }
         catch { statusMessage = L("Couldn't save usage cache: \(error.localizedDescription)", "Kunne ikke lagre bruksbufferen: \(error.localizedDescription)") }
+    }
+
+    /// Collects modification dates for every local status-line reading file
+    /// (both `reading.json` and any tagged Claude reading files).
+    private func currentStatusLineReadingDates() -> [String: Date] {
+        var dates: [String: Date] = [:]
+        for connection in subscriptionConnections
+        where connection.kind == .antigravityStatusLine || connection.kind == .claudeStatusLine {
+            guard let dir = try? subscriptionStore.appOwnedDirectory(for: connection.id),
+                  let files = try? FileManager.default.contentsOfDirectory(
+                      at: dir, includingPropertiesForKeys: [.contentModificationDateKey],
+                      options: [.skipsHiddenFiles]) else { continue }
+            for file in files
+            where file.pathExtension == "json" && file.lastPathComponent != "bridge-metadata.json" {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+                   let modified = attrs[.modificationDate] as? Date {
+                    dates[file.path] = modified
+                }
+            }
+        }
+        return dates
+    }
+
+    /// Picks up newly written local status-line readings within seconds instead
+    /// of waiting for the 5-minute scheduled refresh pass. Never invokes CLIs
+    /// or makes network requests — only re-reads the specific changed local
+    /// reading file using the status-line provider's own discovered account
+    /// descriptor so untouched connections are never refreshed.
+    private func refreshChangedStatusLineReadings() async {
+        guard !isDemo, let scheduler else { return }
+        let current = currentStatusLineReadingDates()
+        let changedPaths = current.compactMap { path, modified in
+            statusLineReadingDates[path] != modified ? path : nil
+        }
+        statusLineReadingDates = current
+        guard !changedPaths.isEmpty else { return }
+
+        var targetAccountIDsByKind: [SubscriptionConnectionKind: Set<String>] = [:]
+        for path in changedPaths {
+            let fileURL = URL(fileURLWithPath: path)
+            let dirPath = fileURL.deletingLastPathComponent().path
+            let fileName = fileURL.lastPathComponent
+            guard let connection = subscriptionConnections.first(where: {
+                ($0.kind == .antigravityStatusLine || $0.kind == .claudeStatusLine)
+                    && (try? subscriptionStore.appOwnedDirectory(for: $0.id).path) == dirPath
+            }) else { continue }
+            let accountID = fileName == "reading.json"
+                ? connection.accountID
+                : AccountIdentity.makeID(
+                    providerID: connection.kind.providerID,
+                    identityKey: "\(connection.id.uuidString.lowercased())#\(fileName)")
+            targetAccountIDsByKind[connection.kind, default: []].insert(accountID)
+        }
+
+        for (kind, targetIDs) in targetAccountIDsByKind {
+            let provider: (any UsageProvider)? = switch kind {
+            case .antigravityStatusLine:
+                providers.first { $0 is AntigravityStatusLineProvider }
+            case .claudeStatusLine:
+                providers.first { $0 is ClaudeStatusLineProvider }
+            case .codexAppServer:
+                nil
+            }
+            guard let provider, let accounts = try? await provider.accounts() else { continue }
+            for account in accounts where targetIDs.contains(account.account.id) {
+                await scheduler.refresh(provider: provider, account: account)
+            }
+        }
+    }
+
+    /// Launches interactive `agy` in macOS Terminal so its official `statusLine`
+    /// hook emits a fresh quota reading. Never runs `agy -p` headless mode.
+    func openAntigravityTerminal(for connection: SubscriptionConnection? = nil) {
+        guard !isDemo else { return }
+        let targetConnection = connection
+            ?? subscriptionConnections.first { $0.kind == .antigravityStatusLine }
+        let executable = AntigravityCLIStatus.resolveExecutable()?.path
+        let script = AntigravityCLIStatus.interactiveLaunchScript(
+            executablePath: executable,
+            configurationDirectory: targetConnection?.directory)
+        let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openquota-agy-\(UUID().uuidString).command")
+        do {
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: scriptURL.path)
+            NSWorkspace.shared.open(
+                [scriptURL],
+                withApplicationAt: terminalURL,
+                configuration: NSWorkspace.OpenConfiguration())
+        } catch {
+            NSWorkspace.shared.open(terminalURL)
+        }
     }
 
     private func rebuildProviders() {
@@ -143,6 +239,9 @@ final class AppModel {
                 connections: subscriptionConnections,
                 store: subscriptionStore))
         }
+        // Seed known reading mtimes so startup doesn't double-refresh already-loaded files,
+        // while any new status-line write immediately triggers a local reload.
+        statusLineReadingDates = currentStatusLineReadingDates()
         for profile in profiles {
             guard let path = Self.credentialPaths[profile.providerID] else { continue }
             let files = LocalCredentialFiles(
