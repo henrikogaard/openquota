@@ -67,8 +67,8 @@ Documented API-key endpoints that need a small handwritten adapter rather than a
 Not planned: CodexBar's browser-cookie and private-endpoint integrations
 (Windsurf, Manus, Notion AI, Qwen, T3 Chat, Raycast and similar). They need
 imported web sessions, which OpenQuota does not do. Ollama (OpenUsage) reads
-local app state with no documented interface yet. Antigravity is supported
-experimentally; see [Antigravity](#antigravity-experimental).
+local app state with no documented interface yet. Antigravity uses its
+documented CLI status-line integration; see [Antigravity CLI status line](#antigravity-cli-status-line).
 
 ## Cursor (experimental, explicit opt-in)
 
@@ -306,6 +306,46 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 [Codex app-server](https://developers.openai.com/codex/app-server.md), and
 [Codex usage dashboard](https://chatgpt.com/codex/settings/usage).
 
+### Antigravity CLI status line
+
+Requires the Antigravity CLI (`agy`). In Settings → Accounts → + → **Antigravity**,
+choose the Antigravity CLI configuration directory (default `~/.gemini/antigravity-cli`)
+and **Connect**. OpenQuota never reads Antigravity OAuth tokens, never calls
+undocumented internal language-server RPCs, and makes no network requests.
+
+The installer updates only `statusLine` in `~/.gemini/antigravity-cli/settings.json`,
+preserving unrelated keys and storing the previous `statusLine` object in private
+app-owned metadata (`bridge-metadata.json`). When no active custom status-line
+command was configured previously (including when an existing `statusLine` had
+`"enabled": false`), OpenQuota enables `statusLine`, sets `"stack_with_default": true`
+so `agy` keeps showing its built-in status line while piping JSON to
+`openquota-bridge`, and skips executing any disabled command. If an active custom
+command was already configured, the bridge forwards `stdin` and `stdout` to it.
+Original `enabled` and `stack_with_default` values are saved and restored on
+disconnect.
+
+`openquota-bridge --provider antigravity` receives Antigravity CLI's documented
+status-line JSON, retains only `recordedAt`, `plan_tier`, `email`, and non-disabled
+`quota` buckets (`remaining_fraction` or `remaining_amount`, `reset_time` or
+`reset_in_seconds`), and atomically writes `reading.json` (`0600`). It never saves
+`cwd`, conversation IDs, titles, transcripts, prompts, or workspace paths.
+
+- Readings are passive: they update while you use `agy` and are marked outdated
+  after ten minutes without a new status-line update.
+- Quota buckets with `remaining_fraction` display as percentage remaining; buckets
+  with only `remaining_amount` display as a numeric amount without inventing a
+  percentage. A non-disabled bucket with a reset time but omitted fraction is
+  treated as exhausted (`0` remaining).
+- On disconnect, the original `statusLine` object is restored (or removed if none
+  existed) only when `statusLine.command` still matches OpenQuota's installed
+  command; later user edits are preserved.
+- Token spend estimates for both the Antigravity app and CLI remain separate under
+  [Estimated Spend](estimated-spend.md#antigravity-experimental).
+
+Official documentation: [Antigravity CLI status line](https://antigravity.google/docs/cli/statusline),
+[Antigravity plans](https://antigravity.google/docs/plans), and
+[Google One AI credits](https://one.google.com/ai/credits).
+
 ## Local-credential adapters (auto-detected, no key entry)
 
 | Provider | Credential source | Endpoint(s) | Notes |
@@ -314,33 +354,7 @@ Official documentation: [Codex authentication](https://developers.openai.com/cod
 | Grok | `~/.grok/auth.json` (multi-entry) | `cli-chat-proxy.grok.com/v1/billing?format=credits`; refresh via `auth.x.ai/oauth2/token` | weekly pool + PAYG balance |
 | OpenCode Go | `opencode-go` key from OpenCode 2's `credential` table in `~/.local/share/opencode/opencode*.db` (read-only via `/usr/bin/sqlite3`), falling back to `auth.json` only when no database has that table; or pasted keys (Add Account → OpenCode Go, one per subscription) | `GET opencode.ai/zen/go/v1/usage` | 5h/weekly/monthly |
 | Devin | `windsurf_api_key` (and optional `https://` `api_server_url`) in `~/.local/share/devin/credentials.toml` | `POST {server}/exa.seat_management_pb.SeatManagementService/GetUserStatus` (Connect, default `server.codeium.com`) | daily/weekly remaining percentage; overage balance in USD |
-| Antigravity (experimental) | newest live `~/.gemini/antigravity/daemon/hub_*.json` (`pid`, `httpPort`, `csrfToken`) | `POST http://127.0.0.1:{httpPort}/exa.language_server_pb.LanguageServerService/GetUserStatus` (Connect, `X-Codeium-Csrf-Token`) | per-model-family remaining quota and reset; see below |
 | Copilot | `~/.config/gh/hosts.yml` (gh CLI token) | `api.github.com/copilot_internal/v2/token` → `copilot_internal/user` | premium/chat/completions % |
-
-## Antigravity (experimental)
-
-Antigravity has no public quota API. While the desktop app runs, its language
-server listens on 127.0.0.1 and writes the port and a CSRF token to
-`~/.gemini/antigravity/daemon/hub_<port>.json`. OpenQuota reads the newest few
-of those files, skips any whose process is gone, and asks the first live one
-for `GetUserStatus`. The token is sent only to 127.0.0.1, never stored or
-logged, and redirects are refused.
-
-- The quota belongs to the Google account, so it covers the app and the
-  `agy` CLI together. The CLI runs its own language server but writes no hub
-  file, so the app must be open for a reading; otherwise the last reading is
-  kept and marked outdated.
-- One row per model family (for example "Gemini 4 Neon"); the most-used
-  variant ("Low", "High", ...) decides the row.
-- A model with a reset time but no `remainingFraction` is shown as used up.
-  That follows proto3, which leaves a zero out of JSON; it is inferred, not
-  documented.
-- The plan is `userTier.description` (for example "Google AI Ultra"), else
-  `planInfo.planName`.
-
-Fixture tests cover the mapping; one live reading on one Mac in November
-2026 matched the fields above. Token spend for both the app and the CLI is
-under [Estimated Spend](estimated-spend.md#antigravity-experimental).
 
 ## Session-token provider (manual paste only)
 

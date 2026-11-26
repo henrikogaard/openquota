@@ -221,3 +221,279 @@ public enum CodexUsageMapping {
             creditsRemaining: balance, creditsUnit: balance == nil ? nil : "credits", fetchedAt: now)
     }
 }
+
+/// Only the documented Antigravity CLI status-line quota and account fields
+/// are retained. Never stores cwd, conversation ids, transcripts, prompts, or
+/// workspace paths.
+/// Reference: https://antigravity.google/docs/cli/statusline
+public struct AntigravityUsageReading: Codable, Sendable, Equatable {
+    public struct Bucket: Codable, Sendable, Equatable {
+        public let id: String
+        public let remainingFraction: Double?
+        public let remainingAmount: Double?
+        public let resetsAt: Date?
+
+        public init(
+            id: String,
+            remainingFraction: Double? = nil,
+            remainingAmount: Double? = nil,
+            resetsAt: Date? = nil
+        ) {
+            self.id = id
+            self.remainingFraction = remainingFraction
+            self.remainingAmount = remainingAmount
+            self.resetsAt = resetsAt
+        }
+    }
+
+    public static let maxBuckets = 32
+
+    public let recordedAt: Date
+    public let planTier: String?
+    public let email: String?
+    public let buckets: [Bucket]
+
+    public init(
+        recordedAt: Date,
+        planTier: String? = nil,
+        email: String? = nil,
+        buckets: [Bucket]
+    ) {
+        self.recordedAt = recordedAt
+        self.planTier = planTier
+        self.email = email
+        self.buckets = buckets
+    }
+
+    public static func capture(_ input: Data, now: Date = Date()) throws -> Self? {
+        struct RawBucket: Decodable {
+            let remaining_fraction: Double?
+            let remaining_amount: Double?
+            let reset_time: String?
+            let reset_in_seconds: Double?
+            let disabled: Bool?
+        }
+        struct Input: Decodable {
+            let quota: [String: RawBucket]?
+            let plan_tier: String?
+            let email: String?
+        }
+        guard input.count <= 1_048_576 else {
+            throw ProviderError.badResponse(Localized.text(
+                "Antigravity status input too large",
+                "Statusdata fra Antigravity er for store"))
+        }
+        let decoded = try JSONDecoder().decode(Input.self, from: input)
+        guard let rawQuota = decoded.quota, !rawQuota.isEmpty else { return nil }
+        guard rawQuota.count <= maxBuckets else {
+            throw ProviderError.badResponse(Localized.text(
+                "Too many Antigravity quota buckets",
+                "For mange kvoter fra Antigravity"))
+        }
+
+        var parsedBuckets: [Bucket] = []
+        for id in rawQuota.keys.sorted() {
+            guard let raw = rawQuota[id] else { continue }
+            if raw.disabled == true { continue }
+            let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedID.isEmpty, trimmedID.utf8.count <= 128 else {
+                throw ProviderError.badResponse(Localized.text(
+                    "Invalid Antigravity quota window",
+                    "Ugyldig kvotevindu fra Antigravity"))
+            }
+            if let fraction = raw.remaining_fraction {
+                guard fraction.isFinite, (0...1).contains(fraction) else {
+                    throw ProviderError.badResponse(Localized.text(
+                        "Invalid Antigravity quota window",
+                        "Ugyldig kvotevindu fra Antigravity"))
+                }
+            }
+            if let amount = raw.remaining_amount {
+                guard amount.isFinite, amount >= 0 else {
+                    throw ProviderError.badResponse(Localized.text(
+                        "Invalid Antigravity quota window",
+                        "Ugyldig kvotevindu fra Antigravity"))
+                }
+            }
+            if let seconds = raw.reset_in_seconds {
+                guard seconds.isFinite, seconds >= 0 else {
+                    throw ProviderError.badResponse(Localized.text(
+                        "Invalid Antigravity quota window",
+                        "Ugyldig kvotevindu fra Antigravity"))
+                }
+            }
+
+            let resetsAt: Date?
+            if let resetTime = raw.reset_time, let parsed = parseISO8601(resetTime) {
+                resetsAt = parsed
+            } else if let seconds = raw.reset_in_seconds {
+                resetsAt = now.addingTimeInterval(seconds)
+            } else {
+                resetsAt = nil
+            }
+
+            let fraction: Double?
+            if let rawFraction = raw.remaining_fraction {
+                fraction = rawFraction
+            } else if raw.remaining_amount == nil, resetsAt != nil {
+                // Go/proto3 JSON may omit a zero remaining_fraction when a bucket is exhausted.
+                fraction = 0
+            } else {
+                fraction = nil
+            }
+            guard fraction != nil || raw.remaining_amount != nil else { continue }
+            parsedBuckets.append(Bucket(
+                id: trimmedID,
+                remainingFraction: fraction,
+                remainingAmount: raw.remaining_amount,
+                resetsAt: resetsAt))
+        }
+
+        guard !parsedBuckets.isEmpty else { return nil }
+        let planTier = sanitizedPlan(decoded.plan_tier)
+        let email = sanitizedEmail(decoded.email)
+        let reading = Self(recordedAt: now, planTier: planTier, email: email, buckets: parsedBuckets)
+        try reading.validate()
+        return reading
+    }
+
+    public func snapshot(
+        account: AccountIdentity, now: Date = Date(), staleAfter: TimeInterval = 600
+    ) throws -> UsageSnapshot {
+        try validate()
+        guard recordedAt <= now.addingTimeInterval(60) else {
+            throw ProviderError.badResponse(Localized.text(
+                "Antigravity reading has a future timestamp",
+                "Antigravity-målingen har et tidspunkt i fremtiden"))
+        }
+        var windows: [UsageWindow] = []
+        for bucket in buckets {
+            let windowID = "antigravity.\(Self.slug(bucket.id))"
+            let label = Self.displayLabel(for: bucket.id)
+            if let fraction = bucket.remainingFraction {
+                let used = min(max((1 - fraction) * 100, 0), 100)
+                windows.append(UsageWindow(
+                    id: windowID, label: label, kind: .consumption,
+                    used: used, limit: 100, unit: "%", resetsAt: bucket.resetsAt))
+            } else if let amount = bucket.remainingAmount {
+                windows.append(UsageWindow(
+                    id: windowID, label: label, kind: .credits,
+                    remaining: amount, resetsAt: bucket.resetsAt))
+            }
+        }
+        guard !windows.isEmpty else {
+            throw ProviderError.badResponse(Localized.text(
+                "No Antigravity usage reported yet",
+                "Antigravity har ikke rapportert bruk ennå"))
+        }
+        var identity = account
+        identity.plan = planTier ?? identity.plan
+        identity.email = email ?? identity.email
+        return UsageSnapshot(
+            account: identity, providerID: "antigravity", windows: windows,
+            fetchedAt: recordedAt, isStale: now.timeIntervalSince(recordedAt) > staleAfter)
+    }
+
+    private func validate() throws {
+        guard buckets.count <= Self.maxBuckets else {
+            throw ProviderError.badResponse(Localized.text(
+                "Too many Antigravity quota buckets",
+                "For mange kvoter fra Antigravity"))
+        }
+        for bucket in buckets {
+            guard !bucket.id.isEmpty, bucket.id.utf8.count <= 128 else {
+                throw ProviderError.badResponse(Localized.text(
+                    "Invalid Antigravity quota window",
+                    "Ugyldig kvotevindu fra Antigravity"))
+            }
+            if let fraction = bucket.remainingFraction {
+                guard fraction.isFinite, (0...1).contains(fraction) else {
+                    throw ProviderError.badResponse(Localized.text(
+                        "Invalid Antigravity quota window",
+                        "Ugyldig kvotevindu fra Antigravity"))
+                }
+            }
+            if let amount = bucket.remainingAmount {
+                guard amount.isFinite, amount >= 0 else {
+                    throw ProviderError.badResponse(Localized.text(
+                        "Invalid Antigravity quota window",
+                        "Ugyldig kvotevindu fra Antigravity"))
+                }
+            }
+            guard bucket.remainingFraction != nil || bucket.remainingAmount != nil else {
+                throw ProviderError.badResponse(Localized.text(
+                    "Invalid Antigravity quota window",
+                    "Ugyldig kvotevindu fra Antigravity"))
+            }
+        }
+    }
+
+    /// Formats a documented status-line quota bucket id such as "gemini-weekly"
+    /// or "claude-gpt-5h" into a concise display label.
+    public static func displayLabel(for bucketID: String) -> String {
+        let rawParts = bucketID
+            .split(whereSeparator: { $0 == "-" || $0 == "_" || $0.isWhitespace })
+            .map(String.init)
+        guard !rawParts.isEmpty else { return bucketID }
+
+        let periodMap: [String: String] = [
+            "weekly": "Week", "week": "Week", "7d": "Week",
+            "5h": "5h", "5hr": "5h", "5hours": "5h",
+            "daily": "Day", "day": "Day", "24h": "Day",
+            "monthly": "Month", "month": "Month", "30d": "Month",
+        ]
+        let acronyms: [String: String] = [
+            "ai": "AI", "gpt": "GPT", "oss": "OSS", "g1": "AI", "cli": "CLI",
+        ]
+
+        var parts = rawParts
+        var period: String?
+        if let last = parts.last?.lowercased(), let mapped = periodMap[last] {
+            period = mapped
+            parts.removeLast()
+        }
+        let prefix = parts.map { token -> String in
+            let lower = token.lowercased()
+            if let acronym = acronyms[lower] { return acronym }
+            guard let first = token.first else { return token }
+            return first.uppercased() + token.dropFirst()
+        }.joined(separator: " ")
+
+        switch (prefix.isEmpty, period) {
+        case (false, let period?): return "\(prefix) · \(period)"
+        case (true, let period?): return period
+        case (false, nil): return prefix
+        case (true, nil): return bucketID
+        }
+    }
+
+    private static func slug(_ value: String) -> String {
+        value.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+            .reduce(into: "") { $0.append($1) }
+    }
+
+    private static func sanitizedPlan(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty, trimmed.utf8.count <= 128,
+              !trimmed.contains(where: \.isNewline) else { return nil }
+        return trimmed
+    }
+
+    private static func sanitizedEmail(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.contains("@"), trimmed.utf8.count <= 254,
+              !trimmed.contains(where: \.isWhitespace) else { return nil }
+        return trimmed
+    }
+
+    private static func parseISO8601(_ value: String) -> Date? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: trimmed) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: trimmed)
+    }
+}

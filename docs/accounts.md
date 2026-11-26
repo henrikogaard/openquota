@@ -80,6 +80,23 @@ If Codex is not found, choose the CLI executable, not a credential file.
 OpenAI API keys have separate billing and do not provide ChatGPT subscription
 allowance. Removing a connection retains its Codex-managed home.
 
+## Antigravity
+
+Choose **Settings → Accounts → + → Antigravity** and select your Antigravity
+CLI settings directory (default `~/.gemini/antigravity-cli`). OpenQuota installs
+its local bridge in Antigravity CLI's documented `statusLine` setting
+(`settings.json`) and sets `stack_with_default: true` when no custom status
+line is present, so `agy`'s built-in status bar keeps working. Any existing
+custom status-line command is chained and its output is forwarded.
+
+**Monitoring is passive.** Quota buckets, reset times, and your Google AI plan
+tier update while you use `agy` in Terminal, and readings are marked outdated
+after ten minutes without a new event. OpenQuota reads no Google OAuth tokens
+and makes no network requests. Disconnect restores the previous `statusLine`
+setting if the installed command has not been edited. See
+[Antigravity CLI status line](https://antigravity.google/docs/cli/statusline)
+and [provider details](providers.md#antigravity-cli-status-line).
+
 ## Anthropic API and OpenAI API: spend only
 
 **Anthropic API** and **OpenAI API** are the pay-as-you-go developer

@@ -16,6 +16,7 @@ a read-only credential or guarantee secrecy on a compromised Mac.
 | Profile/connection metadata | Local labels, IDs, paths—not keys |
 | Last-good usage | Bounded local snapshot cache |
 | Claude bridge | Sanitized percentages, reset times, and timestamp |
+| Antigravity bridge | Sanitized quota buckets, plan tier, account email, and timestamp |
 | Local spend estimates | Opt-in bounded scan; `usage.sqlite` (0600) keeps which logs were read, 40 days of per-request token counts for de-duplication, and daily token/cost totals per source and model |
 
 App-written private files use 0600 permissions in 0700 directories. Existing
@@ -34,6 +35,11 @@ provider-owned files.
   ids so another account gets its own card; the ids and email are not saved.
   It invokes any existing status-line command with its original input; that
   command stays under your control.
+- The Antigravity CLI bridge uses Antigravity's documented `statusLine` hook
+  in `~/.gemini/antigravity-cli/settings.json`. It saves only allowlisted
+  quota buckets, plan tier, account email, and timestamp; never cwd,
+  conversation IDs, titles, transcripts, or prompts. It reads no OAuth tokens
+  and makes no network requests.
 - Claude and Codex cards show the signed-in email: Claude's from the folder's
   `.claude.json`, Codex's from its app-server account read. It is kept only
   in the private local snapshot cache, used to warn when two connections are

@@ -315,6 +315,9 @@ struct AccountUsage: View {
                 Text(snapshot.providerID == "claude"
                      ? L("Usage appears after your next Claude Code reply.",
                          "Bruken vises etter neste svar i Claude Code.")
+                     : snapshot.providerID == "antigravity"
+                     ? L("Usage appears while you use Antigravity CLI (agy).",
+                         "Bruken vises mens du bruker Antigravity CLI (agy).")
                      : ProviderError.awaitingReading.userMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)

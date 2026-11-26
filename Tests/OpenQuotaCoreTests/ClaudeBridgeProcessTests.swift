@@ -78,6 +78,106 @@ final class ClaudeBridgeProcessTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder.openQuota.decode(ClaudeUsageReading.self, from: data).fiveHour?.usedPercentage, 7)
     }
 
+    func test_antigravityBridgeCapturesSanitizedQuotaAndForwardsOriginalCommand() throws {
+        let input = Data(#"""
+            {
+              "cwd": "/private/secret-repo",
+              "session_id": "fixture-session-id",
+              "conversation_title": "Private Title",
+              "transcript_path": "/Users/test/.gemini/antigravity/brain/transcript.jsonl",
+              "plan_tier": "Ultra",
+              "email": "fixture@example.com",
+              "cost": {"total_usd": 1.25},
+              "quota": {
+                "gemini-weekly": {
+                  "remaining_fraction": 0.82,
+                  "reset_time": "2026-12-01T00:00:00Z"
+                }
+              }
+            }
+            """#.utf8)
+
+        let chained = try runAntigravityBridge(command: "printf 'status ok'", input: input)
+        XCTAssertFalse(chained.timedOut)
+        XCTAssertEqual(chained.status, 0)
+        XCTAssertEqual(chained.output, Data("status ok".utf8))
+        let readingURL = chained.connectionDirectory.appendingPathComponent("reading.json")
+        let data = try Data(contentsOf: readingURL)
+        let encoded = String(decoding: data, as: UTF8.self)
+        for secret in ["secret-repo", "fixture-session-id", "Private Title", "transcript.jsonl", "1.25"] {
+            XCTAssertFalse(encoded.contains(secret))
+        }
+        let reading = try JSONDecoder.openQuota.decode(AntigravityUsageReading.self, from: data)
+        XCTAssertEqual(reading.planTier, "Ultra")
+        XCTAssertEqual(reading.email, "fixture@example.com")
+        XCTAssertEqual(reading.buckets.first?.id, "gemini-weekly")
+        XCTAssertEqual(reading.buckets.first?.remainingFraction, 0.82)
+
+        let standalone = try runAntigravityBridge(command: nil, input: input)
+        XCTAssertFalse(standalone.timedOut)
+        XCTAssertEqual(standalone.status, 0)
+        XCTAssertTrue(standalone.output.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: standalone.connectionDirectory.appendingPathComponent("reading.json").path))
+
+        let disabled = try runAntigravityBridge(command: "exit 42", enabled: false, input: input)
+        XCTAssertFalse(disabled.timedOut)
+        XCTAssertEqual(disabled.status, 0)
+        XCTAssertTrue(disabled.output.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: disabled.connectionDirectory.appendingPathComponent("reading.json").path))
+    }
+
+    private func runAntigravityBridge(command: String?, enabled: Bool = true, input: Data) throws -> BridgeResult {
+        signal(SIGPIPE, SIG_IGN)
+        let directory = try makeDirectory()
+        let original: Data? = try command.map {
+            var object: [String: Any] = ["type": "command", "command": $0]
+            if !enabled { object["enabled"] = false }
+            return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        }
+        let metadata = AntigravityBridgeMetadata(
+            installedCommand: "openquota-bridge --provider antigravity test",
+            originalStatusLine: original,
+            addedStackWithDefault: command == nil || !enabled)
+        try JSONEncoder.openQuota.encode(metadata)
+            .write(to: directory.appendingPathComponent("bridge-metadata.json"))
+
+        let executable = try findBridgeExecutable()
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["--provider", "antigravity", "--connection-directory", directory.path]
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = FileHandle.nullDevice
+
+        let terminated = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in terminated.signal() }
+        try process.run()
+        inputPipe.fileHandleForReading.closeFile()
+        outputPipe.fileHandleForWriting.closeFile()
+
+        let writer = BridgeInputWriter(handle: inputPipe.fileHandleForWriting, input: input)
+        let reader = BridgeOutputReader(handle: outputPipe.fileHandleForReading)
+        let writerDone = DispatchSemaphore(value: 0)
+        let readerDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { writer.write(); writerDone.signal() }
+        DispatchQueue.global().async { reader.read(); readerDone.signal() }
+
+        let timedOut = terminated.wait(timeout: .now() + 5) == .timedOut
+        if timedOut { _ = kill(process.processIdentifier, SIGKILL) }
+        process.waitUntilExit()
+        _ = writerDone.wait(timeout: .now() + 2)
+        _ = readerDone.wait(timeout: .now() + 2)
+        return BridgeResult(
+            output: reader.value,
+            status: process.terminationStatus,
+            timedOut: timedOut,
+            connectionDirectory: directory)
+    }
+
     private func runBridge(
         command: String,
         input: Data,

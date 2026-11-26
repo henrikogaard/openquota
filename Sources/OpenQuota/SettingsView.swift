@@ -126,7 +126,7 @@ struct AccountsPane: View {
     private var items: [AccountItem] {
         var out: [AccountItem] = []
         out += model.subscriptionConnections.map {
-            AccountItem(id: "sub:\($0.id)", providerID: $0.kind == .claudeStatusLine ? "claude" : "codex",
+            AccountItem(id: "sub:\($0.id)", providerID: $0.kind.providerID,
                         title: $0.label, kind: .subscription($0))
         }
         out += saved.map {
@@ -324,6 +324,8 @@ struct AccountItem: Identifiable {
         switch kind {
         case .subscription(let connection) where connection.kind == .codexAppServer:
             L("Codex keeps its sign-in files in the account's private home.", "Codex beholder påloggingsfilene i kontoens private mappe.")
+        case .subscription(let connection) where connection.kind == .antigravityStatusLine:
+            L("Your Antigravity CLI status line is restored if it hasn't changed since connecting.", "Antigravity CLI-statuslinjen gjenopprettes hvis den ikke er endret siden tilkoblingen.")
         case .subscription:
             L("Your Claude status line is restored if it hasn't changed since connecting.", "Claude-statuslinjen gjenopprettes hvis den ikke er endret siden tilkoblingen.")
         case .profile:
@@ -376,6 +378,7 @@ struct AccountDetail: View {
 
     private var snapshot: UsageSnapshot? {
         switch item.kind {
+        case .subscription(let connection): model.snapshots.first { $0.account.id == connection.accountID }
         case .saved(let account): model.snapshots.first { $0.account.id == account.id }
         default: model.snapshots.first { $0.providerID == item.providerID && $0.account.label == item.title }
         }
@@ -571,6 +574,15 @@ struct AccountDetail: View {
                         Button(L("Refresh", "Oppdater")) { model.refreshNow() }
                             .disabled(model.refreshing || model.isDemo)
                     }
+                case .antigravityStatusLine:
+                    Section("Antigravity") {
+                        Text(L(
+                            "OpenQuota reads the installed status line after Antigravity CLI (agy) writes a new reading. Use agy, then Refresh; no token or network request is used.",
+                            "OpenQuota leser den installerte statuslinjen etter at Antigravity CLI (agy) skriver en ny måling. Bruk agy, og oppdater deretter; ingen nøkkel eller nettverkskall brukes."))
+                            .foregroundStyle(.secondary)
+                        Button(L("Refresh", "Oppdater")) { model.refreshNow() }
+                            .disabled(model.refreshing || model.isDemo)
+                    }
                 }
             }
             if case .detected = item.kind {
@@ -622,7 +634,11 @@ struct AccountDetail: View {
         }
         return switch item.kind {
         case .subscription(let connection):
-            connection.kind == .claudeStatusLine ? L("Claude Code status line", "Claude Code-statuslinje") : L("Codex sign-in", "Codex-pålogging")
+            switch connection.kind {
+            case .claudeStatusLine: L("Claude Code status line", "Claude Code-statuslinje")
+            case .codexAppServer: L("Codex sign-in", "Codex-pålogging")
+            case .antigravityStatusLine: L("Antigravity CLI status line", "Antigravity CLI-statuslinje")
+            }
         case .saved(let account):
             account.account.providerID == "cursor"
                 ? L("Session token in Keychain", "Øktnøkkel i nøkkelringen")
@@ -644,6 +660,8 @@ struct AccountDetail: View {
               "Eksperimentell: uoffisielle endepunkter og en sensitiv øktnøkkel. Erstatningen må tilhøre samme Cursor-konto. Ingen automatisk fornyelse eller nettleserimport.")
         case .subscription(let connection) where connection.kind == .claudeStatusLine:
             L("Updates while you use Claude Code. \(connection.directory)", "Oppdateres mens du bruker Claude Code. \(connection.directory)")
+        case .subscription(let connection) where connection.kind == .antigravityStatusLine:
+            L("Updates while you use Antigravity CLI (agy). \(connection.directory)", "Oppdateres mens du bruker Antigravity CLI (agy). \(connection.directory)")
         case .profile(let profile) where profile.providerID == "claude" || profile.providerID == "codex":
             L("This older profile is no longer used. Remove it and connect the account again.", "Denne eldre profilen brukes ikke lenger. Fjern den og koble til kontoen på nytt.")
         case .profile(let profile): profile.credentialPath

@@ -40,12 +40,20 @@ public enum Localized {
         guard norwegian else { return label }
         // "Budget $50", "Budget 2": a budget's limit or number follows the word.
         if label.hasPrefix("Budget ") { return "Budsjett " + label.dropFirst(7) }
+        // "Gemini · Week", "Gemini · Day", "Gemini · Month".
+        for (suffix, translated) in [(" · Week", " · Uke"), (" · Day", " · Dag"), (" · Month", " · Måned")] {
+            if label.hasSuffix(suffix) {
+                return String(label.dropLast(suffix.count)) + translated
+            }
+        }
         return windowLabels[label] ?? label
     }
 
     static let windowLabels: [String: String] = [
+        "Day": "Dag", "Daily": "Daglig",
         "Week": "Uke", "Weekly": "Ukentlig", "Month": "Måned", "Monthly": "Månedlig",
         "Session": "Økt", "5 hours": "5 timer", "Balance": "Saldo", "Credits": "Kreditter",
+        "AI Credits": "AI-kreditter",
         "Plan": "Plan", "Budget": "Budsjett", "Requests": "Forespørsler", "Search": "Søk", "Characters": "Tegn",
         "Subscription": "Abonnement", "Points": "Poeng", "Billing": "Fakturering",
         "Allowance": "Kvote", "Lifetime spend": "Totalt forbruk", "Key spend": "Nøkkelforbruk",

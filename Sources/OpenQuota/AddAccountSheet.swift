@@ -6,7 +6,7 @@ import OpenQuotaCore
 /// A searchable grid of providers; choosing one shows its short form.
 struct AddAccountSheet: View {
     enum Target: Hashable {
-        case claude, codex, cursor, mistral, vibeCLI, openCodeMethods, openCodeSignIn
+        case claude, codex, antigravity, cursor, mistral, vibeCLI, openCodeMethods, openCodeSignIn
         case apiKey(String)
         case profile(String)
 
@@ -14,7 +14,7 @@ struct AddAccountSheet: View {
         var ownsActions: Bool {
             switch self {
             case .openCodeMethods: false
-            case .claude, .codex, .cursor, .mistral, .vibeCLI, .openCodeSignIn, .apiKey, .profile: true
+            case .claude, .codex, .antigravity, .cursor, .mistral, .vibeCLI, .openCodeSignIn, .apiKey, .profile: true
             }
         }
     }
@@ -69,7 +69,12 @@ struct AddAccountSheet: View {
             byCanonicalID[canonicalID] = Tile(
                 target: .profile(id), providerID: id, name: model.providerName(id))
         }
-        return byCanonicalID.values
+        // Keep the Antigravity CLI subscription tile separate from API-key spec
+        // deduplication so custom specs with any ID remain reachable.
+        let allTiles = Array(byCanonicalID.values) + [
+            Tile(target: .antigravity, providerID: "antigravity", name: "Antigravity"),
+        ]
+        return allTiles
             .filter(matches)
             .sorted {
                 let order = $0.name.localizedCaseInsensitiveCompare($1.name)
@@ -84,12 +89,15 @@ struct AddAccountSheet: View {
     private func matches(_ tile: Tile) -> Bool {
         search.isEmpty || tile.name.localizedCaseInsensitiveContains(search)
             || (tile.target == .codex && "chatgpt".localizedCaseInsensitiveContains(search))
+            || (tile.target == .antigravity && ("google".localizedCaseInsensitiveContains(search)
+                || "agy".localizedCaseInsensitiveContains(search)))
     }
 
     private func title(for target: Target) -> String {
         switch target {
         case .claude: "Claude Code"
         case .codex: "Codex / ChatGPT"
+        case .antigravity: "Antigravity"
         case .cursor: "Cursor"
         case .mistral: "Mistral"
         case .vibeCLI: "Mistral Vibe CLI"
@@ -107,6 +115,7 @@ struct AddAccountSheet: View {
         case .some(.openCodeSignIn): 440
         case .some(.profile(_)): 420
         case .some(.claude): 460
+        case .some(.antigravity): 420
         default: 340
         }
     }
@@ -205,6 +214,8 @@ struct AddAccountSheet: View {
             SubscriptionConnectForm(model: model, kind: .claudeStatusLine, onConnected: onDone, onCancel: onDone)
         case .codex:
             SubscriptionConnectForm(model: model, kind: .codexAppServer, onConnected: onDone, onCancel: onDone)
+        case .antigravity:
+            SubscriptionConnectForm(model: model, kind: .antigravityStatusLine, onConnected: onDone, onCancel: onDone)
         case .cursor:
             CursorSessionForm(model: model, onDone: onDone)
         case .mistral:

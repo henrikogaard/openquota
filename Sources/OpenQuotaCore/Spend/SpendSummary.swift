@@ -179,8 +179,17 @@ public struct SpendLogSource: Sendable, Hashable {
             (.claude, homeFor("CLAUDE_CONFIG_DIR", fallback: ".claude")),
             (.codex, homeFor("CODEX_HOME", fallback: ".codex")),
         ]
-        homes += connections.map {
-            ($0.kind == .claudeStatusLine ? .claude : .codex, URL(fileURLWithPath: $0.directory))
+        var antigravityFolders: [URL] = []
+        for connection in connections {
+            let directory = URL(fileURLWithPath: connection.directory)
+            switch connection.kind {
+            case .claudeStatusLine:
+                homes.append((.claude, directory))
+            case .codexAppServer:
+                homes.append((.codex, directory))
+            case .antigravityStatusLine:
+                antigravityFolders.append(directory.appendingPathComponent("conversations"))
+            }
         }
         var seen = Set<SpendLogSource>()
         let logs = homes.flatMap { provider, directory in
@@ -197,7 +206,7 @@ public struct SpendLogSource: Sendable, Hashable {
             SpendLogSource(provider: .antigravity, directory: home.appendingPathComponent(".gemini/antigravity/conversations")),
             // The agy CLI keeps the same conversation databases in its own folder.
             SpendLogSource(provider: .antigravity, directory: home.appendingPathComponent(".gemini/antigravity-cli/conversations")),
-        ]
+        ] + antigravityFolders.map { SpendLogSource(provider: .antigravity, directory: $0) }
         return (logs + tools).filter { seen.insert($0).inserted }
     }
 }
