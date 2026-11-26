@@ -330,12 +330,23 @@ status-line JSON, retains only `recordedAt`, `plan_tier`, `email`, and non-disab
 `reset_in_seconds`), and atomically writes `reading.json` (`0600`). It never saves
 `cwd`, conversation IDs, titles, transcripts, prompts, or workspace paths.
 
-- Readings are passive: they update while you use `agy` and are marked outdated
-  after ten minutes without a new status-line update.
-- Quota buckets with `remaining_fraction` display as percentage remaining; buckets
-  with only `remaining_amount` display as a numeric amount without inventing a
-  percentage. A non-disabled bucket with a reset time but omitted fraction is
-  treated as exhausted (`0` remaining).
+- Readings are passive: they update automatically within seconds whenever you
+  use `agy` interactively in Terminal (or click **Open agy in Terminal** in the
+  popover or Settings) and are marked outdated after ten minutes without a new
+  status-line update.
+- Quota belongs to the Google account and is shared across `agy`, `agy acp`
+  clients (such as T3 Code, Octant, Zed, or Xcode), and the Antigravity app.
+  `agy acp` has no quota channel and does not run `statusLine`; per Google's
+  [Antigravity FAQ](https://antigravity.google/docs/faq), wrapping headless
+  `agy -p` inside third-party applications is not supported under consumer
+  plans, so OpenQuota intentionally never invokes `agy -p`.
+- Quota buckets with `remaining_fraction` display as percentage remaining
+  (ordered with Gemini buckets first, then partner `3p` / Claude & GPT buckets,
+  with `5h` before `weekly`); untouched buckets whose `reset_time` is Unix
+  epoch 0 (`1970-01-01T00:00:00Z`) omit the reset countdown. Buckets with only
+  `remaining_amount` display as a numeric amount without inventing a percentage.
+  A non-disabled bucket with a future reset time but omitted fraction is treated
+  as exhausted (`0` remaining).
 - On disconnect, the original `statusLine` object is restored (or removed if none
   existed) only when `statusLine.command` still matches OpenQuota's installed
   command; later user edits are preserved.

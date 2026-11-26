@@ -440,7 +440,7 @@ struct AccountDetail: View {
                 }
                 LabeledContent(L("Source", "Kilde"), value: source)
                 if let plan = snapshot?.account.plan {
-                    LabeledContent(L("Plan", "Plan"), value: plan.capitalized)
+                    LabeledContent(L("Plan", "Plan"), value: Format.planName(plan))
                 }
                 if let email = snapshot?.account.email {
                     LabeledContent(L("Account", "Konto"), value: email)
@@ -577,11 +577,22 @@ struct AccountDetail: View {
                 case .antigravityStatusLine:
                     Section("Antigravity") {
                         Text(L(
-                            "OpenQuota reads the installed status line after Antigravity CLI (agy) writes a new reading. Use agy, then Refresh; no token or network request is used.",
-                            "OpenQuota leser den installerte statuslinjen etter at Antigravity CLI (agy) skriver en ny måling. Bruk agy, og oppdater deretter; ingen nøkkel eller nettverkskall brukes."))
+                            "OpenQuota reads the installed status line automatically within seconds whenever you open Antigravity CLI (agy) in Terminal, showing your shared Google AI quota (covering agy, ACP clients, and the Antigravity app).",
+                            "OpenQuota leser den installerte statuslinjen automatisk i løpet av sekunder når du åpner Antigravity CLI (agy) i Terminal, og viser den delte Google AI-kvoten (som gjelder agy, ACP-klienter og Antigravity-appen)."))
                             .foregroundStyle(.secondary)
-                        Button(L("Refresh", "Oppdater")) { model.refreshNow() }
-                            .disabled(model.refreshing || model.isDemo)
+                        Text(L(
+                            "ACP sessions (agy acp) do not emit status-line updates, and OpenQuota intentionally never invokes agy -p or reads Google OAuth tokens to stay within Google’s consumer terms.",
+                            "ACP-økter (agy acp) sender ikke statuslinjeoppdateringer, og OpenQuota kjører bevisst aldri agy -p eller leser Google OAuth-nøkler for å holde seg innenfor Googles vilkår."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Button(L("Open agy in Terminal", "Åpne agy i Terminal")) {
+                                model.openAntigravityTerminal(for: connection)
+                            }
+                            .disabled(model.isDemo)
+                            Button(L("Refresh", "Oppdater")) { model.refreshNow() }
+                                .disabled(model.refreshing || model.isDemo)
+                        }
                     }
                 }
             }

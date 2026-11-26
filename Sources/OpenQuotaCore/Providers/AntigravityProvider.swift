@@ -500,4 +500,43 @@ public struct AntigravityCLIStatus: Equatable, Sendable {
         }
         return nil
     }
+
+    /// Builds a self-cleaning interactive Terminal launch script for `agy`.
+    /// Never passes `-p` / `--print` headless flags.
+    public static func interactiveLaunchScript(
+        executablePath: String?,
+        configurationDirectory: String? = nil,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String {
+        func quote(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+
+        var args: [String] = []
+        if let configurationDirectory, !configurationDirectory.isEmpty {
+            let expanded = URL(fileURLWithPath: ClaudeProfileStatus.expanded(
+                configurationDirectory, homeDirectory: homeDirectory)).standardizedFileURL
+            let defaultDir = homeDirectory
+                .appendingPathComponent(AntigravityStatusLineInstaller.defaultRelativeDirectory)
+                .standardizedFileURL
+            if expanded.path != defaultDir.path {
+                let settingsPath = expanded.appendingPathComponent("settings.json").path
+                args.append(contentsOf: ["--settings", quote(settingsPath)])
+            }
+        }
+
+        let command: String
+        if let executablePath, executablePath.hasPrefix("/") {
+            command = ([quote(executablePath)] + args).joined(separator: " ")
+        } else {
+            let inner = (["agy"] + args).joined(separator: " ")
+            command = "\"${SHELL:-/bin/zsh}\" -lc " + quote("exec " + inner)
+        }
+
+        return """
+        #!/bin/sh
+        rm -f -- "$0"
+        exec \(command)
+        """
+    }
 }

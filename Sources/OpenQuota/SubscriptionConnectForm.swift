@@ -167,8 +167,8 @@ struct AntigravitySetupForm: View {
                         .font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(L(
-                        "If you haven’t signed in to Antigravity CLI yet, run agy in Terminal to sign in with your Google account.",
-                        "Hvis du ikke har logget inn i Antigravity CLI ennå, kjør agy i Terminal for å logge inn med Google-kontoen din."))
+                        "If you haven’t signed in to Antigravity CLI yet, run agy in Terminal to sign in with your Google account. ACP clients (agy acp) share the same Google account quota, but do not run statusLine — open agy or run /usage inside agy to update.",
+                        "Hvis du ikke har logget inn i Antigravity CLI ennå, kjør agy i Terminal for å logge inn med Google-kontoen din. ACP-klienter (agy acp) deler samme Google-kontokvote, men kjører ikke statusLine – åpne agy eller kjør /usage i agy for å oppdatere."))
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if let errorText {
