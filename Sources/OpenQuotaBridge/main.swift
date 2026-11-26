@@ -20,14 +20,18 @@ struct OpenQuotaBridge {
 
     private static let inputLimit = 1_048_576
     private static let outputLimit = 1_048_576
-    private static let runtimeLimit: TimeInterval = 10
+    private static let claudeRuntimeLimit: TimeInterval = 10
+    /// Antigravity CLI stops status-line runs after 5 seconds; keep a slightly
+    /// shorter ceiling so any hung chained script is killed and reaped first.
+    private static let antigravityRuntimeLimit: TimeInterval = 4.5
     private static let metadataName = "bridge-metadata.json"
 
     static func main() {
         signal(SIGPIPE, SIG_IGN)
-        let deadline = Date().addingTimeInterval(runtimeLimit)
-        guard let invocation = parseArguments(),
-              let originalCommand = loadOriginalCommand(from: invocation.directory, provider: invocation.provider),
+        guard let invocation = parseArguments() else { return }
+        let limit = invocation.provider == .antigravity ? antigravityRuntimeLimit : claudeRuntimeLimit
+        let deadline = Date().addingTimeInterval(limit)
+        guard let originalCommand = loadOriginalCommand(from: invocation.directory, provider: invocation.provider),
               let input = readInput(deadline: deadline) else {
             return
         }

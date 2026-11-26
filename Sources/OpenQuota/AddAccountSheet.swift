@@ -38,7 +38,8 @@ struct AddAccountSheet: View {
         var byCanonicalID: [String: Tile] = [
             "claude": Tile(target: .claude, providerID: "claude", name: "Claude Code"),
             "codex": Tile(target: .codex, providerID: "codex", name: "Codex / ChatGPT"),
-            "antigravity": Tile(target: .antigravity, providerID: "antigravity", name: "Antigravity"),
+            // Distinct key so a custom provider-specs.json entry with id "antigravity" keeps its own API-key tile.
+            "antigravity-cli": Tile(target: .antigravity, providerID: "antigravity", name: "Antigravity"),
             "cursor": Tile(
                 target: .cursor, providerID: "cursor",
                 name: L("Cursor · Experimental", "Cursor · Eksperimentell")),

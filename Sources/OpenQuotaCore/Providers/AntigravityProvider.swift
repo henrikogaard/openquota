@@ -271,7 +271,15 @@ public struct AntigravityStatusLineInstaller: Sendable {
         let metadataURL = appOwnedDirectory.appendingPathComponent(Self.metadataName)
         let metadataData = try Self.readBounded(metadataURL, limit: Self.settingsLimit)
         let metadata = try JSONDecoder.openQuota.decode(AntigravityBridgeMetadata.self, from: metadataData)
-        let configDirectory = try canonicalConfigurationDirectory(configurationDirectory, createIfMissing: false)
+        let configDirectory: String
+        do {
+            configDirectory = try canonicalConfigurationDirectory(configurationDirectory, createIfMissing: false)
+        } catch AntigravityStatusLineInstallError.configurationDirectoryNotFound {
+            // If the user already deleted the CLI folder, there is nothing to
+            // restore; let account removal succeed cleanly.
+            try? FileManager.default.removeItem(at: metadataURL)
+            return false
+        }
         let settingsURL = URL(fileURLWithPath: configDirectory)
             .appendingPathComponent("settings.json")
         guard let currentData = try readSettings(settingsURL, allowMissing: true) else { return false }

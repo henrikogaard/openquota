@@ -315,10 +315,14 @@ undocumented internal language-server RPCs, and makes no network requests.
 
 The installer updates only `statusLine` in `~/.gemini/antigravity-cli/settings.json`,
 preserving unrelated keys and storing the previous `statusLine` object in private
-app-owned metadata (`bridge-metadata.json`). When no custom status-line command was
-configured previously, OpenQuota sets `"stack_with_default": true` so `agy` keeps
-showing its built-in status line while piping JSON to `openquota-bridge`. If a custom
+app-owned metadata (`bridge-metadata.json`). When no active custom status-line
+command was configured previously (including when an existing `statusLine` had
+`"enabled": false`), OpenQuota enables `statusLine`, sets `"stack_with_default": true`
+so `agy` keeps showing its built-in status line while piping JSON to
+`openquota-bridge`, and skips executing any disabled command. If an active custom
 command was already configured, the bridge forwards `stdin` and `stdout` to it.
+Original `enabled` and `stack_with_default` values are saved and restored on
+disconnect.
 
 `openquota-bridge --provider antigravity` receives Antigravity CLI's documented
 status-line JSON, retains only `recordedAt`, `plan_tier`, `email`, and non-disabled

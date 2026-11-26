@@ -327,6 +327,38 @@ final class AntigravityStatusLineTests: XCTestCase {
         XCTAssertTrue(after.settingsExists)
     }
 
+    func test_disconnectSucceedsWhenConfigurationDirectoryWasDeleted() throws {
+        let root = try makeDirectory()
+        let config = try makeDirectory(inside: root, name: "deleted-agy")
+        let helper = try makeHelper(root)
+        let store = SubscriptionConnectionStore(url: root.appendingPathComponent("connections.json"))
+        let installer = AntigravityStatusLineInstaller(store: store)
+        let connection = try installer.install(
+            label: "Temp", configurationDirectory: config.path, helperExecutable: helper)
+
+        try FileManager.default.removeItem(at: config)
+        XCTAssertFalse(try installer.disconnect(connection))
+        let metadataURL = try store.appOwnedDirectory(for: connection.id)
+            .appendingPathComponent("bridge-metadata.json")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: metadataURL.path))
+    }
+
+    func test_spendLocalSourcesClassifiesAntigravityConnectionsAsAntigravityNotCodex() throws {
+        let root = try makeDirectory()
+        let customConfig = try makeDirectory(inside: root, name: "custom-agy")
+        let store = SubscriptionConnectionStore(url: root.appendingPathComponent("connections.json"))
+        let connection = try store.addAntigravity(label: "Custom", configurationDirectory: customConfig.path)
+
+        let sources = SpendLogSource.localSources(connections: [connection], home: root, environment: [:])
+        let canonicalCustom = customConfig.standardizedFileURL.resolvingSymlinksInPath().path
+        XCTAssertTrue(sources.contains {
+            $0.provider == .antigravity && $0.directory.path == canonicalCustom + "/conversations"
+        })
+        XCTAssertFalse(sources.contains {
+            $0.provider == .codex && $0.directory.path.hasPrefix(canonicalCustom)
+        })
+    }
+
     private func makeDirectory(inside parent: URL? = nil, name: String = UUID().uuidString) throws -> URL {
         let directory = (parent ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent(name, isDirectory: true)
