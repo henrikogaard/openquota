@@ -190,8 +190,7 @@ final class AntigravityStatusLineTests: XCTestCase {
               "statusLine": {
                 "type": "command",
                 "command": "~/.gemini/antigravity-cli/statusline.sh",
-                "padding": 2,
-                "enabled": false
+                "padding": 2
               },
               "useG1Credits": true
             }
@@ -208,8 +207,12 @@ final class AntigravityStatusLineTests: XCTestCase {
         let statusLine = try XCTUnwrap(installed["statusLine"] as? [String: Any])
         XCTAssertTrue((statusLine["command"] as? String)?.contains("helper'\\''s dir") == true)
         XCTAssertEqual(statusLine["padding"] as? Int, 2)
-        XCTAssertEqual(statusLine["enabled"] as? Bool, true)
         XCTAssertNil(statusLine["stack_with_default"])
+
+        let metadataData = try Data(contentsOf: try store.appOwnedDirectory(for: connection.id)
+            .appendingPathComponent("bridge-metadata.json"))
+        let metadata = try JSONDecoder.openQuota.decode(AntigravityBridgeMetadata.self, from: metadataData)
+        XCTAssertEqual(metadata.originalCommand, "~/.gemini/antigravity-cli/statusline.sh")
 
         XCTAssertTrue(try installer.disconnect(connection))
         let restored = try readSettings(settingsURL)
@@ -217,7 +220,50 @@ final class AntigravityStatusLineTests: XCTestCase {
         let restoredStatus = try XCTUnwrap(restored["statusLine"] as? [String: Any])
         XCTAssertEqual(restoredStatus["command"] as? String, "~/.gemini/antigravity-cli/statusline.sh")
         XCTAssertEqual(restoredStatus["padding"] as? Int, 2)
+    }
+
+    func test_installerSkipsChainingDisabledCommandKeepsDefaultBarAndRestoresItOnDisconnect() throws {
+        let root = try makeDirectory()
+        let config = try makeDirectory(inside: root, name: "antigravity-disabled")
+        let helper = try makeHelper(root)
+        let settingsURL = config.appendingPathComponent("settings.json")
+        let original = #"""
+            {
+              "statusLine": {
+                "type": "command",
+                "command": "/nonexistent/disabled-script.sh",
+                "padding": 1,
+                "enabled": false,
+                "stack_with_default": false
+              }
+            }
+            """#
+        try Data(original.utf8).write(to: settingsURL)
+
+        let store = SubscriptionConnectionStore(url: root.appendingPathComponent("connections.json"))
+        let installer = AntigravityStatusLineInstaller(store: store)
+        let connection = try installer.install(
+            label: "Pro", configurationDirectory: config.path, helperExecutable: helper)
+
+        let installed = try readSettings(settingsURL)
+        let statusLine = try XCTUnwrap(installed["statusLine"] as? [String: Any])
+        XCTAssertEqual(statusLine["enabled"] as? Bool, true)
+        XCTAssertEqual(statusLine["stack_with_default"] as? Bool, true)
+        XCTAssertEqual(statusLine["padding"] as? Int, 1)
+
+        let metadataData = try Data(contentsOf: try store.appOwnedDirectory(for: connection.id)
+            .appendingPathComponent("bridge-metadata.json"))
+        let metadata = try JSONDecoder.openQuota.decode(AntigravityBridgeMetadata.self, from: metadataData)
+        XCTAssertNil(metadata.originalCommand)
+        XCTAssertTrue(metadata.addedStackWithDefault)
+
+        XCTAssertTrue(try installer.disconnect(connection))
+        let restored = try readSettings(settingsURL)
+        let restoredStatus = try XCTUnwrap(restored["statusLine"] as? [String: Any])
+        XCTAssertEqual(restoredStatus["command"] as? String, "/nonexistent/disabled-script.sh")
+        XCTAssertEqual(restoredStatus["padding"] as? Int, 1)
         XCTAssertEqual(restoredStatus["enabled"] as? Bool, false)
+        XCTAssertEqual(restoredStatus["stack_with_default"] as? Bool, false)
     }
 
     func test_disconnectKeepsLaterUserCommandAndRejectsUnsupportedOrMalformedSettings() throws {

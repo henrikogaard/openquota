@@ -98,6 +98,7 @@ public struct AntigravityBridgeMetadata: Codable, Sendable, Equatable {
     public var originalCommand: String? {
         guard let originalStatusLine,
               let value = try? JSONSerialization.jsonObject(with: originalStatusLine) as? [String: Any],
+              value["enabled"] as? Bool != false,
               let command = value["command"] as? String else {
             return nil
         }
@@ -168,7 +169,7 @@ public struct AntigravityStatusLineInstaller: Sendable {
         var settings = try decodeSettings(originalData)
         let originalValue = settings["statusLine"]
         let originalStatusLine: Data?
-        var hadOriginalCommand = false
+        var hadActiveOriginalCommand = false
         if let originalValue {
             guard let statusLine = originalValue as? [String: Any] else {
                 throw AntigravityStatusLineInstallError.unsupportedStatusLine
@@ -178,6 +179,7 @@ public struct AntigravityStatusLineInstaller: Sendable {
                     throw AntigravityStatusLineInstallError.unsupportedStatusLine
                 }
             }
+            let wasDisabled = statusLine["enabled"] as? Bool == false
             if let commandValue = statusLine["command"] {
                 guard let command = commandValue as? String else {
                     throw AntigravityStatusLineInstallError.unsupportedStatusLine
@@ -185,7 +187,8 @@ public struct AntigravityStatusLineInstaller: Sendable {
                 guard !isRecursive(command, helperPath: helperExecutable.path) else {
                     throw AntigravityStatusLineInstallError.recursiveBridge
                 }
-                hadOriginalCommand = !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                hadActiveOriginalCommand = !wasDisabled
+                    && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
             originalStatusLine = try JSONSerialization.data(
                 withJSONObject: statusLine, options: [.sortedKeys])
@@ -208,7 +211,7 @@ public struct AntigravityStatusLineInstaller: Sendable {
             statusLine["enabled"] = true
         }
         let addedStackWithDefault: Bool
-        if !hadOriginalCommand, statusLine["stack_with_default"] == nil {
+        if !hadActiveOriginalCommand, statusLine["stack_with_default"] as? Bool != true {
             statusLine["stack_with_default"] = true
             addedStackWithDefault = true
         } else {

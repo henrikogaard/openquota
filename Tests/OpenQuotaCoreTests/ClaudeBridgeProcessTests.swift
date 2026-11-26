@@ -119,18 +119,27 @@ final class ClaudeBridgeProcessTests: XCTestCase {
         XCTAssertTrue(standalone.output.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: standalone.connectionDirectory.appendingPathComponent("reading.json").path))
+
+        let disabled = try runAntigravityBridge(command: "exit 42", enabled: false, input: input)
+        XCTAssertFalse(disabled.timedOut)
+        XCTAssertEqual(disabled.status, 0)
+        XCTAssertTrue(disabled.output.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: disabled.connectionDirectory.appendingPathComponent("reading.json").path))
     }
 
-    private func runAntigravityBridge(command: String?, input: Data) throws -> BridgeResult {
+    private func runAntigravityBridge(command: String?, enabled: Bool = true, input: Data) throws -> BridgeResult {
         signal(SIGPIPE, SIG_IGN)
         let directory = try makeDirectory()
         let original: Data? = try command.map {
-            try JSONSerialization.data(withJSONObject: ["type": "command", "command": $0], options: [.sortedKeys])
+            var object: [String: Any] = ["type": "command", "command": $0]
+            if !enabled { object["enabled"] = false }
+            return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         }
         let metadata = AntigravityBridgeMetadata(
             installedCommand: "openquota-bridge --provider antigravity test",
             originalStatusLine: original,
-            addedStackWithDefault: command == nil)
+            addedStackWithDefault: command == nil || !enabled)
         try JSONEncoder.openQuota.encode(metadata)
             .write(to: directory.appendingPathComponent("bridge-metadata.json"))
 
