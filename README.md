@@ -61,7 +61,7 @@ Each saved key/session has its own row. Other local providers discover their def
 | OpenCode Go | Local API key | Rolling, weekly and monthly usage |
 | OpenCode Console | Account sign-in | Go limits, spend budgets and prepaid workspace balance when permitted |
 | Devin | Local CLI credentials | Daily/weekly remaining percentage and extra-usage balance |
-| Antigravity | Experimental, running desktop app | Per-model quota and reset time for the account the app and `agy` CLI share; read from the app's local language server while it runs |
+| Antigravity | Passive status line | Sanitized documented Antigravity CLI (`agy`) status-line readings; Google AI plan tier and quota buckets while you use `agy` |
 | Grok | Local OAuth | Billing-period usage; named local accounts |
 | Cursor | Experimental, manual session token | Cursor Models / Other Models allowance and on-demand spend; internal dashboard with legacy RPC fallback |
 | Mistral | Experimental, manual web session | Pro/Team included monthly usage and separate Vibe allowance as used percentages; pay-as-you-go credits |

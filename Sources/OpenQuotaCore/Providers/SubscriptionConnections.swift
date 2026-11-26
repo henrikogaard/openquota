@@ -3,11 +3,13 @@ import Foundation
 public enum SubscriptionConnectionKind: String, Codable, Sendable {
     case claudeStatusLine
     case codexAppServer
+    case antigravityStatusLine
 
     public var providerID: String {
         switch self {
         case .claudeStatusLine: "claude"
         case .codexAppServer: "codex"
+        case .antigravityStatusLine: "antigravity"
         }
     }
 }
@@ -114,6 +116,39 @@ public struct SubscriptionConnectionStore: Sendable {
         let connection = SubscriptionConnection(
             id: id,
             kind: .claudeStatusLine,
+            label: normalizedLabel,
+            directory: directory)
+        _ = try appOwnedDirectory(for: connection.id)
+        values.append(connection)
+        try save(values)
+        return connection
+    }
+
+    @discardableResult
+    public func addAntigravity(
+        id: UUID = UUID(),
+        label: String,
+        configurationDirectory: String
+    ) throws -> SubscriptionConnection {
+        guard let normalizedLabel = Self.validatedLabel(label) else {
+            throw SubscriptionConnectionStoreError.invalidLabel
+        }
+        let directory = try Self.canonicalExistingDirectory(configurationDirectory)
+        var values = try connections()
+        guard !values.contains(where: { $0.id == id }) else {
+            throw SubscriptionConnectionStoreError.duplicateConnectionID
+        }
+        guard !values.contains(where: {
+            $0.kind == .antigravityStatusLine && $0.directory == directory
+        }) else {
+            throw SubscriptionConnectionStoreError.duplicateDirectory
+        }
+        guard values.count < Self.maxConnections else {
+            throw SubscriptionConnectionStoreError.connectionLimitReached
+        }
+        let connection = SubscriptionConnection(
+            id: id,
+            kind: .antigravityStatusLine,
             label: normalizedLabel,
             directory: directory)
         _ = try appOwnedDirectory(for: connection.id)
@@ -291,7 +326,7 @@ public struct SubscriptionConnectionStore: Sendable {
         let normalized = URL(fileURLWithPath: connection.directory).standardizedFileURL.path
         guard normalized == connection.directory else { return false }
         switch connection.kind {
-        case .claudeStatusLine:
+        case .claudeStatusLine, .antigravityStatusLine:
             return true
         case .codexAppServer:
             let expected = url.deletingLastPathComponent()

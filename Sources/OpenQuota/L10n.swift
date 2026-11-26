@@ -26,9 +26,6 @@ func providerError(_ message: String, providerID: String) -> String {
     case "openai":
         return L("OpenAI rejected this key for spend data. It needs an Admin key (sk-admin-…) from the organization's Admin keys page; a project or user key (sk-proj-…) can't read spend. Replace the key in Settings.",
                  "OpenAI avviste denne nøkkelen for forbruksdata. Det kreves en Admin-nøkkel (sk-admin-…) fra organisasjonens side for Admin-nøkler; en prosjekt- eller brukernøkkel (sk-proj-…) kan ikke lese forbruk. Bytt nøkkelen i Innstillinger.")
-    case "antigravity":
-        return L("Antigravity refused the request. Restart the Antigravity app and sign in again.",
-                 "Antigravity avviste forespørselen. Start Antigravity-appen på nytt og logg inn igjen.")
     case "devin":
         return L("Sign-in rejected. Run devin auth login again.",
                  "Påloggingen ble avvist. Kjør devin auth login på nytt.")

@@ -23,7 +23,6 @@ public enum Adapters {
             MistralVibeCLIProvider(http: http, files: files),
             OpenCodeConsoleProvider(http: http, credentials: credentials),
             CopilotProvider(http: http, files: files),
-            AntigravityProvider(http: http, files: files),
         ]
     }
 }

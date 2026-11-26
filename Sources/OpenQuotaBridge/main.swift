@@ -8,6 +8,16 @@ import Darwin
 
 @main
 struct OpenQuotaBridge {
+    private enum Provider: String {
+        case claude
+        case antigravity
+    }
+
+    private struct Invocation {
+        let provider: Provider
+        let directory: URL
+    }
+
     private static let inputLimit = 1_048_576
     private static let outputLimit = 1_048_576
     private static let runtimeLimit: TimeInterval = 10
@@ -16,38 +26,68 @@ struct OpenQuotaBridge {
     static func main() {
         signal(SIGPIPE, SIG_IGN)
         let deadline = Date().addingTimeInterval(runtimeLimit)
-        guard let directory = connectionDirectory(),
-              let metadata = loadMetadata(from: directory),
+        guard let invocation = parseArguments(),
+              let originalCommand = loadOriginalCommand(from: invocation.directory, provider: invocation.provider),
               let input = readInput(deadline: deadline) else {
             return
         }
-        if let reading = try? ClaudeUsageReading.capture(input),
-           let encoded = try? encodeReading(reading) {
-            let source = ClaudeReadingSource.from(environment: ProcessInfo.processInfo.environment)
-            writeReading(encoded, to: directory.appendingPathComponent(source?.fileName ?? "reading.json"))
-        }
-        guard let command = metadata.originalCommand, !command.isEmpty else { return }
+        captureReading(input: input, invocation: invocation)
+        guard let command = originalCommand.command, !command.isEmpty else { return }
         let status = run(command: command, input: input, deadline: deadline)
         exit(status)
     }
 
-    private static func connectionDirectory() -> URL? {
-        let arguments = CommandLine.arguments
-        guard arguments.count == 3,
-              arguments[1] == "--connection-directory",
-              arguments[2].hasPrefix("/") else {
-            return nil
+    private struct LoadedMetadata {
+        let command: String?
+    }
+
+    private static func captureReading(input: Data, invocation: Invocation) {
+        switch invocation.provider {
+        case .claude:
+            if let reading = try? ClaudeUsageReading.capture(input),
+               let encoded = try? encode(reading) {
+                let source = ClaudeReadingSource.from(environment: ProcessInfo.processInfo.environment)
+                writeReading(encoded, to: invocation.directory.appendingPathComponent(source?.fileName ?? "reading.json"))
+            }
+        case .antigravity:
+            if let reading = try? AntigravityUsageReading.capture(input),
+               let encoded = try? encode(reading) {
+                writeReading(encoded, to: invocation.directory.appendingPathComponent("reading.json"))
+            }
         }
-        let directory = URL(fileURLWithPath: arguments[2]).standardizedFileURL
-        guard directory.path == arguments[2],
+    }
+
+    private static func parseArguments() -> Invocation? {
+        let arguments = CommandLine.arguments
+        var provider: Provider = .claude
+        var directoryPath: String?
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--connection-directory":
+                guard index + 1 < arguments.count, directoryPath == nil else { return nil }
+                directoryPath = arguments[index + 1]
+                index += 2
+            case "--provider":
+                guard index + 1 < arguments.count,
+                      let parsed = Provider(rawValue: arguments[index + 1]) else { return nil }
+                provider = parsed
+                index += 2
+            default:
+                return nil
+            }
+        }
+        guard let directoryPath, directoryPath.hasPrefix("/") else { return nil }
+        let directory = URL(fileURLWithPath: directoryPath).standardizedFileURL
+        guard directory.path == directoryPath,
               let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
               values.isDirectory == true, values.isSymbolicLink != true else {
             return nil
         }
-        return directory
+        return Invocation(provider: provider, directory: directory)
     }
 
-    private static func loadMetadata(from directory: URL) -> ClaudeBridgeMetadata? {
+    private static func loadOriginalCommand(from directory: URL, provider: Provider) -> LoadedMetadata? {
         let url = directory.appendingPathComponent(metadataName)
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
               values.isRegularFile == true, values.isSymbolicLink != true,
@@ -61,7 +101,14 @@ struct OpenQuotaBridge {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(ClaudeBridgeMetadata.self, from: data)
+        switch provider {
+        case .claude:
+            guard let metadata = try? decoder.decode(ClaudeBridgeMetadata.self, from: data) else { return nil }
+            return LoadedMetadata(command: metadata.originalCommand)
+        case .antigravity:
+            guard let metadata = try? decoder.decode(AntigravityBridgeMetadata.self, from: data) else { return nil }
+            return LoadedMetadata(command: metadata.originalCommand)
+        }
     }
 
     private static func readInput(deadline: Date) -> Data? {
@@ -93,7 +140,7 @@ struct OpenQuotaBridge {
         }
     }
 
-    private static func encodeReading(_ reading: ClaudeUsageReading) throws -> Data {
+    private static func encode<T: Encodable>(_ reading: T) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(reading)

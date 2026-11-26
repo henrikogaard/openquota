@@ -138,6 +138,11 @@ final class AppModel {
                 connections: subscriptionConnections,
                 store: subscriptionStore))
         }
+        if subscriptionConnections.contains(where: { $0.kind == .antigravityStatusLine }) {
+            providers.append(AntigravityStatusLineProvider(
+                connections: subscriptionConnections,
+                store: subscriptionStore))
+        }
         for profile in profiles {
             guard let path = Self.credentialPaths[profile.providerID] else { continue }
             let files = LocalCredentialFiles(
@@ -332,6 +337,23 @@ final class AppModel {
         configurationChanged()
     }
 
+    func installAntigravityStatusLine(
+        label: String,
+        configurationDirectory: String,
+        helper: URL,
+        createDirectoryIfMissing: Bool = false
+    ) throws {
+        guard !isDemo else { return }
+        let directory = (configurationDirectory as NSString).expandingTildeInPath
+        let installer = AntigravityStatusLineInstaller(store: subscriptionStore)
+        _ = try installer.install(
+            label: label,
+            configurationDirectory: directory,
+            helperExecutable: helper,
+            createDirectoryIfMissing: createDirectoryIfMissing)
+        configurationChanged()
+    }
+
     func startCodexLogin(
         label: String,
         executablePath: String?,
@@ -441,12 +463,21 @@ final class AppModel {
 
     func removeSubscriptionConnection(_ connection: SubscriptionConnection) throws {
         guard !isDemo else { return }
-        if connection.kind == .claudeStatusLine {
+        switch connection.kind {
+        case .claudeStatusLine:
             let restored = try ClaudeStatusLineInstaller(store: subscriptionStore)
                 .disconnect(connection)
             if !restored {
                 statusMessage = L("Claude settings changed; their status-line command was kept.", "Claude-innstillingene er endret; statuslinjekommandoen ble beholdt.")
             }
+        case .antigravityStatusLine:
+            let restored = try AntigravityStatusLineInstaller(store: subscriptionStore)
+                .disconnect(connection)
+            if !restored {
+                statusMessage = L("Antigravity CLI settings changed; their status-line command was kept.", "Innstillingene til Antigravity CLI er endret; statuslinjekommandoen ble beholdt.")
+            }
+        case .codexAppServer:
+            break
         }
         try subscriptionStore.remove(id: connection.id)
         configurationChanged()
@@ -578,7 +609,7 @@ final class AppModel {
     static func isDetectedLocal(_ provider: any UsageProvider) -> Bool {
         !(provider is GenericProvider) && !(provider is ProfiledProvider) && !(provider is CursorProvider)
             && !(provider is MistralProvider) && !(provider is OpenCodeConsoleProvider)
-            && provider.id != "claude" && provider.id != "codex"
+            && provider.id != "claude" && provider.id != "codex" && provider.id != "antigravity"
     }
 
     /// Hide or show an auto-detected provider. Its sign-in is not touched.
@@ -601,7 +632,7 @@ final class AppModel {
         providers.first(where: { $0.id == id })?.displayName
             ?? hiddenProviderNames[id]
             ?? ["opencode": "OpenCode Go", "opencode-go": "OpenCode Go", "opencode-console": "OpenCode", "openrouter": "OpenRouter",
-                "claude": "Claude Code", "codex": "Codex / ChatGPT",
+                "claude": "Claude Code", "codex": "Codex / ChatGPT", "antigravity": "Antigravity",
                 "mistral": "Mistral"][id] ?? id.capitalized
     }
 
@@ -617,6 +648,9 @@ final class AppModel {
         case "codex":
             L("Codex app-server · subscription data returned by ChatGPT",
               "Codex-appserver · abonnementsdata fra ChatGPT")
+        case "antigravity":
+            L("Antigravity CLI status line · updates while you use agy",
+              "Antigravity CLI-statuslinje · oppdateres mens du bruker agy")
         case "cursor":
             L("Cursor's unofficial dashboard endpoint; not an official subscription API",
               "Uoffisielt Cursor-kontrollpanelendepunkt; ikke et offisielt abonnements-API")
