@@ -46,7 +46,7 @@ final class AppModel {
     private let subscriptionStore = SubscriptionConnectionStore(
         url: AppModel.appSupportDir.appendingPathComponent("connections.json"))
     private let claudeCLIRefreshRequests = ClaudeCLIRefreshRequests()
-    private var statusLineReadingDates: [UUID: Date] = [:]
+    private var statusLineReadingDates: [String: Date] = [:]
     private var codexLoginTask: Task<Void, Never>?
     private var codexLoginGeneration: UInt64 = 0
 
@@ -119,37 +119,63 @@ final class AppModel {
         catch { statusMessage = L("Couldn't save usage cache: \(error.localizedDescription)", "Kunne ikke lagre bruksbufferen: \(error.localizedDescription)") }
     }
 
-    /// Picks up newly written local status-line readings within seconds instead
-    /// of waiting for the 5-minute scheduled refresh pass. Never invokes CLIs
-    /// or makes network requests — only re-reads changed local JSON files.
-    private func refreshChangedStatusLineReadings() async {
-        guard !isDemo, let scheduler else { return }
-        let watched = subscriptionConnections.filter {
-            $0.kind == .antigravityStatusLine || $0.kind == .claudeStatusLine
-        }
-        let activeIDs = Set(watched.map(\.id))
-        statusLineReadingDates = statusLineReadingDates.filter { activeIDs.contains($0.key) }
-
-        var changed: [SubscriptionConnection] = []
-        for connection in watched {
-            guard let url = try? subscriptionStore.readingURL(for: connection.id),
-                  let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let modified = attrs[.modificationDate] as? Date else { continue }
-            if statusLineReadingDates[connection.id] != modified {
-                statusLineReadingDates[connection.id] = modified
-                changed.append(connection)
+    /// Collects modification dates for every local status-line reading file
+    /// (both `reading.json` and any tagged Claude reading files).
+    private func currentStatusLineReadingDates() -> [String: Date] {
+        var dates: [String: Date] = [:]
+        for connection in subscriptionConnections
+        where connection.kind == .antigravityStatusLine || connection.kind == .claudeStatusLine {
+            guard let dir = try? subscriptionStore.appOwnedDirectory(for: connection.id),
+                  let files = try? FileManager.default.contentsOfDirectory(
+                      at: dir, includingPropertiesForKeys: [.contentModificationDateKey],
+                      options: [.skipsHiddenFiles]) else { continue }
+            for file in files
+            where file.pathExtension == "json" && file.lastPathComponent != "bridge-metadata.json" {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+                   let modified = attrs[.modificationDate] as? Date {
+                    dates[file.path] = modified
+                }
             }
         }
-        guard !changed.isEmpty else { return }
-        for connection in changed {
-            guard let provider = providers.first(where: { $0.id == connection.kind.providerID }) else { continue }
-            let account = AccountDescriptor(
-                account: AccountIdentity(
-                    providerID: connection.kind.providerID,
-                    id: connection.accountID,
-                    label: connection.label),
-                source: .configFile)
-            await scheduler.refresh(provider: provider, account: account)
+        return dates
+    }
+
+    /// Picks up newly written local status-line readings within seconds instead
+    /// of waiting for the 5-minute scheduled refresh pass. Never invokes CLIs
+    /// or makes network requests — only re-reads changed local JSON files using
+    /// the status-line provider's own discovered account descriptors.
+    private func refreshChangedStatusLineReadings() async {
+        guard !isDemo, let scheduler else { return }
+        let current = currentStatusLineReadingDates()
+        var changedDirectories = Set<String>()
+        for (path, modified) in current where statusLineReadingDates[path] != modified {
+            changedDirectories.insert(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+        }
+        statusLineReadingDates = current
+        guard !changedDirectories.isEmpty else { return }
+
+        var changedKinds = Set<SubscriptionConnectionKind>()
+        for connection in subscriptionConnections
+        where connection.kind == .antigravityStatusLine || connection.kind == .claudeStatusLine {
+            if let dir = try? subscriptionStore.appOwnedDirectory(for: connection.id),
+               changedDirectories.contains(dir.path) {
+                changedKinds.insert(connection.kind)
+            }
+        }
+
+        for kind in changedKinds {
+            let provider: (any UsageProvider)? = switch kind {
+            case .antigravityStatusLine:
+                providers.first { $0 is AntigravityStatusLineProvider }
+            case .claudeStatusLine:
+                providers.first { $0 is ClaudeStatusLineProvider }
+            case .codexAppServer:
+                nil
+            }
+            guard let provider, let accounts = try? await provider.accounts() else { continue }
+            for account in accounts {
+                await scheduler.refresh(provider: provider, account: account)
+            }
         }
     }
 
@@ -207,16 +233,7 @@ final class AppModel {
         }
         // Seed known reading mtimes so startup doesn't double-refresh already-loaded files,
         // while any new status-line write immediately triggers a local reload.
-        var seededDates: [UUID: Date] = [:]
-        for connection in subscriptionConnections
-        where connection.kind == .antigravityStatusLine || connection.kind == .claudeStatusLine {
-            if let url = try? subscriptionStore.readingURL(for: connection.id),
-               let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-               let modified = attrs[.modificationDate] as? Date {
-                seededDates[connection.id] = modified
-            }
-        }
-        statusLineReadingDates = seededDates
+        statusLineReadingDates = currentStatusLineReadingDates()
         for profile in profiles {
             guard let path = Self.credentialPaths[profile.providerID] else { continue }
             let files = LocalCredentialFiles(
