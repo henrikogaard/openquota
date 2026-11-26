@@ -142,28 +142,36 @@ final class AppModel {
 
     /// Picks up newly written local status-line readings within seconds instead
     /// of waiting for the 5-minute scheduled refresh pass. Never invokes CLIs
-    /// or makes network requests — only re-reads changed local JSON files using
-    /// the status-line provider's own discovered account descriptors.
+    /// or makes network requests — only re-reads the specific changed local
+    /// reading file using the status-line provider's own discovered account
+    /// descriptor so untouched connections are never refreshed.
     private func refreshChangedStatusLineReadings() async {
         guard !isDemo, let scheduler else { return }
         let current = currentStatusLineReadingDates()
-        var changedDirectories = Set<String>()
-        for (path, modified) in current where statusLineReadingDates[path] != modified {
-            changedDirectories.insert(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+        let changedPaths = current.compactMap { path, modified in
+            statusLineReadingDates[path] != modified ? path : nil
         }
         statusLineReadingDates = current
-        guard !changedDirectories.isEmpty else { return }
+        guard !changedPaths.isEmpty else { return }
 
-        var changedKinds = Set<SubscriptionConnectionKind>()
-        for connection in subscriptionConnections
-        where connection.kind == .antigravityStatusLine || connection.kind == .claudeStatusLine {
-            if let dir = try? subscriptionStore.appOwnedDirectory(for: connection.id),
-               changedDirectories.contains(dir.path) {
-                changedKinds.insert(connection.kind)
-            }
+        var targetAccountIDsByKind: [SubscriptionConnectionKind: Set<String>] = [:]
+        for path in changedPaths {
+            let fileURL = URL(fileURLWithPath: path)
+            let dirPath = fileURL.deletingLastPathComponent().path
+            let fileName = fileURL.lastPathComponent
+            guard let connection = subscriptionConnections.first(where: {
+                ($0.kind == .antigravityStatusLine || $0.kind == .claudeStatusLine)
+                    && (try? subscriptionStore.appOwnedDirectory(for: $0.id).path) == dirPath
+            }) else { continue }
+            let accountID = fileName == "reading.json"
+                ? connection.accountID
+                : AccountIdentity.makeID(
+                    providerID: connection.kind.providerID,
+                    identityKey: "\(connection.id.uuidString.lowercased())#\(fileName)")
+            targetAccountIDsByKind[connection.kind, default: []].insert(accountID)
         }
 
-        for kind in changedKinds {
+        for (kind, targetIDs) in targetAccountIDsByKind {
             let provider: (any UsageProvider)? = switch kind {
             case .antigravityStatusLine:
                 providers.first { $0 is AntigravityStatusLineProvider }
@@ -173,7 +181,7 @@ final class AppModel {
                 nil
             }
             guard let provider, let accounts = try? await provider.accounts() else { continue }
-            for account in accounts {
+            for account in accounts where targetIDs.contains(account.account.id) {
                 await scheduler.refresh(provider: provider, account: account)
             }
         }
