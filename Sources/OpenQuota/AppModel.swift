@@ -277,6 +277,13 @@ final class AppModel {
         case .vibe: return ("Mistral Vibe", nil)
         case .copilot: return ("Copilot CLI", nil)
         case .antigravity:
+            if let connection, connection.kind == .antigravityStatusLine {
+                let base = L("Antigravity CLI (experimental)", "Antigravity CLI (eksperimentell)")
+                if (source.folder as NSString).lastPathComponent == "antigravity-cli" {
+                    return (base, email)
+                }
+                return ("\(base) · \(connection.label)", email)
+            }
             if (source.folder as NSString).lastPathComponent == "antigravity-cli" {
                 return (L("Antigravity CLI (experimental)", "Antigravity CLI (eksperimentell)"), nil)
             }

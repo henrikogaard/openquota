@@ -38,8 +38,6 @@ struct AddAccountSheet: View {
         var byCanonicalID: [String: Tile] = [
             "claude": Tile(target: .claude, providerID: "claude", name: "Claude Code"),
             "codex": Tile(target: .codex, providerID: "codex", name: "Codex / ChatGPT"),
-            // Distinct key so a custom provider-specs.json entry with id "antigravity" keeps its own API-key tile.
-            "antigravity-cli": Tile(target: .antigravity, providerID: "antigravity", name: "Antigravity"),
             "cursor": Tile(
                 target: .cursor, providerID: "cursor",
                 name: L("Cursor · Experimental", "Cursor · Eksperimentell")),
@@ -71,7 +69,12 @@ struct AddAccountSheet: View {
             byCanonicalID[canonicalID] = Tile(
                 target: .profile(id), providerID: id, name: model.providerName(id))
         }
-        return byCanonicalID.values
+        // Keep the Antigravity CLI subscription tile separate from API-key spec
+        // deduplication so custom specs with any ID remain reachable.
+        let allTiles = Array(byCanonicalID.values) + [
+            Tile(target: .antigravity, providerID: "antigravity", name: "Antigravity"),
+        ]
+        return allTiles
             .filter(matches)
             .sorted {
                 let order = $0.name.localizedCaseInsensitiveCompare($1.name)

@@ -1,6 +1,11 @@
 import Foundation
 import XCTest
 @testable import OpenQuotaCore
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 final class AntigravityStatusLineTests: XCTestCase {
     func test_captureRoundTripKeepsOnlySanitizedQuotaAndAccountFields() throws {
@@ -341,6 +346,37 @@ final class AntigravityStatusLineTests: XCTestCase {
         let metadataURL = try store.appOwnedDirectory(for: connection.id)
             .appendingPathComponent("bridge-metadata.json")
         XCTAssertFalse(FileManager.default.fileExists(atPath: metadataURL.path))
+    }
+
+    func test_disconnectPreservesMetadataWhenDirectoryIsInaccessibleAndRestoresAfterAccessReturns() throws {
+        // Root bypasses POSIX directory permission checks (e.g. Linux CI containers).
+        if geteuid() == 0 { return }
+        let root = try makeDirectory()
+        let parent = try makeDirectory(inside: root, name: "locked-parent")
+        let config = try makeDirectory(inside: parent, name: "agy")
+        let helper = try makeHelper(root)
+        let settingsURL = config.appendingPathComponent("settings.json")
+        try Data(#"{"statusLine":{"type":"command","command":"echo original"}}"#.utf8).write(to: settingsURL)
+
+        let store = SubscriptionConnectionStore(url: root.appendingPathComponent("connections.json"))
+        let installer = AntigravityStatusLineInstaller(store: store)
+        let connection = try installer.install(
+            label: "Locked", configurationDirectory: config.path, helperExecutable: helper)
+        let metadataURL = try store.appOwnedDirectory(for: connection.id)
+            .appendingPathComponent("bridge-metadata.json")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: parent.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path) }
+
+        XCTAssertThrowsError(try installer.disconnect(connection)) {
+            XCTAssertEqual($0 as? AntigravityStatusLineInstallError, .invalidConfigurationDirectory)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: metadataURL.path))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path)
+        XCTAssertTrue(try installer.disconnect(connection))
+        let restored = try XCTUnwrap(try readSettings(settingsURL)["statusLine"] as? [String: Any])
+        XCTAssertEqual(restored["command"] as? String, "echo original")
     }
 
     func test_spendLocalSourcesClassifiesAntigravityConnectionsAsAntigravityNotCodex() throws {

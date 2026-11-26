@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 // MARK: - Antigravity CLI status line (documented, ToS-clean)
 
@@ -372,21 +377,27 @@ public struct AntigravityStatusLineInstaller: Sendable {
             throw AntigravityStatusLineInstallError.invalidConfigurationDirectory
         }
         let candidate = URL(fileURLWithPath: path).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        if !FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory) {
-            guard createIfMissing else {
-                throw AntigravityStatusLineInstallError.configurationDirectoryNotFound
-            }
-            do {
-                try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
-                try FileManager.default.setAttributes(
-                    [.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: candidate.path)
-            } catch {
+        var info = stat()
+        if stat(candidate.path, &info) == 0 {
+            guard (info.st_mode & S_IFMT) == S_IFDIR else {
                 throw AntigravityStatusLineInstallError.invalidConfigurationDirectory
             }
-            isDirectory = true
+            return candidate.resolvingSymlinksInPath().path
         }
-        guard isDirectory.boolValue else {
+        let lookupError = errno
+        guard lookupError == ENOENT else {
+            // Permission denied (EACCES/EPERM) or an unwalkable parent must
+            // never be mistaken for a deleted folder.
+            throw AntigravityStatusLineInstallError.invalidConfigurationDirectory
+        }
+        guard createIfMissing else {
+            throw AntigravityStatusLineInstallError.configurationDirectoryNotFound
+        }
+        do {
+            try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: candidate.path)
+        } catch {
             throw AntigravityStatusLineInstallError.invalidConfigurationDirectory
         }
         return candidate.resolvingSymlinksInPath().path
